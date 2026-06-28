@@ -72,14 +72,14 @@ def bind(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     multiply by role to recover concept.
 
     Args:
-        a: Bipolar hypervector.
-        b: Bipolar hypervector.
+        a: Bipolar hypervector (1D).
+        b: Bipolar hypervector (1D), same shape as a.
 
     Returns:
         Bipolar hypervector, same shape as inputs.
-
-    Time: O(dim).
     """
+    if a.shape != b.shape:
+        raise ValueError(f"Shape mismatch in bind: {a.shape} vs {b.shape}")
     return (a * b).astype(np.int8)
 
 
@@ -224,7 +224,7 @@ class ConceptVocabulary:
 
         If no vector is provided, a random one is generated.
         The random seed is derived from the concept name hash
-        for reproducibility.
+        for reproducibility (uses hashlib, not Python's salted hash()).
 
         Args:
             name: Concept name.
@@ -235,9 +235,14 @@ class ConceptVocabulary:
         """
         if name in self.concepts:
             return self.concepts[name]
-        if vector is None:
-            # Reproducible seed from name
-            seed = hash(name) % (2**32)
+        if vector is not None:
+            assert len(vector) == self.dim, (
+                f"Vector dim {len(vector)} != vocab dim {self.dim}"
+            )
+        else:
+            # Reproducible seed from name using hashlib (NOT Python's salted hash())
+            import hashlib
+            seed = int(hashlib.md5(name.encode()).hexdigest()[:8], 16)
             vector = generate_hypervector(self.dim, seed=seed)
         vector = vector.astype(np.int8)
         self.concepts[name] = vector
@@ -313,11 +318,17 @@ class ConceptVocabulary:
             json.dump(data, f)
 
     def load(self, path: str | Path) -> None:
-        """Load vocabulary from JSON file."""
+        """Load vocabulary from JSON file. Clears existing concepts first."""
+        self.concepts.clear()
+        self._counter = 0
         with open(path, "r") as f:
             data = json.load(f)
         for name, vec_list in data.items():
-            self.concepts[name] = np.array(vec_list, dtype=np.int8)
+            vec = np.array(vec_list, dtype=np.int8)
+            assert len(vec) == self.dim, (
+                f"Loaded concept '{name}' has dim {len(vec)} != {self.dim}"
+            )
+            self.concepts[name] = vec
         self._counter = len(data)
 
     def __len__(self) -> int:
