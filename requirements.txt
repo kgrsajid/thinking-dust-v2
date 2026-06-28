@@ -1,6 +1,22 @@
 # Thinking Dust v2 dependencies
-numpy>=1.26.0,<2.0
-torch>=2.2.0
-z3-solver>=4.13.0
-matplotlib>=3.8.0  # Optional, for energy landscape visualization
-pytest>=8.0.0      # For testing
+#
+# On macOS x86_64 (Intel): torch is capped at 2.2.2 (PyTorch deprecated Intel Mac builds)
+#   → requires numpy<2 (torch 2.2 was compiled against numpy 1.x)
+#
+# On macOS arm64 (Apple Silicon) or Linux: torch 2.7+ is available
+#   → numpy 2.x works natively
+#
+# The code is forward-compatible: when you move to ARM/Linux, just install
+# latest torch and numpy without version constraints.
+
+# For Intel Mac (current dev machine):
+numpy>=1.26,<2
+torch>=2.2,<2.3
+
+# For ARM Mac / Linux (uncomment when upgrading):
+# numpy>=2.0
+# torch>=2.6
+
+z3-solver>=4.13
+matplotlib>=3.8   # Optional, for energy landscape visualization
+pytest>=8.0       # For testing

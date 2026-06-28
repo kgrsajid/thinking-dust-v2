@@ -7,22 +7,35 @@ name = "thinking-dust"
 version = "0.1.0"
 description = "Neuro-symbolic reasoning engine — <100K params, CPU-only, no LLM"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Kazi Rabbany"},
 ]
 dependencies = [
-    "numpy>=1.26.0,<2.0",
-    "torch>=2.2.0",
-    "z3-solver>=4.13.0",
+    "numpy>=1.26",
+    "torch>=2.2",
+    "z3-solver>=4.13",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0.0", "matplotlib>=3.8.0"]
+# For macOS x86_64 (Intel) — torch 2.2 requires numpy <2
+intel-mac = [
+    "numpy>=1.26,<2",
+    "torch>=2.2,<2.3",
+]
+# For ARM Mac / Linux — latest everything
+modern = [
+    "numpy>=2.0",
+    "torch>=2.6",
+]
+dev = [
+    "pytest>=8.0",
+    "matplotlib>=3.8",
+]
 
 [tool.setuptools.packages.find]
 include = ["td*"]
 
-[tool.pytest.ini_options]
+[tool.pytest.inioptions]
 testpaths = ["tests"]
