@@ -14,8 +14,7 @@ authors = [
 ]
 dependencies = [
     "numpy>=1.26.0,<2.0",
-    "torch>=2.2.0,<3.0",
-    "torchhd>=0.7.0",
+    "torch>=2.2.0",
     "z3-solver>=4.13.0",
 ]
 

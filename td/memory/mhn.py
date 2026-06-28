@@ -47,9 +47,9 @@ class MHNConfig:
 @dataclass
 class StoredPattern:
     """A single stored pattern with metadata."""
-    key: np.ndarray          # Situation HDC vector
-    value: np.ndarray        # Action/value HDC vector
-    composite: np.ndarray    # bind(key, value) — stored for retrieval
+    key: np.ndarray          # Situation HDC vector (used for retrieval matching)
+    value: np.ndarray        # Action/value HDC vector (returned on retrieval)
+    composite: np.ndarray    # bind(key, value) — kept for algebraic queries
     metadata: dict           # Domain, task type, outcome, timestamp
     active: bool = True      # False if superseded by correction
 
@@ -86,9 +86,9 @@ class ModernHopfieldNetwork:
             self._pattern_matrix = None
             self._dirty = False
             return
-        # Stack composite vectors as float32 for fast dot products
+        # Store KEY vectors for similarity-based retrieval (not composites)
         self._pattern_matrix = np.stack(
-            [p.composite.astype(np.float32) for p in active]
+            [p.key.astype(np.float32) for p in active]
         )
         self._active_indices = [i for i, p in enumerate(self.patterns) if p.active]
         self._dirty = False

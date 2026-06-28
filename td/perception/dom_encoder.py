@@ -45,10 +45,13 @@ class DOMEncoder:
 
         Args:
             vocabulary: Concept vocabulary for keyword matching.
-            ca: Optional pre-configured CA Reservoir. Creates one if None.
+            ca: Optional pre-configured CA Reservoir. Creates one matching vocab dim if None.
         """
         self.vocab = vocabulary
-        self.ca = ca or CAReservoir()
+        if ca is None:
+            from .ca_reservoir import CAConfig
+            ca = CAReservoir(CAConfig(input_dim=vocabulary.dim))
+        self.ca = ca
 
     def _extract_features(self, html: str) -> dict[str, float]:
         """Extract normalized features from HTML.

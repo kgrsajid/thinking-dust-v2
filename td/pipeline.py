@@ -147,7 +147,8 @@ class TDPipeline:
         else:
             self.vocab = build_default_vocabulary(dim=dim)
 
-        self.ca = CAReservoir(input_dim=dim)
+        from .perception.ca_reservoir import CAConfig
+        self.ca = CAReservoir(CAConfig(input_dim=dim))
         self.nl_parser = NLParser(self.vocab)
         self.dom_encoder = DOMEncoder(self.vocab, self.ca)
         self.api_encoder = APIEncoder(self.vocab)

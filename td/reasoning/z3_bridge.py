@@ -3,6 +3,9 @@
 This is the hardest research component of TD v2. The current implementation
 uses template-based query generation (reliable) rather than algebraic
 decomposition (open research problem).
+
+Z3 is imported lazily so the rest of TD v2 works even if Z3 is not installed
+or has architecture issues.
 """
 
 from __future__ import annotations
@@ -13,10 +16,17 @@ from typing import Any
 
 import numpy as np
 
-from z3 import (
-    Solver, Bool, Int, Real, And, Or, Not, Implies, If,
-    sat, unsat, unknown, ModelRef,
-)
+# Lazy Z3 import — don't crash the whole package if Z3 is unavailable
+_z3_available = False
+_z3_modules = {}
+try:
+    from z3 import (
+        Solver, Bool, Int, Real, And, Or, Not, Implies, If,
+        sat, unsat, unknown,
+    )
+    _z3_available = True
+except Exception:
+    pass
 
 
 @dataclass
@@ -86,10 +96,9 @@ class Z3Bridge:
         4. Z3 solve
         5. Result → confidence score
 
-    The bridge uses template-based query generation, which is reliable
-    but limited to predefined constraint patterns. Algebraic decomposition
-    of HDC vectors into arbitrary SMT-LIB is an open research problem
-    (flagged for TD Pro).
+    Z3 is imported lazily — if Z3 is unavailable, the bridge still
+    provides decompose/select_template but validate_action returns
+    status="unknown".
     """
 
     def __init__(self, template_dir: str | Path | None = None):
@@ -100,6 +109,7 @@ class Z3Bridge:
                           If None, uses built-in templates.
         """
         self.template_dir = Path(template_dir) if template_dir else None
+        self._z3_ok = _z3_available
 
     def decompose(self, hdc_vector: np.ndarray, vocabulary,
                  threshold: float = 0.15) -> dict[str, float]:
@@ -165,21 +175,23 @@ class Z3Bridge:
         then solves it. If SAT, the plan is valid. If UNSAT, the
         proof shows which constraint is violated.
 
+        If Z3 is unavailable, returns status="unknown".
+
         Args:
-            action_plan: List of action dicts, e.g.:
-                [{"action": "click", "target": "submit_button"},
-                 {"action": "type", "target": "username", "value": "Alice"}]
-            constraints: Dict of constraint key-value pairs, e.g.:
-                {"submit_visible": True, "captcha_present": False,
-                 "required_fields_filled": True}
+            action_plan: List of action dicts.
+            constraints: Dict of constraint key-value pairs.
 
         Returns:
             Z3Result with validation outcome.
         """
+        if not self._z3_ok:
+            return Z3Result(status="unknown",
+                            smt_query="Z3 not available")
+
         s = Solver()
 
         # Declare boolean variables for each constraint
-        z3_vars: dict[str, Bool] = {}
+        z3_vars: dict[str, Any] = {}
         for key, value in constraints.items():
             var_name = key.replace(" ", "_")
             z3_vars[var_name] = Bool(var_name)
@@ -190,7 +202,6 @@ class Z3Bridge:
                     s.add(Not(z3_vars[var_name]))
 
         # Add action-plan-derived constraints
-        # If any action targets submit, require form readiness
         actions = [a.get("action", "") for a in action_plan]
         targets = [a.get("target", "") for a in action_plan]
 
@@ -202,14 +213,12 @@ class Z3Bridge:
             if "captcha_present" in z3_vars:
                 s.add(Not(z3_vars["captcha_present"]))
 
-        # If any action is "restart", require safety constraints
         if "restart" in str(actions).lower():
             if "during_maintenance" in z3_vars:
                 s.add(Not(z3_vars["during_maintenance"]))
             if "service_healthy" in z3_vars:
                 s.add(z3_vars["service_healthy"])
 
-        # If any action is "type" or "fill", require field visibility
         if any(a in ("type", "fill") for a in actions):
             if "field_visible" in z3_vars:
                 s.add(z3_vars["field_visible"])
@@ -236,16 +245,9 @@ class Z3Bridge:
             return Z3Result(status="unknown", smt_query=str(s))
 
     def solve(self, smt_lib: str) -> Z3Result:
-        """Execute Z3 solver on a raw SMT-LIB string.
-
-        Args:
-            smt_lib: SMT-LIB v2 format query string.
-
-        Returns:
-            Z3Result.
-        """
-        # For raw SMT-LIB, we'd need to parse and execute
-        # This is a simplified interface for advanced users
+        """Execute Z3 solver on a raw SMT-LIB string."""
+        if not self._z3_ok:
+            return Z3Result(status="unknown", smt_query=smt_lib)
         s = Solver()
         try:
             s.from_string(smt_lib)

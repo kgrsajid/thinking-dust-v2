@@ -86,29 +86,24 @@ def bind(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def bundle(*vectors: np.ndarray) -> np.ndarray:
     """HDC bundling (superposition) via majority vote.
 
-    Computes sign(sum(vectors)). Ties (sum == 0) are broken randomly.
-
-    The result preserves the common structure of all input vectors
-    while being dissimilar to each individual vector. Adding more
-    vectors increases noise but HDC is robust to noise.
+    Computes sign(sum(vectors)). Ties (sum == 0) are resolved as +1.
+    Works with a single vector (returns it unchanged).
 
     Args:
-        *vectors: Two or more bipolar hypervectors of the same shape.
+        *vectors: One or more bipolar hypervectors of the same shape.
 
     Returns:
         Bipolar hypervector.
 
     Time: O(n * dim) where n = number of vectors.
     """
-    if len(vectors) < 2:
-        raise ValueError(f"bundle requires at least 2 vectors, got {len(vectors)}")
+    if len(vectors) == 1:
+        return vectors[0].astype(np.int8)
+    if len(vectors) < 1:
+        raise ValueError("bundle requires at least 1 vector")
     stacked = np.stack(vectors, axis=0)
     total = stacked.sum(axis=0)
-    # Break ties randomly
-    tie_mask = total == 0
-    if np.any(tie_mask):
-        rng = np.random.default_rng()
-        total[tie_mask] = rng.choice([-1, 1], size=int(tie_mask.sum()))
+    total[total == 0] = 1  # Deterministic tie-breaking
     return np.sign(total).astype(np.int8)
 
 
@@ -345,21 +340,21 @@ DEFAULT_CONCEPTS = [
     "navigate", "extract", "fill", "check", "uncheck", "toggle",
     "open", "close", "wait", "refresh", "back", "forward",
     # API actions
-    "fetch", "post", "put", "delete", "patch", "call", "retry",
-    "authenticate", "authorize", "parse_response", "transform",
+    "fetch", "post_data", "put_data", "delete_data", "patch_data", "call", "retry",
+    "authenticate", "authorize", "parse_response", "transform_data",
     # File actions
     "read", "write", "create", "delete_file", "copy", "move",
-    "validate", "convert", "import", "export",
+    "validate", "convert", "import_data", "export_data",
     # Monitor actions
     "alert", "restart", "scale", "notify", "log", "diagnose",
-    "threshold", "escalate", "monitor", "health_check",
+    "threshold", "escalate_action", "monitor_action", "health_check",
     # Targets
-    "button", "form", "field", "input", "dropdown", "checkbox",
-    "link", "image", "table", "modal", "tab", "menu",
+    "button", "form", "field", "input_field", "dropdown", "checkbox",
+    "link", "image", "table", "modal", "tab_elem", "menu",
     "submit_button", "login_form", "contact_form", "search_bar",
     # API targets
     "endpoint", "auth_token", "api_key", "response", "request",
-    "header", "body", "query_param", "status_code",
+    "header", "body_param", "query_param", "status_code",
     # File targets
     "csv", "json", "xml", "yaml", "tsv", "txt", "config",
     "schema", "column", "row", "record",
@@ -367,13 +362,13 @@ DEFAULT_CONCEPTS = [
     "cpu", "memory", "disk", "network", "service", "process",
     "nginx", "postgres", "redis", "docker",
     # Contexts / domains
-    "web", "api", "file", "monitor", "unknown",
+    "web", "api", "file", "monitor", "unknown_domain",
     # Task types
-    "form", "navigation", "extraction", "interaction",
+    "form_type", "navigation", "extraction", "interaction",
     "sequential", "parallel", "error_handling",
-    "parse", "transform", "generate",
+    "parse_type", "transform", "generate",
     "log_analysis", "alert_routing", "routine",
-    "complex", "proof", "novel", "ambiguous",
+    "complex", "proof_type", "novel", "ambiguous",
     # Strategies
     "memory_only", "memory_then_validate", "escalate",
     # Roles (for encode_record)
@@ -390,10 +385,10 @@ DEFAULT_CONCEPTS = [
     # Common objects
     "user", "order", "product", "customer", "invoice",
     "name", "email", "phone", "address", "password",
-    "username", "date", "time", "id",
+    "username", "date", "time", "id_field",
     # Logic / Z3
-    "and", "or", "not", "implies", "constraint",
-    "satisfied", "violated", "sat", "unsat", "unknown",
+    "and_op", "or_op", "not_op", "implies_op", "constraint",
+    "satisfied", "violated", "sat", "unsat", "unknown_result",
     # Result
     "result", "plan", "decision", "confidence", "proof",
     "validated", "rejected",

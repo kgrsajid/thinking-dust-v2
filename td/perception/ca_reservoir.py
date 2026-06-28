@@ -105,16 +105,19 @@ class CAReservoir:
         if (self._projection_indices is None
                 or binary_input.size > self._projection_max_input):
             self._build_projection(max(binary_input.size, 100))
-
         # Project: XOR of selected input bits → output lattice
         n = self.config.input_dim
         idx = self._projection_indices
-        # Clamp indices to input size
-        clamped = np.minimum(idx, binary_input.size - 1)
+        # Use hash-based projection for short inputs to avoid clamping collisions
+        if binary_input.size < self._projection_max_input:
+            # Use modulo to map indices into input range — different from clamping
+            # because it creates different patterns for different input sizes
+            clamped = idx % max(binary_input.size, 1)
+        else:
+            clamped = np.minimum(idx, binary_input.size - 1)
         selected = binary_input[clamped]  # shape (n, 3)
-        lattice = (selected.sum(axis=1) % 2).astype(np.uint8)  # XOR of 3 bits
 
-        # Evolve Rule 90 for T steps
+        lattice = (selected.sum(axis=1) % 2).astype(np.uint8)  # XOR of 3 bits
         for _ in range(self.config.steps):
             left = np.roll(lattice, 1)
             right = np.roll(lattice, -1)
