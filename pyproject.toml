@@ -19,16 +19,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# For macOS x86_64 (Intel) — torch 2.2 requires numpy <2
-intel-mac = [
-    "numpy>=1.26,<2",
-    "torch>=2.2,<2.3",
-]
-# For ARM Mac / Linux — latest everything
-modern = [
-    "numpy>=2.0",
-    "torch>=2.6",
-]
 dev = [
     "pytest>=8.0",
     "matplotlib>=3.8",
@@ -37,5 +27,5 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["td*"]
 
-[tool.pytest.inioptions]
+[tool.pytest.ini_options]
 testpaths = ["tests"]

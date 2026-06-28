@@ -28,6 +28,7 @@ class TestZ3Bridge:
         assert result.is_valid
 
     def test_validate_form_missing_field(self):
+        """Submit with required_fields_filled=False → UNSAT (correctly rejected)."""
         bridge = Z3Bridge()
         action_plan = [
             {"action": "click", "target": "submit_button"},
@@ -38,7 +39,8 @@ class TestZ3Bridge:
             "captcha_present": False,
         }
         result = bridge.validate_action(action_plan, constraints)
-        assert result.status == "sat"
+        # Z3 should reject: submit requires fields filled, but constraint says not filled
+        assert result.status == "unsat"
 
     def test_decompose(self):
         bridge = Z3Bridge()
