@@ -185,6 +185,27 @@ class GenericNLParser:
             "connector": generate_hypervector(dim),
         }
 
+        # Innate stop-word prototype (HDC-encoded sentence)
+        # Filters noise in pure mode without requiring seed data
+        self.stop_word_prototype = self._encode_phrase(
+            "the a an and or is are was were be been have has had do does did "
+            "will would could should may might must can shall it its "
+            "this that these those there their they them"
+        )
+
+        # Innate relation prototypes (classify relations by HDC similarity)
+        self.relation_prototypes = {
+            "different": self._encode_phrase("cannot be the same must be distinct separate"),
+            "before": self._encode_phrase("comes earlier precedes happens first"),
+            "after": self._encode_phrase("comes later follows happens second"),
+            "excludes": self._encode_phrase("cannot coexist mutually exclusive not together"),
+            "limited": self._encode_phrase("has maximum has minimum bounded by restricted"),
+            "grouped": self._encode_phrase("belongs together same category partition"),
+            "sum_to": self._encode_phrase("adds up to totals equals sum"),
+            "implies": self._encode_phrase("if then means requires leads to"),
+            "overlap": self._encode_phrase("cannot overlap no conflict separate time"),
+        }
+
     # ─── Token Encoding (Kleyko 2022: n-gram HDC) ───────────────────────
 
     def _tokenize(self, text: str) -> list[str]:
@@ -225,20 +246,27 @@ class GenericNLParser:
 
         return bundle(*ngrams) if ngrams else generate_hypervector(self.dim)
 
-    def _encode_phrase(self, tokens: list[str], start: int, end: int) -> np.ndarray:
-        """Encode a phrase (token span) with positional binding (Kanerva 2009).
+    def _encode_phrase(self, text_or_tokens, start: int = 0, end: int = None) -> np.ndarray:
+        """Encode a phrase with positional binding (Kanerva 2009).
 
-        phrase = bundle(bind(permute(token_0, 0), role_subject),
-                        bind(permute(token_1, 1), role_object), ...)
+        Overload: accepts either a string or a token list with indices.
         """
+        if isinstance(text_or_tokens, str):
+            tokens = self._tokenize(text_or_tokens)
+            start, end = 0, len(tokens)
+        else:
+            tokens = text_or_tokens
+            end = end if end is not None else len(tokens)
+
         vecs = []
         for i, tok in enumerate(tokens[start:end]):
             tok_vec = self._encode_token(tok)
             pos_vec = permute(tok_vec, i)
-            # Alternate roles for variety (not grammatical parsing — just structure)
             role = list(self.role_markers.values())[i % len(self.role_markers)]
             vecs.append(bind(pos_vec, role))
         return bundle(*vecs) if vecs else generate_hypervector(self.dim)
+
+
 
     # ─── Document Composition (Kanerva 2009: record superposition) ─────
 
