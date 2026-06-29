@@ -1,6 +1,7 @@
 """Ternary Linear Layer — weights constrained to {-1, 0, +1}.
 
 Based on BitNet b1.58 (Ma et al., 2024, Microsoft Research).
+Uses absmean quantization with RoundClip per the paper.
 
 Storage: 2 bits per weight (vs 32 bits for float32) → 16× compression.
 Inference: pure integer multiply-add (no floating point).
@@ -17,53 +18,45 @@ import torch.nn.functional as F
 class TernaryLinear(nn.Module):
     """Linear layer with ternary weights {-1, 0, +1}.
 
-    Uses the Straight-Through Estimator (STE):
-    - Forward: use ternarized weights (deterministic, integer arithmetic)
-    - Backward: gradient passes through as if weights were continuous
+    Uses absmean quantization from BitNet b1.58:
+        γ = mean(|W|)                    # global, not per-row
+        W̃ = RoundClip(W/(γ+ε), -1, 1)   # round to nearest ternary
 
-    Ternarization rule (per-row):
-        1. Compute threshold τ = 0.7 × mean(|w_row|)
-        2. w_ternary = sign(w) × (|w| > τ)
+    STE: forward uses ternarized weights, backward flows through continuous weights.
 
-    This means ~70% of weights become 0 (sparse), reducing both
-    storage and computation.
+    Note: No bias terms (per BitNet b1.58 spec).
     """
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+    def __init__(self, in_features: int, out_features: int, bias: bool = False):
         """Initialize ternary linear layer.
 
         Args:
             in_features: Input dimensionality.
             out_features: Output dimensionality.
-            bias: Whether to include bias term.
+            bias: Ignored — always False per BitNet spec. Kept for API compat.
         """
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
 
-        # Continuous weights (used during training, ternarized at inference)
+        # Continuous shadow weights (used during training, ternarized at inference)
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
-        if bias:
-            self.bias = nn.Parameter(torch.zeros(out_features))
-        else:
-            self.register_parameter("bias", None)
+        # BitNet b1.58: no bias terms
+        self.register_parameter("bias", None)
 
-        # Initialize weights (Kaiming uniform for good starting point)
-        nn.init.kaiming_uniform_(self.weight, a=5 ** 0.5)
+        # Initialize weights (Kaiming uniform)
+        nn.init.kaiming_uniform_(self.weight, a=2 ** 0.5)  # √2 for ReLU
 
-        # Store ternarized weights cache for inference
-        # Registered as buffer so it moves with .to()/.cuda() (bug fix #7)
+        # Ternarized weights cache for inference
         self.register_buffer("_ternary_cache", torch.zeros(out_features, in_features), persistent=False)
         self._cache_valid = False
 
     def _ternarize(self, w: torch.Tensor) -> torch.Tensor:
-        """Ternarize continuous weights to {-1, 0, +1}.
+        """Ternarize continuous weights to {-1, 0, +1} using absmean quantization.
 
-        Per-row thresholding:
-            τ = 0.7 × mean(|w_row|)
-            w_t = sign(w) × (|w| > τ)
-
-        This zeros out ~70% of weights, making the matrix sparse.
+        BitNet b1.58 formula:
+            γ = (1/nm) Σ|W_ij|             # global mean absolute value
+            W̃ = RoundClip(W/(γ+ε), -1, 1)  # round to nearest ternary
 
         Args:
             w: Continuous weight tensor of shape (out, in).
@@ -71,14 +64,12 @@ class TernaryLinear(nn.Module):
         Returns:
             Ternarized weight tensor of same shape.
         """
-        # Per-row statistics
-        row_means = w.abs().mean(dim=1, keepdim=True)
-        thresholds = 0.7 * row_means
-
-        # Ternarize: sign(w) * (|w| > threshold)
-        ternary = torch.sign(w) * (w.abs() > thresholds).float()
-
-        return ternary
+        eps = 1e-8
+        gamma = w.abs().mean()  # Global absmean
+        scaled = w / (gamma + eps)
+        # RoundClip to {-1, 0, +1}: round then clamp
+        rounded = torch.round(scaled)
+        return rounded.clamp(-1, 1)
 
     def get_ternary_weights(self) -> torch.Tensor:
         """Get the current ternarized weights.

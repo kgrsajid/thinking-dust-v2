@@ -300,6 +300,13 @@ class TDPipeline:
 
         # 5. Confidence scoring
         confidence = compute_confidence(routing, mhn_results, z3_result)
+
+        # Override confidence for ESCALATE: if the system decided to escalate,
+        # force confidence below 0.7 so decision is "escalate" (not "execute").
+        if strategy == "ESCALATE" and confidence.combined >= 0.7:
+            from dataclasses import replace
+            confidence = replace(confidence, combined=0.5)
+
         trace.append(f"Confidence: {confidence.combined:.3f} → {confidence.decision}")
 
         # 6. Build decision
@@ -358,12 +365,12 @@ class TDPipeline:
             situation_hdc, wrong_hdc, correct_hdc, meta
         )
 
-    def train_routers(self, epochs: int = 50, lr: float = 1e-3):
+    def train_routers(self, epochs: int = 50, lr: float = 1e-3, verbose: bool = True):
         """Train all routers on synthetic data.
 
         Convenience method that trains all 3 router levels.
         """
-        return train_router(self.vocab, epochs=epochs, lr=lr)
+        return train_router(self.vocab, epochs=epochs, lr=lr, verbose=verbose)
 
     def save_state(self, path: str | Path):
         """Persist router weights and vocabulary."""

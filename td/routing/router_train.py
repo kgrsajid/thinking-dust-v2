@@ -24,19 +24,29 @@ from .hierarchical_router import HierarchicalRouter
 # ---------------------------------------------------------------------------
 
 TRAINING_EXAMPLES = [
-    # Web / Form
+    # Web / Form (more examples for better coverage)
     ("Click the submit button on the login form", "Web", "Form", "MEMORY_THEN_VALIDATE"),
     ("Fill out the contact form with name and email", "Web", "Form", "MEMORY_THEN_VALIDATE"),
     ("Enter username and password then click login", "Web", "Form", "MEMORY_THEN_VALIDATE"),
     ("Type the search query and hit enter", "Web", "Form", "MEMORY_ONLY"),
     ("Select option from dropdown and submit", "Web", "Form", "MEMORY_THEN_VALIDATE"),
+    ("Check the checkbox to agree to terms and conditions", "Web", "Form", "MEMORY_THEN_VALIDATE"),
+    ("Fill in the registration form with user details", "Web", "Form", "MEMORY_THEN_VALIDATE"),
+    ("Enter credit card information in the checkout form", "Web", "Form", "MEMORY_THEN_VALIDATE"),
+    ("Type email address and click subscribe button", "Web", "Form", "MEMORY_ONLY"),
+    ("Input password confirmation and submit", "Web", "Form", "MEMORY_THEN_VALIDATE"),
 
-    # Web / Navigation
+    # Web / Navigation (more examples)
     ("Click the next page button", "Web", "Navigation", "MEMORY_ONLY"),
     ("Scroll down to see more content", "Web", "Navigation", "MEMORY_ONLY"),
     ("Navigate back to the home page", "Web", "Navigation", "MEMORY_ONLY"),
     ("Click on the about us link", "Web", "Navigation", "MEMORY_ONLY"),
     ("Go to the dashboard tab", "Web", "Navigation", "MEMORY_ONLY"),
+    ("Scroll up to the top of the page", "Web", "Navigation", "MEMORY_ONLY"),
+    ("Click the breadcrumb link to go back", "Web", "Navigation", "MEMORY_ONLY"),
+    ("Navigate to the settings page", "Web", "Navigation", "MEMORY_ONLY"),
+    ("Open the user profile page", "Web", "Navigation", "MEMORY_ONLY"),
+    ("Click the logo to return home", "Web", "Navigation", "MEMORY_ONLY"),
 
     # Web / Extraction
     ("Extract all product prices from the page", "Web", "Extraction", "MEMORY_ONLY"),
@@ -44,20 +54,26 @@ TRAINING_EXAMPLES = [
     ("Scrape table data from the results page", "Web", "Extraction", "MEMORY_ONLY"),
     ("Extract user reviews from the listing", "Web", "Extraction", "MEMORY_ONLY"),
     ("Get all image URLs from the gallery", "Web", "Extraction", "MEMORY_ONLY"),
+    ("Copy the phone number from the contact page", "Web", "Extraction", "MEMORY_ONLY"),
+    ("Read the article title and publication date", "Web", "Extraction", "MEMORY_ONLY"),
 
     # Web / Interaction
     ("Hover over the menu to reveal submenu", "Web", "Interaction", "MEMORY_ONLY"),
     ("Drag and drop the file into the upload zone", "Web", "Interaction", "MEMORY_THEN_VALIDATE"),
-    ("Click the checkbox to agree to terms", "Web", "Interaction", "MEMORY_ONLY"),
-    ("Toggle the switch to enable dark mode", "Web", "Interaction", "MEMORY_ONLY"),
+    ("Click the checkbox to enable dark mode", "Web", "Interaction", "MEMORY_ONLY"),
+    ("Toggle the switch to turn on notifications", "Web", "Interaction", "MEMORY_ONLY"),
     ("Click the play button on the video player", "Web", "Interaction", "MEMORY_ONLY"),
+    ("Drag the slider to adjust volume", "Web", "Interaction", "MEMORY_ONLY"),
 
-    # API / Sequential
+    # API / Sequential (more examples)
     ("Fetch user profile from API then fetch their orders", "API", "Sequential", "MEMORY_THEN_VALIDATE"),
     ("Call the auth API to get a token then use it for the next request", "API", "Sequential", "MEMORY_THEN_VALIDATE"),
     ("Get data from endpoint A, transform it, send to endpoint B", "API", "Sequential", "MEMORY_THEN_VALIDATE"),
     ("Fetch the list, then fetch details for each item", "API", "Sequential", "MEMORY_THEN_VALIDATE"),
     ("Query the database and return results as JSON", "API", "Sequential", "MEMORY_ONLY"),
+    ("Login via API then fetch the dashboard data", "API", "Sequential", "MEMORY_THEN_VALIDATE"),
+    ("Get authentication token then call protected endpoint", "API", "Sequential", "MEMORY_THEN_VALIDATE"),
+    ("Fetch paginated results until all data is retrieved", "API", "Sequential", "MEMORY_THEN_VALIDATE"),
 
     # API / Parallel
     ("Fetch data from three APIs simultaneously", "API", "Parallel", "MEMORY_THEN_VALIDATE"),
@@ -65,6 +81,7 @@ TRAINING_EXAMPLES = [
     ("Batch fetch user details for multiple IDs", "API", "Parallel", "MEMORY_ONLY"),
     ("Call multiple microservices in parallel and merge results", "API", "Parallel", "MEMORY_THEN_VALIDATE"),
     ("Send async requests to all webhook URLs", "API", "Parallel", "MEMORY_ONLY"),
+    ("Query multiple data sources concurrently", "API", "Parallel", "MEMORY_THEN_VALIDATE"),
 
     # API / ErrorHandling
     ("Handle 404 errors and log the missing endpoints", "API", "ErrorHandling", "MEMORY_THEN_VALIDATE"),
@@ -78,14 +95,16 @@ TRAINING_EXAMPLES = [
     ("Implement exponential backoff for 5xx errors", "API", "Retry", "MEMORY_THEN_VALIDATE"),
     ("Retry with different parameters on timeout", "API", "Retry", "MEMORY_THEN_VALIDATE"),
     ("Reconnect to the websocket on disconnect", "API", "Retry", "MEMORY_ONLY"),
-    ("Retry the upload with a smaller file if original fails", "API", "Retry", "MEMORY_THEN_VALIDATE"),
 
-    # File / Parse
+    # File / Parse (more examples)
     ("Parse the CSV file and extract all rows", "File", "Parse", "MEMORY_THEN_VALIDATE"),
     ("Read the JSON configuration file", "File", "Parse", "MEMORY_ONLY"),
     ("Load the YAML file and validate its structure", "File", "Parse", "MEMORY_THEN_VALIDATE"),
     ("Parse XML data and extract attribute values", "File", "Parse", "MEMORY_ONLY"),
     ("Read the TSV file and convert to list of dicts", "File", "Parse", "MEMORY_ONLY"),
+    ("Import data from Excel spreadsheet", "File", "Parse", "MEMORY_THEN_VALIDATE"),
+    ("Parse the log file for error messages", "File", "Parse", "MEMORY_ONLY"),
+    ("Read the properties file and extract key-value pairs", "File", "Parse", "MEMORY_ONLY"),
 
     # File / Transform
     ("Convert JSON to CSV with specific column mapping", "File", "Transform", "MEMORY_ONLY"),
@@ -99,21 +118,21 @@ TRAINING_EXAMPLES = [
     ("Check for null values in required fields", "File", "Validate", "MEMORY_THEN_VALIDATE"),
     ("Verify all email addresses are valid format", "File", "Validate", "MEMORY_THEN_VALIDATE"),
     ("Validate that IDs are unique in the dataset", "File", "Validate", "MEMORY_THEN_VALIDATE"),
-    ("Check data types match the schema definition", "File", "Validate", "MEMORY_THEN_VALIDATE"),
 
     # File / Generate
     ("Generate a CSV report from the data", "File", "Generate", "MEMORY_ONLY"),
     ("Create a summary JSON file with statistics", "File", "Generate", "MEMORY_ONLY"),
     ("Export the filtered results to a new file", "File", "Generate", "MEMORY_ONLY"),
     ("Write the configuration to a YAML file", "File", "Generate", "MEMORY_ONLY"),
-    ("Create a template file with placeholders", "File", "Generate", "MEMORY_ONLY"),
 
-    # Monitor / Threshold
+    # Monitor / Threshold (more examples)
     ("If CPU exceeds 90 percent for 5 minutes restart the service", "Monitor", "Threshold", "MEMORY_THEN_VALIDATE"),
     ("Alert when memory usage goes above 85 percent", "Monitor", "Threshold", "MEMORY_ONLY"),
     ("Trigger notification when disk is 95 percent full", "Monitor", "Threshold", "MEMORY_ONLY"),
     ("Restart nginx if response time exceeds 2 seconds", "Monitor", "Threshold", "MEMORY_THEN_VALIDATE"),
     ("Scale up if queue length exceeds 1000 messages", "Monitor", "Threshold", "MEMORY_THEN_VALIDATE"),
+    ("Send alert when database connection pool is exhausted", "Monitor", "Threshold", "MEMORY_ONLY"),
+    ("Restart service when health check fails 3 times", "Monitor", "Threshold", "MEMORY_THEN_VALIDATE"),
 
     # Monitor / LogAnalysis
     ("Analyze error logs from the last hour", "Monitor", "LogAnalysis", "MEMORY_ONLY"),
@@ -127,16 +146,14 @@ TRAINING_EXAMPLES = [
     ("Route database warnings to the DBA team", "Monitor", "AlertRouting", "MEMORY_ONLY"),
     ("Notify Slack channel for deployment failures", "Monitor", "AlertRouting", "MEMORY_ONLY"),
     ("Email the admin if SSL certificate expires soon", "Monitor", "AlertRouting", "MEMORY_ONLY"),
-    ("Page the security team for intrusion detection alerts", "Monitor", "AlertRouting", "MEMORY_ONLY"),
 
     # Monitor / Routine
     ("Check disk usage daily and delete logs older than 30 days", "Monitor", "Routine", "MEMORY_ONLY"),
     ("Run health check every 5 minutes", "Monitor", "Routine", "MEMORY_ONLY"),
     ("Backup the database every night at 2am", "Monitor", "Routine", "MEMORY_ONLY"),
     ("Clean up temporary files every hour", "Monitor", "Routine", "MEMORY_ONLY"),
-    ("Rotate logs when they exceed 100MB", "Monitor", "Routine", "MEMORY_ONLY"),
 
-    # Unknown / Escalate
+    # Unknown / Escalate (more examples)
     ("Book a flight to Istanbul with 500 dollar budget morning departure", "Unknown", "Complex", "ESCALATE"),
     ("Plan a 3-day trip itinerary for Paris", "Unknown", "Complex", "ESCALATE"),
     ("Write a poem about artificial intelligence", "Unknown", "Novel", "ESCALATE"),
@@ -147,6 +164,16 @@ TRAINING_EXAMPLES = [
     ("Generate creative names for a coffee shop", "Unknown", "Novel", "ESCALATE"),
     ("Negotiate the best deal with the vendor", "Unknown", "Complex", "ESCALATE"),
     ("Analyze the sentiment of customer feedback", "Unknown", "Complex", "ESCALATE"),
+    ("Write a song about the ocean", "Unknown", "Novel", "ESCALATE"),
+    ("Compose a resume for a software engineer", "Unknown", "Novel", "ESCALATE"),
+    ("Decide what to cook for dinner tonight", "Unknown", "Ambiguous", "ESCALATE"),
+    ("Recommend a movie based on my preferences", "Unknown", "Complex", "ESCALATE"),
+    ("Explain quantum computing to a five year old", "Unknown", "Novel", "ESCALATE"),
+    ("Create a lesson plan for teaching fractions", "Unknown", "Complex", "ESCALATE"),
+    ("Debate whether AI will replace human jobs", "Unknown", "Complex", "ESCALATE"),
+    ("Summarize the plot of Romeo and Juliet", "Unknown", "Novel", "ESCALATE"),
+    ("Brainstorm ideas for a mobile app", "Unknown", "Complex", "ESCALATE"),
+    ("Review this legal contract for issues", "Unknown", "Proof", "ESCALATE"),
 ]
 
 
@@ -187,8 +214,8 @@ def generate_training_data(vocab: ConceptVocabulary) -> tuple[np.ndarray, np.nda
 
 def train_router(
     vocab: ConceptVocabulary | None = None,
-    epochs: int = 50,
-    lr: float = 1e-3,
+    epochs: int = 100,
+    lr: float = 5e-3,
     batch_size: int = 32,
     verbose: bool = True,
 ) -> dict:

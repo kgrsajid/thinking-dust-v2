@@ -1,6 +1,7 @@
 """Router A — Domain Detector.
 
 Classifies input HDC vector into 5 domains.
+Uses BitNet b1.58-style ternary layers with LayerNorm (SubLN).
 """
 
 from __future__ import annotations
@@ -18,45 +19,34 @@ class RouterA(nn.Module):
     """Domain Detector — classifies input into 5 domains.
 
     Architecture:
-        TernaryLinear(10_000, 128) → ReLU → TernaryLinear(128, 5) → Softmax
+        HDC normalize → TernaryLinear(10K, 128) → LayerNorm → ReLU
+        → TernaryLinear(128, 5) → Softmax
 
-    Parameters: 10_000×128 + 128×5 = 1,280,640 weights
-    After ternarization + sparsity: ~5K effective non-zero weights.
-
-    Input: HDC vector (10K-dim, bipolar → converted to float)
-    Output: softmax probabilities over 5 domains
-    Time: ~0.01ms (integer matmul on CPU after ternarization)
+    The LayerNorm between layers prevents logit saturation (BitNet uses
+    SubLN for the same purpose). Without it, ternary matmuls produce
+    logits of magnitude ~80+ which saturate softmax.
     """
 
-    def __init__(self, input_dim: int = 10_000, hidden_dim: int = 128):
+    def __init__(self, input_dim: int = 10_000, hidden_dim: int = 256):
         super().__init__()
+        self.input_dim = input_dim
         self.fc1 = TernaryLinear(input_dim, hidden_dim)
+        self.ln1 = nn.LayerNorm(hidden_dim)
         self.fc2 = TernaryLinear(hidden_dim, len(DOMAINS))
 
     def forward(self, hdc_vector: torch.Tensor) -> torch.Tensor:
-        """Classify HDC vector into domain probabilities.
-
-        Args:
-            hdc_vector: HDC vector tensor of shape (batch, 10_000)
-                        or (10_000,) for single input.
-
-        Returns:
-            Softmax probabilities of shape (batch, 5) or (5,).
-        """
         if hdc_vector.dim() == 1:
             hdc_vector = hdc_vector.unsqueeze(0)
 
-        x = self.fc1(hdc_vector.float())
+        # Normalize HDC input: ±1 in D dims → divide by √D for O(1) activations
+        x = hdc_vector.float() / (hdc_vector.shape[-1] ** 0.5)
+        x = self.fc1(x)
+        x = self.ln1(x)  # SubLN: prevents intermediate activation explosion
         x = torch.relu(x)
         x = self.fc2(x)
         return torch.softmax(x, dim=-1)
 
     def classify(self, hdc_vector_numpy: np.ndarray) -> tuple[str, float, np.ndarray]:
-        """Convenience: classify numpy HDC vector and return domain name + confidence.
-
-        Returns:
-            Tuple of (domain_name, confidence, all_probs).
-        """
         with torch.no_grad():
             x = torch.from_numpy(hdc_vector_numpy.astype(np.float32))
             probs = self.forward(x).squeeze(0)

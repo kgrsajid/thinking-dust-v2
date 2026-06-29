@@ -1,6 +1,7 @@
 """Router C — Strategy Selector.
 
 Picks execution pathway: MEMORY_ONLY, MEMORY_THEN_VALIDATE, or ESCALATE.
+Uses BitNet b1.58-style ternary layers with LayerNorm (SubLN).
 """
 
 from __future__ import annotations
@@ -11,7 +12,6 @@ import torch.nn as nn
 
 from .ternary_linear import TernaryLinear
 
-
 STRATEGIES = ["MEMORY_ONLY", "MEMORY_THEN_VALIDATE", "ESCALATE"]
 
 
@@ -19,46 +19,28 @@ class RouterC(nn.Module):
     """Strategy Selector — picks execution pathway.
 
     Architecture:
-        TernaryLinear(10_000, 32) → ReLU → TernaryLinear(32, 3) → Softmax
-
-    Input: HDC vector + retrieved MHN pattern (bundled together)
-    Output: softmax probabilities over 3 strategies
-
-    Decision logic:
-        MEMORY_ONLY:         high router confidence + high MHN similarity
-        MEMORY_THEN_VALIDATE: high router confidence + medium MHN similarity
-        ESCALATE:            low router confidence OR low MHN similarity
+        HDC normalize → TernaryLinear(10K, 32) → LayerNorm → ReLU
+        → TernaryLinear(32, 3) → Softmax
     """
 
     def __init__(self, input_dim: int = 10_000, hidden_dim: int = 32):
         super().__init__()
         self.fc1 = TernaryLinear(input_dim, hidden_dim)
+        self.ln1 = nn.LayerNorm(hidden_dim)
         self.fc2 = TernaryLinear(hidden_dim, len(STRATEGIES))
 
     def forward(self, hdc_vector: torch.Tensor) -> torch.Tensor:
-        """Classify HDC vector into strategy probabilities.
-
-        Args:
-            hdc_vector: HDC vector (query bundled with MHN retrieval).
-                        Shape: (batch, input_dim) or (input_dim,).
-
-        Returns:
-            Softmax probabilities of shape (batch, 3) or (3,).
-        """
         if hdc_vector.dim() == 1:
             hdc_vector = hdc_vector.unsqueeze(0)
 
-        x = self.fc1(hdc_vector.float())
+        x = hdc_vector.float() / (hdc_vector.shape[-1] ** 0.5)
+        x = self.fc1(x)
+        x = self.ln1(x)
         x = torch.relu(x)
         x = self.fc2(x)
         return torch.softmax(x, dim=-1)
 
     def classify(self, hdc_vector_numpy: np.ndarray):
-        """Classify numpy HDC vector.
-
-        Returns:
-            (strategy_name, confidence, all_probs)
-        """
         with torch.no_grad():
             x = torch.from_numpy(hdc_vector_numpy.astype(np.float32))
             probs = self.forward(x).squeeze(0)

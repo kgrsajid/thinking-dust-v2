@@ -1,6 +1,7 @@
 """Router B — Task Type Detector.
 
 One instance per domain. Classifies task type within a domain.
+Uses BitNet b1.58-style ternary layers with LayerNorm (SubLN).
 """
 
 from __future__ import annotations
@@ -25,53 +26,32 @@ class RouterB(nn.Module):
     """Task Type Detector — one instance per domain.
 
     Architecture:
-        TernaryLinear(10_000, 64) → ReLU → TernaryLinear(64, 4) → Softmax
-
-    Only the relevant domain's RouterB is invoked (gated by RouterA output).
-
-    Input: HDC vector (10K-dim)
-    Output: softmax probabilities over 4 task types (for the selected domain)
+        HDC normalize → TernaryLinear(10K, 128) → LayerNorm → ReLU
+        → TernaryLinear(128, 4) → Softmax
     """
 
-    def __init__(self, domain: str, input_dim: int = 10_000, hidden_dim: int = 64):
-        """Initialize RouterB for a specific domain.
-
-        Args:
-            domain: One of DOMAINS ("Web", "API", "File", "Monitor", "Unknown").
-            input_dim: HDC dimensionality.
-            hidden_dim: Hidden layer size.
-        """
+    def __init__(self, domain: str, input_dim: int = 10_000, hidden_dim: int = 128):
         super().__init__()
         assert domain in TASK_TYPES, f"Unknown domain: {domain}"
         self.domain = domain
         self.task_types = TASK_TYPES[domain]
 
         self.fc1 = TernaryLinear(input_dim, hidden_dim)
+        self.ln1 = nn.LayerNorm(hidden_dim)
         self.fc2 = TernaryLinear(hidden_dim, len(self.task_types))
 
     def forward(self, hdc_vector: torch.Tensor) -> torch.Tensor:
-        """Classify HDC vector into task type probabilities.
-
-        Args:
-            hdc_vector: HDC vector tensor of shape (batch, input_dim).
-
-        Returns:
-            Softmax probabilities of shape (batch, 4).
-        """
         if hdc_vector.dim() == 1:
             hdc_vector = hdc_vector.unsqueeze(0)
 
-        x = self.fc1(hdc_vector.float())
+        x = hdc_vector.float() / (hdc_vector.shape[-1] ** 0.5)
+        x = self.fc1(x)
+        x = self.ln1(x)
         x = torch.relu(x)
         x = self.fc2(x)
         return torch.softmax(x, dim=-1)
 
     def classify(self, hdc_vector_numpy: np.ndarray):
-        """Classify numpy HDC vector.
-
-        Returns:
-            (task_type_name, confidence, all_probs)
-        """
         with torch.no_grad():
             x = torch.from_numpy(hdc_vector_numpy.astype(np.float32))
             probs = self.forward(x).squeeze(0)
