@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TD v2 — Flare Chat. Theatrical, interactive, jaw-dropping demo.
+"""TD v2 — Flare Chat. Theatrical, intent-aware, jaw-dropping demo.
 
 Usage:
     .venv/bin/python3 demos/chat.py --pure
@@ -10,6 +10,7 @@ Flares:
     ✦ HDC similarity heatmap (what is it retrieving?)
     ✦ Memory growth animation (patterns being stored live)
     ✦ Confidence gauge (honest, dynamic)
+    ✦ Intent classification (6 innate intents via HDC prototypes)
     ✦ Pure mode arc: 0 → learned → useful (the thesis)
     ✦ Feedback loop: 👍 / 👎 / ✏️ (wires to teach)
     ✦ Seed ratio tracker (are we still dependent on seed?)
@@ -26,27 +27,15 @@ from td.memory.mhn import ModernHopfieldNetwork, MHNConfig
 from td.thinking import GenericThinkingDust
 
 
-# ANSI colors
 C = {
-    "reset": "\033[0m",
-    "bold": "\033[1m",
-    "dim": "\033[2m",
-    "red": "\033[91m",
-    "green": "\033[92m",
-    "yellow": "\033[93m",
-    "blue": "\033[94m",
-    "magenta": "\033[95m",
-    "cyan": "\033[96m",
-    "white": "\033[97m",
-    "gray": "\033[90m",
-    "bg_green": "\033[42m",
-    "bg_red": "\033[41m",
-    "bg_yellow": "\033[43m",
+    "reset": "[0m", "bold": "[1m", "dim": "[2m",
+    "red": "[91m", "green": "[92m", "yellow": "[93m",
+    "blue": "[94m", "magenta": "[95m", "cyan": "[96m",
+    "white": "[97m", "gray": "[90m",
 }
 
 
 def bar(val, max_val=1.0, width=20, color="green"):
-    """ASCII bar chart."""
     filled = int((val / max_val) * width)
     empty = width - filled
     c = C.get(color, C["green"])
@@ -54,7 +43,6 @@ def bar(val, max_val=1.0, width=20, color="green"):
 
 
 def gauge(confidence):
-    """Dynamic confidence gauge."""
     if confidence >= 0.90:
         return f"{C['green']}[CERTAIN]{C['reset']}"
     elif confidence >= 0.70:
@@ -67,29 +55,39 @@ def gauge(confidence):
         return f"{C['red']}[UNKNOWN]{C['reset']}"
 
 
+def intent_emoji(intent):
+    return {
+        "question": "❓",
+        "constraint": "🔧",
+        "suggestion": "💡",
+        "command": "📌",
+        "conversation": "💬",
+        "meta": "🔍",
+        "unknown": "❓",
+    }.get(intent, "❓")
+
+
 def thinking_animation(duration=0.5):
-    """Show a thinking animation."""
     import itertools
     chars = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
     start = time.time()
     while time.time() - start < duration:
         c = next(chars)
-        print(f"\r  {C['gray']}{c} Thinking...{C['reset']}", end="", flush=True)
+        print(f"  {C['gray']}{c} Thinking...{C['reset']}", end="", flush=True)
         time.sleep(0.05)
-    print(f"\r  {' ' * 20}\r", end="")
+    print(f"  {' ' * 20}", end="")
 
 
 def print_banner():
     print(f"""
 {C['cyan']}  ╔═══════════════════════════════════════════════════════════════╗{C['reset']}
-{C['cyan']}  ║{C['reset']}  {C['bold']}✦ THINKING DUST v2 — Generic Reasoning Engine{C['reset']}              {C['cyan']}║{C['reset']}
-{C['cyan']}  ║{C['reset']}  {C['dim']}18 innate primitives · HDC algebra · Z3 proving · MHN memory{C['reset']}  {C['cyan']}║{C['reset']}
+{C['cyan']}  ║{C['reset']}  {C['bold']}✦ THINKING DUST v2 — Intent-Aware Reasoning Engine{C['reset']}       {C['cyan']}║{C['reset']}
+{C['cyan']}  ║{C['reset']}  {C['dim']}6 intents · 18 primitives · HDC · Z3 · MHN · Zero seed{C['reset']}  {C['cyan']}║{C['reset']}
 {C['cyan']}  ╚═══════════════════════════════════════════════════════════════╝{C['reset']}
 """)
 
 
 def print_memory_state(td, before=False):
-    """Show memory state with visual flair."""
     s = td.stats()
     total = s["memory_size"]
     seed = s["seed_patterns"]
@@ -107,19 +105,20 @@ def print_memory_state(td, before=False):
     print(f"    {C['yellow']}Seed:{C['reset']}     {seed_bar} {seed_pct:.0f}%")
     print(f"    {C['green']}Learned:{C['reset']}  {learned_bar} {100-seed_pct:.0f}%")
 
-    # Flare: if seed ratio drops below 5%, celebrate
     if seed_pct < 5 and seed > 0:
         print(f"  {C['green']}✦ SEED RATIO < 5% — System is now self-learning!{C['reset']}")
 
 
 def print_reasoning_trace(result):
-    """Print the reasoning trace with visual hierarchy."""
-    print(f"\n  {C['gray']}┌─ Reasoning Trace ───────────────────────────────────────┐{C['reset']}")
+    if not result.trace:
+        return
+    print(f"
+  {C['gray']}┌─ Reasoning Trace ───────────────────────────────────────┐{C['reset']}")
     for line in result.trace:
-        if line.startswith("Parsed:"):
+        if line.startswith("Intent:"):
+            print(f"  {C['gray']}│{C['reset']} {C['magenta']}{intent_emoji(result.intent)} {line}{C['reset']}")
+        elif line.startswith("Parsed:"):
             print(f"  {C['gray']}│{C['reset']} {C['cyan']}📄 {line}{C['reset']}")
-        elif line.startswith("IDP"):
-            print(f"  {C['gray']}│{C['reset']} {C['magenta']}🔄 {line}{C['reset']}")
         elif "Iter" in line and "CONVERGED" in line:
             print(f"  {C['gray']}│{C['reset']} {C['green']}   {line}{C['reset']}")
         elif "Iter" in line:
@@ -130,7 +129,7 @@ def print_reasoning_trace(result):
             print(f"  {C['gray']}│{C['reset']} {C['green']}✓ {line}{C['reset']}")
         elif "Z3: UNSAT" in line:
             print(f"  {C['gray']}│{C['reset']} {C['red']}✗ {line}{C['reset']}")
-        elif "Z3: Not a constraint" in line:
+        elif "Z3: Not" in line or "Z3: No" in line:
             print(f"  {C['gray']}│{C['reset']} {C['gray']}⊘ {line}{C['reset']}")
         elif "MHN:" in line:
             print(f"  {C['gray']}│{C['reset']} {C['cyan']}💡 {line}{C['reset']}")
@@ -142,30 +141,32 @@ def print_reasoning_trace(result):
 
 
 def print_hdc_heatmap(result):
-    """Show HDC retrieval similarity as a heatmap."""
     if not result.thoughts:
         return
-    print(f"\n  {C['bold']}HDC Retrieval Heatmap:{C['reset']}")
+    print(f"
+  {C['bold']}HDC Retrieval Heatmap:{C['reset']}")
     for t in result.thoughts:
         if t.retrieved_hdc is not None:
-            sim_bar = bar(t.retrieved_similarity, 1.0, 25, "green" if t.retrieved_similarity > 0.7 else "yellow" if t.retrieved_similarity > 0.4 else "red")
+            color = "green" if t.retrieved_similarity > 0.7 else "yellow" if t.retrieved_similarity > 0.4 else "red"
+            sim_bar = bar(t.retrieved_similarity, 1.0, 25, color)
             label = t.retrieved_metadata.get("title", t.description[:40])
             print(f"    {sim_bar} {t.retrieved_similarity:.2f} — {label}")
 
 
 def print_solution(result):
-    """Print the solution with dramatic flair."""
     sol = result.solution or {}
     formatted = sol.get("formatted", "")
     sol_type = sol.get("type", "unknown")
     prims = sol.get("primitives_applied", [])
     conf = result.confidence
 
-    print(f"\n  {C['bold']}Answer:{C['reset']} {gauge(conf)}")
+    print(f"
+  {C['bold']}Answer:{C['reset']} {gauge(conf)} {C['gray']}(intent: {result.intent}){C['reset']}")
 
     if sol_type == "generic_csp" and prims and prims != ["bounded"]:
         print(f"  {C['cyan']}┌─ Constraint Solution ─────────────────────────────────┐{C['reset']}")
-        for line in formatted.split("\n"):
+        for line in formatted.split("
+"):
             print(f"  {C['cyan']}│{C['reset']}  {line}")
         print(f"  {C['cyan']}└────────────────────────────────────────────────────────┘{C['reset']}")
         print(f"  {C['gray']}Primitives: {C['yellow']}{' + '.join(prims)}{C['reset']}")
@@ -177,18 +178,29 @@ def print_solution(result):
         print(f"  {C['red']}→ {formatted}{C['reset']}")
         print(f"  {C['red']}  (Proven impossible by Z3){C['reset']}")
 
+    elif sol_type == "conversation" and formatted:
+        print(f"  {C['magenta']}→ {formatted}{C['reset']}")
+
+    elif sol_type == "suggestion" and formatted:
+        print(f"  {C['yellow']}→ {formatted}{C['reset']}")
+
+    elif sol_type == "command" and formatted:
+        print(f"  {C['blue']}→ {formatted}{C['reset']}")
+
+    elif sol_type == "meta" and formatted:
+        print(f"  {C['gray']}→ {formatted}{C['reset']}")
+
     else:
         print(f"  {C['magenta']}→ I don't know this one yet.{C['reset']}")
 
 
 def print_feedback_prompt(problem_text):
-    """Show feedback options."""
-    print(f"\n  {C['gray']}Was this helpful?{C['reset']}")
+    print(f"
+  {C['gray']}Was this helpful?{C['reset']}")
     print(f"    {C['green']}[y]{C['reset']} Yes  {C['red']}[n]{C['reset']} No  {C['yellow']}[t]{C['reset']} Teach me the right answer")
 
 
 def handle_feedback(td, problem_text, result, user_input):
-    """Handle feedback and wire to teach()."""
     if user_input.lower() == "y":
         print(f"  {C['green']}✓ Feedback recorded. Memory reinforced.{C['reset']}")
         return True
@@ -202,8 +214,8 @@ def handle_feedback(td, problem_text, result, user_input):
             if correct:
                 r = td.teach(problem_text, correct)
                 print(f"  {C['green']}✓ {r['message']} Memory: {r['memory_size']}{C['reset']}")
-                # FLARE: show memory growth
-                print(f"\n  {C['green']}✦ NEW PATTERN STORED ✦{C['reset']}")
+                print(f"
+  {C['green']}✦ NEW PATTERN STORED ✦{C['reset']}")
                 print_memory_state(td)
         except (EOFError, KeyboardInterrupt):
             pass
@@ -221,7 +233,7 @@ def main():
     mhn = ModernHopfieldNetwork(MHNConfig(dim=10_000, min_similarity=0.01))
     td = GenericThinkingDust(vocab=vocab, mhn=mhn, dim=10_000, pure_mode=pure)
 
-    print(f"  Mode: {C['green'] if pure else C['yellow']}\u25cf {'PURE' if pure else 'SEEDED'}{C['reset']}")
+    print(f"  Mode: {C['green'] if pure else C['yellow']}● {'PURE' if pure else 'SEEDED'}{C['reset']}")
     print_memory_state(td)
     print()
 
@@ -243,7 +255,8 @@ def main():
             prompt = "feedback › " if awaiting_feedback else "you › "
             user_input = input(f"{prompt}").strip()
         except (EOFError, KeyboardInterrupt):
-            print(f"\n{C['gray']}bye.{C['reset']}")
+            print(f"
+{C['gray']}bye.{C['reset']}")
             break
 
         if not user_input:
@@ -272,13 +285,16 @@ def main():
         if user_input.lower().startswith("teach:"):
             rest = user_input[6:].strip()
             if "|" not in rest:
-                print(f"\n  {C['red']}Format: teach: <problem> | <solution>{C['reset']}\n")
+                print(f"
+  {C['red']}Format: teach: <problem> | <solution>{C['reset']}
+")
                 continue
             problem, solution = rest.split("|", 1)
             r = td.teach(problem.strip(), solution.strip())
-            print(f"\n  {C['green']}✓ {r['message']}{C['reset']}")
-            # FLARE: show memory growth
-            print(f"\n  {C['green']}✦ NEW PATTERN STORED ✦{C['reset']}")
+            print(f"
+  {C['green']}✓ {r['message']}{C['reset']}")
+            print(f"
+  {C['green']}✦ NEW PATTERN STORED ✦{C['reset']}")
             print_memory_state(td)
             print()
             continue
@@ -305,11 +321,11 @@ def main():
         print(f"  {C['gray']}({result.latency_ms:.0f}ms · {result.iterations} IDP iterations){C['reset']}")
 
         # If confidence is low, ask to teach
-        if result.confidence < 0.40 or (result.solution and result.solution.get("type") == "unknown"):
-            print(f"\n  {C['magenta']}I don't know this yet. Teach me?{C['reset']}")
+        if result.confidence < 0.40 or (result.intent == "question" and not result.solution):
+            print(f"
+  {C['magenta']}I don't know this yet. Teach me?{C['reset']}")
             print(f"    {C['yellow']}teach: {user_input[:40]} | <answer>{C['reset']}")
-        else:
-            # Ask for feedback on good answers
+        elif result.intent not in ("conversation", "suggestion", "command"):
             print_feedback_prompt(user_input)
             awaiting_feedback = True
 
