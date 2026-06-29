@@ -33,6 +33,7 @@ from .z3_solver import (
     requires_external_data, handle_external_data_problem,
     get_advice,
 )
+from .solve_advice import AdviceSolver
 
 
 # Keywords that ALWAYS require actual reasoning, never just MHN retrieval
@@ -113,21 +114,28 @@ class ReasoningDecomposer:
         # Route based on problem type
         if ptype == "advice":
             trace.append("Mode: ADVICE — retrieving behavioral strategies")
-            advice = get_advice(entities)
-            if advice:
-                trace.append(f"  Advice category: {advice['category']}")
-                latency = (time.perf_counter() - t0) * 1000
-                return DecompositionResult(
-                    root=SubProblem(problem_text, "advice", hdc_vector, 0.5,
-                                  solution=advice, source="advice"),
-                    prototype_match="advice",
-                    prototype_similarity=0.5,
-                    sub_problems=[],
-                    solution=advice,
-                    confidence=0.75,
-                    latency_ms=latency,
-                    trace=trace,
-                )
+            advice_solver = AdviceSolver(self.mhn, self.vocab, self.parser)
+            advice_result = advice_solver.solve(entities)
+            trace.append(f"  Source: {advice_result['source']}, strategies: {len(advice_result['strategies'])}")
+            latency = (time.perf_counter() - t0) * 1000
+            # Format for display
+            formatted_lines = ["Strategy:"]
+            for i, s in enumerate(advice_result["strategies"], 1):
+                formatted_lines.append(f"  {i}. {s['title']}: {s['description']}")
+            return DecompositionResult(
+                root=SubProblem(problem_text, "advice", hdc_vector, 0.5,
+                              solution={"type": "advice", "formatted": "\n".join(formatted_lines),
+                                       "details": advice_result},
+                              source="advice"),
+                prototype_match="advice",
+                prototype_similarity=0.5,
+                sub_problems=[],
+                solution={"type": "advice", "formatted": "\n".join(formatted_lines),
+                         "details": advice_result},
+                confidence=advice_result["confidence"],
+                latency_ms=latency,
+                trace=trace,
+            )
 
         elif ptype == "info_request":
             trace.append("Mode: INFO_REQUEST — needs external data")
