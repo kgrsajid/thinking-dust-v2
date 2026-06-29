@@ -864,7 +864,7 @@ class GenericThinkingDust:
             if prims == ["bounded"]:
                 # Default bounded is not meaningful — check MHN first
                 fallback = self._fallback_mhn_solve(thoughts, graph)
-                if fallback:
+                if fallback and fallback.get("similarity", 0) > 0.85:
                     solution = fallback
                     trace.append("  MHN override: better retrieval than default Z3")
 
@@ -1018,7 +1018,12 @@ class GenericThinkingDust:
                 return 0.95
             elif sol_type == "learned":
                 sim = solution.get("similarity", 0.5)
-                return min(sim * 0.9, 0.85)
+                # Honest scaling: only exact matches = high confidence
+                if sim < 0.40:       return 0.10
+                elif sim < 0.60:    return 0.25
+                elif sim < 0.75:    return 0.40
+                elif sim < 0.90:    return 0.55
+                else:                return min(sim * 0.85, 0.85)
 
         # No Z3 solution: confidence based on IDP retrieval quality
         best_sim = max((t.retrieved_similarity for t in thoughts if t.retrieved_hdc is not None), default=0)
