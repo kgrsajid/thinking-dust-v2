@@ -755,10 +755,20 @@ class ThinkingDust:
 
         trace.append("  Z3: Trying budget model...")
         total = entities.get("how_many") or 10000
-        if entities.get("dollars"):
-            total = entities["dollars"][0]
+        # If text has two numbers (e.g. "5000" and "4"), the first is amount,
+        # second is department count. Extract both.
+        import re
+        all_numbers = [int(x) for x in re.findall(r'\d+', problem_text)]
+        if len(all_numbers) >= 2:
+            total = all_numbers[0]
+            num_depts = all_numbers[1]
+        else:
+            total = all_numbers[0] if all_numbers else total
+            num_depts = 3
 
-        departments = ["Operations", "Marketing", "Development"]
+        default_names = ["Operations", "Marketing", "Development", "Research",
+                         "Sales", "Engineering", "Design", "HR", "Finance", "Legal"]
+        departments = default_names[:num_depts]
         s = Optimize()
         vars = {}
         for dept in departments:
