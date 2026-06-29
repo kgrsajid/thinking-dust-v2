@@ -546,12 +546,14 @@ class ThinkingDust:
         if ptype == "advice":
             return self._format_advice(sub_problems, entities)
 
-        # For proof: report what was retrieved
+        # For proof: report what was retrieved, but be honest about limits
         if ptype == "proof":
             return {
-                "type": "proof",
-                "formatted": "Proof structure detected. Z3 would verify logical steps.",
-                "iterations": len(sub_problems),
+                "type": "info_request",
+                "formatted": "Formal proofs require TD Pro's logical reasoning engine. "
+                           "For this demo, heuristic approach only. "
+                           "Mathematical correctness cannot be guaranteed.",
+                "domain": "proof",
             }
 
         # Default: what did the MHN retrieve?
@@ -758,16 +760,12 @@ class ThinkingDust:
         }
 
     def _build_semantic_prototypes(self) -> dict[str, np.ndarray]:
-        """P0 FIX #2: Build sub-problem prototypes from actual sentences.
-
-        Instead of random concept vectors, encode meaningful prototype
-        sentences so HDC decomposition retrieves real content.
-        """
+        """P0 FIX #2: Build sub-problem prototypes from actual sentences."""
         prototype_sentences = {
             "extract_entities": "find all people and objects mentioned in the problem",
-            "identify_constraints": "what limits restrictions and constraints apply",
+            "identify_constraints": "what limits exist what rules must be followed what cannot happen",
             "find_solution": "how to solve and satisfy all requirements",
-            "validate_result": "check that the answer is correct and complete",
+            "validate_result": "check that the answer is correct verify no mistakes ensure all conditions met",
         }
         return {name: self.parser.parse(text) for name, text in prototype_sentences.items()}
 

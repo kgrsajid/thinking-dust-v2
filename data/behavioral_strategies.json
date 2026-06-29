@@ -3,7 +3,12 @@
     "id": "pomodoro",
     "title": "Pomodoro Technique",
     "description": "Work in 25-minute focused bursts, then take a 5-minute break. After 4 cycles, take a longer 15-30 minute break.",
-    "tags": ["focus", "time_management", "procrastination", "study"],
+    "tags": [
+      "focus",
+      "time_management",
+      "procrastination",
+      "study"
+    ],
     "effectiveness": 0.85,
     "query_prototypes": [
       "how to focus without distraction",
@@ -18,8 +23,13 @@
     "id": "eat_the_frog",
     "title": "Eat the Frog",
     "description": "Tackle your hardest, most important task first thing in the morning. Everything after feels easier.",
-    "tags": ["priority", "procrastination", "morning_routine", "willpower"],
-    "effectiveness": 0.80,
+    "tags": [
+      "priority",
+      "procrastination",
+      "morning_routine",
+      "willpower"
+    ],
+    "effectiveness": 0.8,
     "query_prototypes": [
       "how to stop delaying important tasks",
       "best way to start the day productively",
@@ -33,7 +43,12 @@
     "id": "distraction_free",
     "title": "Eliminate Distractions",
     "description": "Phone in another room. Block social media. Use website blockers. Create a dedicated workspace.",
-    "tags": ["focus", "environment", "procrastination", "deep_work"],
+    "tags": [
+      "focus",
+      "environment",
+      "procrastination",
+      "deep_work"
+    ],
     "effectiveness": 0.75,
     "query_prototypes": [
       "how to focus while working",
@@ -47,7 +62,12 @@
     "id": "time_blocking",
     "title": "Time Blocking",
     "description": "Assign every task to a specific time slot on your calendar. Treat it like a meeting you cannot miss.",
-    "tags": ["scheduling", "planning", "time_management", "commitment"],
+    "tags": [
+      "scheduling",
+      "planning",
+      "time_management",
+      "commitment"
+    ],
     "effectiveness": 0.82,
     "query_prototypes": [
       "how to plan my day effectively",
@@ -59,7 +79,12 @@
     "id": "two_minute_rule",
     "title": "Two-Minute Rule",
     "description": "If a task takes less than 2 minutes, do it immediately. Prevents small tasks from piling up.",
-    "tags": ["productivity", "quick_wins", "momentum", "habit"],
+    "tags": [
+      "productivity",
+      "quick_wins",
+      "momentum",
+      "habit"
+    ],
     "effectiveness": 0.78,
     "query_prototypes": [
       "how to handle small tasks efficiently",
@@ -71,7 +96,12 @@
     "id": "accountability_partner",
     "title": "Accountability Partner",
     "description": "Tell someone your plan and deadline. The social commitment makes you more likely to follow through.",
-    "tags": ["social", "commitment", "procrastination", "motivation"],
+    "tags": [
+      "social",
+      "commitment",
+      "procrastination",
+      "motivation"
+    ],
     "effectiveness": 0.72,
     "query_prototypes": [
       "how to stay motivated to complete tasks",
@@ -84,8 +114,13 @@
     "id": "active_recall",
     "title": "Active Recall",
     "description": "Don't re-read. Close the book and write down everything you remember from memory. Test yourself actively.",
-    "tags": ["learning", "memory", "study", "retention"],
-    "effectiveness": 0.90,
+    "tags": [
+      "learning",
+      "memory",
+      "study",
+      "retention"
+    ],
+    "effectiveness": 0.9,
     "query_prototypes": [
       "how to remember what I study",
       "best way to learn effectively",
@@ -96,7 +131,12 @@
     "id": "spaced_repetition",
     "title": "Spaced Repetition",
     "description": "Review material at increasing intervals (1 day, 3 days, 7 days, 14 days). Use Anki or similar tools.",
-    "tags": ["learning", "memory", "long_term", "study"],
+    "tags": [
+      "learning",
+      "memory",
+      "long_term",
+      "study"
+    ],
     "effectiveness": 0.88,
     "query_prototypes": [
       "how to remember things long term",
@@ -108,7 +148,12 @@
     "id": "rubber_duck",
     "title": "Rubber Duck Debugging",
     "description": "Explain your code line by line to an inanimate object. The act of verbalizing often reveals the bug.",
-    "tags": ["debugging", "verbalization", "insight", "cognitive"],
+    "tags": [
+      "debugging",
+      "verbalization",
+      "insight",
+      "cognitive"
+    ],
     "effectiveness": 0.78,
     "query_prototypes": [
       "how to find bugs in my code",
@@ -120,12 +165,68 @@
     "id": "first_principles",
     "title": "First Principles Thinking",
     "description": "Break the problem down to fundamental truths. Rebuild from there instead of reasoning by analogy.",
-    "tags": ["problem_solving", "creativity", "innovation", "deep_thinking"],
+    "tags": [
+      "problem_solving",
+      "creativity",
+      "innovation",
+      "deep_thinking"
+    ],
     "effectiveness": 0.85,
     "query_prototypes": [
       "how to think creatively",
       "best way to solve hard problems",
       "how to approach complex challenges"
     ]
+  },
+  {
+    "id": "strategy-debug-1",
+    "title": "Rubber Duck Debugging",
+    "description": "Explain your code out loud to an inanimate object. The act of verbalizing forces you to understand your assumptions and often reveals the bug.",
+    "query_prototypes": [
+      "how to debug my code",
+      "how to find bugs in my program",
+      "why is my function not working",
+      "debugging tips for beginners"
+    ],
+    "tags": [
+      "debug",
+      "learning",
+      "problem_solving"
+    ],
+    "effectiveness": 0.85
+  },
+  {
+    "id": "strategy-data-1",
+    "title": "Normalize Before Query",
+    "description": "Always clean and normalize your data before any query or analysis. Remove duplicates, fix missing values, standardize formats.",
+    "query_prototypes": [
+      "how to clean my data",
+      "how to find duplicate records",
+      "best practice for database queries",
+      "how to validate email addresses"
+    ],
+    "tags": [
+      "data",
+      "validation",
+      "cleaning"
+    ],
+    "effectiveness": 0.75
+  },
+  {
+    "id": "strategy-plan-1",
+    "title": "Weekly Review Habit",
+    "description": "Every Friday, review what you accomplished, what blocked you, and what matters next week. 15 minutes prevents weeks of drift.",
+    "query_prototypes": [
+      "how to stay on track with goals",
+      "how to plan my week effectively",
+      "how to avoid losing focus",
+      "best way to review progress"
+    ],
+    "tags": [
+      "planning",
+      "focus",
+      "goals"
+    ],
+    "effectiveness": 0.8
   }
 ]
