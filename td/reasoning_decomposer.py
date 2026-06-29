@@ -88,6 +88,10 @@ class ReasoningDecomposer:
         self.dim = dim
         self.max_depth = max_depth
         self.prototypes = PrototypeBank(self.vocab, dim)
+
+        # Pre-initialize advice solver (loads JSON seed once, not per-call)
+        seed_path = str(Path(__file__).parent.parent / "data" / "behavioral_strategies.json")
+        self._advice_solver = None  # Lazy init on first use
         self.parser = NLParser(self.vocab)
 
         self.stats = {
@@ -115,10 +119,12 @@ class ReasoningDecomposer:
         # Route based on problem type
         if ptype == "advice":
             trace.append("Mode: ADVICE — retrieving from MHN")
-            seed_path = str(Path(__file__).parent.parent / "data" / "behavioral_strategies.json")
-            advice_solver = AdviceSolver(self.mhn, self.vocab, self.parser,
-                                         seed_data_path=seed_path)
-            advice_result = advice_solver.solve(entities)
+            # Lazy-init advice solver (only once, not per-call)
+            if self._advice_solver is None:
+                seed_path = str(Path(__file__).parent.parent / "data" / "behavioral_strategies.json")
+                self._advice_solver = AdviceSolver(self.mhn, self.vocab, self.parser,
+                                                   seed_data_path=seed_path)
+            advice_result = self._advice_solver.solve(entities)
             trace.append(f"  Source: {advice_result['source']}, strategies: {len(advice_result['strategies'])}")
             latency = (time.perf_counter() - t0) * 1000
             # Format for display

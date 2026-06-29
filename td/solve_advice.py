@@ -178,7 +178,7 @@ class AdviceSolver:
         return base
 
     def _validate_relevance(self, strategies: list[dict], entities: dict) -> list[dict]:
-        """Check strategy tags overlap with user goals."""
+        """Check strategy tags overlap with user goals. Strict filtering."""
         goals = entities.get("goals", [])
         if not goals:
             return strategies[:5]
@@ -187,24 +187,26 @@ class AdviceSolver:
         goal_concepts = set()
         for g in goals:
             clean = g.replace("avoid_", "").replace("?", "").strip()
-            if clean and len(clean) > 2:
+            if clean and len(clean) > 2 and clean not in ("without",):
                 goal_concepts.add(clean)
 
         if not goal_concepts:
             return strategies[:5]
 
-        scored = []
+        # Only return strategies that actually overlap with goals
+        relevant = []
         for s in strategies:
             tag_set = set(s.get("tags", []))
-            overlap = len(tag_set & goal_concepts)
-            score = overlap + s.get("effectiveness", 0.5)
-            scored.append((s, score))
+            overlap = tag_set & goal_concepts
+            if overlap:
+                s["relevance_score"] = len(overlap) + s.get("effectiveness", 0.5)
+                relevant.append(s)
 
-        scored.sort(key=lambda x: x[1], reverse=True)
+        # Sort by relevance score
+        relevant.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
 
-        # Return top strategies (those with overlap, or top 3 if none overlap)
-        relevant = [s for s, sc in scored if sc > 0.5]
-        return relevant[:5] if relevant else [s for s, _ in scored[:3]]
+        # If we have relevant strategies, return them. Otherwise return top 3 anyway.
+        return relevant[:5] if relevant else strategies[:3]
 
     def _calculate_confidence(self, strategies: list[dict]) -> float:
         if not strategies:
