@@ -30,7 +30,12 @@ from .memory.mhn import ModernHopfieldNetwork, MHNConfig
 from .memory.attractor_store import AttractorStore
 from .routing.hierarchical_router import HierarchicalRouter, RoutingResult
 from .routing.router_train import train_router
-from .reasoning.z3_bridge import Z3Bridge, Z3Result
+try:
+    from .reasoning.z3_bridge import Z3Bridge, Z3Result
+except ImportError:
+    Z3Bridge = None  # type: ignore
+    class Z3Result:  # minimal stub
+        pass
 from .reasoning.confidence import ConfidenceScore, compute_confidence
 from .reasoning.constraint_schemas import (
     WEB_FORM_CONSTRAINTS, API_SEQUENTIAL_CONSTRAINTS,
