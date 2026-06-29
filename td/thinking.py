@@ -1,21 +1,13 @@
 """Generic Thinking Loop -- Universal constraint primitives, no hardcoded domains.
 
 Based on:
-    - Betteti, Bullo, Baggio, Zampieri (2025) -- IDP Iterative Refinement
-      Science Advances. DOI: 10.1126/sciadv.adu6991
-    - Kanerva (2009) -- HDC Algebraic Decomposition
-      Cognitive Computation 1(2), 139-159. DOI: 10.1007/s12559-009-9009-8
-    - Ramsauer et al. (2020) -- Automatic Attractor Storage
-      ICLR 2021. arXiv:2008.02217
-    - Kleyko et al. (2022) -- HDC/VSA Survey, ACM Computing Surveys 55(6), Article 130.
-    - Kleyko et al. (2025) -- Principled neuromorphic reservoir computing
-      Nature Communications 16(1). DOI: 10.1038/s41467-025-55832-y
+    - Betteti et al. (2025) -- IDP Iterative Refinement, Science Advances
+    - Kanerva (2009) -- HDC Algebraic Decomposition, Cognitive Computation
+    - Ramsauer et al. (2020) -- Automatic Attractor Storage, ICLR 2021
+    - Kleyko et al. (2022) -- HDC/VSA Survey, ACM Computing Surveys
+    - Kleyko et al. (2025) -- Principled neuromorphic reservoir computing, Nature Communications
 
-Design principle: No domain-specific code. No `if "schedule" in text`.
-Instead, 18 UNIVERSAL mathematical primitives discovered via:
-    1. MHN template retrieval (Ramsauer 2020)
-    2. Entity relation inference (Kanerva 2009)
-    3. Innate relation prototypes (Kleyko 2025)
+18 innate mathematical primitives, learned composition via MHN retrieval.
 """
 
 from __future__ import annotations
@@ -85,18 +77,10 @@ class ThinkingResult:
         return "\n".join(lines)
 
 
-# =========================================================================
-# Convergence Detection
-# =========================================================================
-
 def has_converged(current: np.ndarray, previous: np.ndarray, threshold: float = 0.98) -> bool:
     sim = similarity(current, previous)
     return sim > threshold
 
-
-# =========================================================================
-# Mechanism 1: IDP Iterative Refinement (Betteti et al. 2025)
-# =========================================================================
 
 def idp_refine(
     query_hdc: np.ndarray,
@@ -110,52 +94,36 @@ def idp_refine(
 
     for i in range(max_iterations):
         results = mhn.retrieve(current_state, top_k=1)
-
         if not results:
             thoughts.append(Thought(
-                iteration=i + 1,
-                state_hdc=current_state.copy(),
-                retrieved_hdc=None,
-                retrieved_similarity=0.0,
-                retrieved_metadata={},
-                converged=True,
+                iteration=i + 1, state_hdc=current_state.copy(),
+                retrieved_hdc=None, retrieved_similarity=0.0,
+                retrieved_metadata={}, converged=True,
                 description="No matching patterns -- converged at empty memory",
             ))
             break
 
         retrieved_vec, retrieved_sim, retrieved_meta = results[0]
-
-        new_state = bundle(
-            current_state * (1 - blend_factor) +
-            retrieved_vec * blend_factor
-        )
+        new_state = bundle(current_state * (1 - blend_factor) + retrieved_vec * blend_factor)
         new_state = np.sign(new_state).astype(np.int8)
         new_state[new_state == 0] = 1
-
         converged = has_converged(new_state, current_state, convergence_threshold)
 
         meta_desc = retrieved_meta.get("title", retrieved_meta.get("domain", ""))
         desc = f"Retrieved: {meta_desc} (sim={retrieved_sim:.3f})" if meta_desc else f"Retrieved pattern (sim={retrieved_sim:.3f})"
-
         thoughts.append(Thought(
-            iteration=i + 1,
-            state_hdc=current_state.copy(),
-            retrieved_hdc=retrieved_vec.copy(),
-            retrieved_similarity=retrieved_sim,
-            retrieved_metadata=retrieved_meta,
-            converged=converged,
-            description=desc,
+            iteration=i + 1, state_hdc=current_state.copy(),
+            retrieved_hdc=retrieved_vec.copy(), retrieved_similarity=retrieved_sim,
+            retrieved_metadata=retrieved_meta, converged=converged, description=desc,
         ))
-
         current_state = new_state
         if converged:
             break
-
     return current_state, thoughts
 
 
 # =========================================================================
-# Mechanism 2: HDC Algebraic Decomposition (Kanerva 2009)
+# HDC Decomposition (Kanerva 2009)
 # =========================================================================
 
 SUB_PROBLEM_DESCRIPTIONS = {
@@ -166,11 +134,7 @@ SUB_PROBLEM_DESCRIPTIONS = {
 }
 
 
-def hdc_decompose(
-    state_hdc: np.ndarray,
-    prototype_vectors: dict[str, np.ndarray],
-    mhn: ModernHopfieldNetwork,
-) -> list[dict]:
+def hdc_decompose(state_hdc, prototype_vectors, mhn):
     sub_problems = []
     for concept_name, proto_hdc in prototype_vectors.items():
         component_hdc = bind(state_hdc, proto_hdc)
@@ -178,24 +142,19 @@ def hdc_decompose(
         if results:
             _, sim, meta = results[0]
             sub_problems.append({
-                "concept": concept_name,
-                "hdc": component_hdc,
-                "retrieved_sim": sim,
-                "retrieved_meta": meta,
+                "concept": concept_name, "hdc": component_hdc,
+                "retrieved_sim": sim, "retrieved_meta": meta,
                 "solution": meta.get("solution", meta),
             })
         else:
             sub_problems.append({
-                "concept": concept_name,
-                "hdc": component_hdc,
-                "retrieved_sim": 0.0,
-                "retrieved_meta": {},
-                "solution": None,
+                "concept": concept_name, "hdc": component_hdc,
+                "retrieved_sim": 0.0, "retrieved_meta": {}, "solution": None,
             })
     return sub_problems
 
 
-def hdc_compose(sub_solutions: list[np.ndarray]) -> np.ndarray:
+def hdc_compose(sub_solutions):
     if not sub_solutions:
         return generate_hypervector(10_000)
     if len(sub_solutions) == 1:
@@ -203,83 +162,61 @@ def hdc_compose(sub_solutions: list[np.ndarray]) -> np.ndarray:
     return bundle(*sub_solutions)
 
 
-# =========================================================================
-# Mechanism 4: Automatic Attractor Storage (Ramsauer et al. 2020)
-# =========================================================================
-
-def store_experience(
-    mhn: ModernHopfieldNetwork,
-    problem_hdc: np.ndarray,
-    solution_hdc: np.ndarray,
-    metadata: dict | None = None,
-):
+def store_experience(mhn, problem_hdc, solution_hdc, metadata=None):
     mhn.store(problem_hdc, solution_hdc, metadata or {"source": "auto_learned"})
 
 
 # =========================================================================
-# Generic Z3 Constraint Solver -- 18 Universal Primitives (ACTUALLY IMPLEMENTED)
+# Generic Z3 Solver -- 18 Primitives
 # =========================================================================
 
 class GenericZ3Solver:
-    """Generic constraint solver using 18 universal mathematical primitives.
-
-    NO domain-specific code. No `if "schedule" in text`.
-
-    18 UNIVERSAL primitives:
-        Core (6): all_different, ordered, bounded, excluded, grouped, optimized
-        Arithmetic (5): sum_eq, sum_leq, sum_geq, count, ratio
-        Logical (5): implies, equivalent, at_least, at_most, exactly
-        Temporal (2): no_overlap, precedence
-    """
-
     def __init__(self):
         self.primitive_builders = {
-            # Core (6)
             "all_different": self._build_all_different,
             "ordered": self._build_ordered,
             "bounded": self._build_bounded,
             "excluded": self._build_excluded,
             "grouped": self._build_grouped,
             "optimized": self._build_optimized,
-            # Arithmetic (5)
             "sum_eq": self._build_sum_eq,
             "sum_leq": self._build_sum_leq,
             "sum_geq": self._build_sum_geq,
             "count": self._build_count,
             "ratio": self._build_ratio,
-            # Logical (5)
             "implies": self._build_implies,
             "equivalent": self._build_equivalent,
             "at_least": self._build_at_least,
             "at_most": self._build_at_most,
             "exactly": self._build_exactly,
-            # Temporal (2)
             "no_overlap": self._build_no_overlap,
             "precedence": self._build_precedence,
         }
 
-    def solve(self, graph: GenericEntityGraph, template: dict | None = None) -> dict | None:
+    def solve(self, graph, template=None):
         try:
-            from z3 import (
-                Solver, Optimize, Int, Bool, sat, unsat,
-                And, Or, Not, Implies, Distinct, Sum, If, And as Z3And,
-            )
+            from z3 import Solver, Optimize, Int, Bool, sat, unsat, And, Or, Not, Implies, Distinct, Sum, If
         except ImportError:
             return None
 
         if not graph.entities:
             return None
 
-        # ─── Step 1: Create Z3 variables generically ─────────────
+        # ─── CRITICAL: Only solve if there are actual constraints ──────
+        # If no template and no relations and no explicit constraints,
+        # this is NOT a constraint problem. Skip Z3 entirely.
+        has_template = template is not None and template.get("primitives")
+        has_relations = len(graph.relations) > 0
+        has_constraints = len(graph.constraints) > 0
+
+        if not has_template and not has_relations and not has_constraints:
+            return None  # Not a constraint problem
+
         z3_vars = {}
         for e in graph.entities:
             var_type = self._infer_var_type(e, graph)
-            if var_type == "bool":
-                z3_vars[e["id"]] = Bool(e["id"])
-            else:
-                z3_vars[e["id"]] = Int(e["id"])
+            z3_vars[e["id"]] = Bool(e["id"]) if var_type == "bool" else Int(e["id"])
 
-        # ─── Step 2: Gather primitives to apply ────────────────────
         primitives = []
         if template:
             primitives = self._extract_primitives_from_template(template, graph)
@@ -293,7 +230,10 @@ class GenericZ3Solver:
         if not primitives:
             return None
 
-        # ─── Step 3: Build and solve ───────────────────────────────
+        # Filter out default bounded if it's the ONLY primitive and no real constraints
+        if primitives == [{"type": "bounded", "subjects": list(z3_vars.keys()), "min": 0, "max": 100}]:
+            return None
+
         has_opt = any(p["type"] == "optimized" for p in primitives)
         solver = Optimize() if has_opt else Solver()
 
@@ -303,19 +243,14 @@ class GenericZ3Solver:
                 builder(solver, z3_vars, p, graph)
 
         result = solver.check()
-
         if result == sat:
             model = solver.model()
             return self._format_solution(model, z3_vars, graph, primitives)
         elif result == unsat:
-            return {
-                "type": "unsat",
-                "formatted": "No solution exists -- constraints are contradictory.",
-            }
-        else:
-            return None
+            return {"type": "unsat", "formatted": "No solution exists -- constraints are contradictory."}
+        return None
 
-    # ─── Core Primitives (6) ─────────────────────────────────────
+    # ─── Builders (18 total) ───────────────────────────────────────
 
     def _build_all_different(self, solver, z3_vars, primitive, graph):
         from z3 import Distinct
@@ -345,8 +280,7 @@ class GenericZ3Solver:
         if len(subjects) == 2:
             solver.add(z3_vars[subjects[0]] != z3_vars[subjects[1]])
         elif len(subjects) == 1:
-            exclude_val = primitive.get("exclude_value", 0)
-            solver.add(z3_vars[subjects[0]] != exclude_val)
+            solver.add(z3_vars[subjects[0]] != primitive.get("exclude_value", 0))
 
     def _build_grouped(self, solver, z3_vars, primitive, graph):
         from z3 import Sum, Distinct
@@ -383,37 +317,32 @@ class GenericZ3Solver:
             else:
                 solver.minimize(total)
 
-    # ─── Arithmetic Primitives (5) ───────────────────────────────
-
     def _build_sum_eq(self, solver, z3_vars, primitive, graph):
         from z3 import Sum
         subjects = [z3_vars[sid] for sid in primitive["subjects"] if sid in z3_vars]
-        target = primitive.get("target", 0)
         if subjects:
-            solver.add(Sum(subjects) == target)
+            solver.add(Sum(subjects) == primitive.get("target", 0))
 
     def _build_sum_leq(self, solver, z3_vars, primitive, graph):
         from z3 import Sum
         subjects = [z3_vars[sid] for sid in primitive["subjects"] if sid in z3_vars]
-        limit = primitive.get("limit", 0)
         if subjects:
-            solver.add(Sum(subjects) <= limit)
+            solver.add(Sum(subjects) <= primitive.get("limit", 0))
 
     def _build_sum_geq(self, solver, z3_vars, primitive, graph):
         from z3 import Sum
         subjects = [z3_vars[sid] for sid in primitive["subjects"] if sid in z3_vars]
-        limit = primitive.get("limit", 0)
         if subjects:
-            solver.add(Sum(subjects) >= limit)
+            solver.add(Sum(subjects) >= primitive.get("limit", 0))
 
     def _build_count(self, solver, z3_vars, primitive, graph):
         from z3 import Sum, If
         subjects = [z3_vars[sid] for sid in primitive["subjects"] if sid in z3_vars]
-        condition = primitive.get("condition", "eq")
-        target = primitive.get("target", 0)
         if not subjects:
             return
         count = Sum([If(v, 1, 0) for v in subjects])
+        condition = primitive.get("condition", "eq")
+        target = primitive.get("target", 0)
         if condition == "eq":
             solver.add(count == target)
         elif condition == "geq":
@@ -422,14 +351,10 @@ class GenericZ3Solver:
             solver.add(count <= target)
 
     def _build_ratio(self, solver, z3_vars, primitive, graph):
-        from z3 import Int
         subjects = [sid for sid in primitive["subjects"] if sid in z3_vars]
         ratio = primitive.get("ratio", 1)
         if len(subjects) >= 2:
-            # A / B = ratio  =>  A = ratio * B
             solver.add(z3_vars[subjects[0]] == ratio * z3_vars[subjects[1]])
-
-    # ─── Logical Primitives (5) ──────────────────────────────────
 
     def _build_implies(self, solver, z3_vars, primitive, graph):
         from z3 import Implies
@@ -447,25 +372,20 @@ class GenericZ3Solver:
     def _build_at_least(self, solver, z3_vars, primitive, graph):
         from z3 import Sum, If
         subjects = [z3_vars[sid] for sid in primitive["subjects"] if sid in z3_vars]
-        n = primitive.get("n", 1)
         if subjects:
-            solver.add(Sum([If(v, 1, 0) for v in subjects]) >= n)
+            solver.add(Sum([If(v, 1, 0) for v in subjects]) >= primitive.get("n", 1))
 
     def _build_at_most(self, solver, z3_vars, primitive, graph):
         from z3 import Sum, If
         subjects = [z3_vars[sid] for sid in primitive["subjects"] if sid in z3_vars]
-        n = primitive.get("n", 1)
         if subjects:
-            solver.add(Sum([If(v, 1, 0) for v in subjects]) <= n)
+            solver.add(Sum([If(v, 1, 0) for v in subjects]) <= primitive.get("n", 1))
 
     def _build_exactly(self, solver, z3_vars, primitive, graph):
         from z3 import Sum, If
         subjects = [z3_vars[sid] for sid in primitive["subjects"] if sid in z3_vars]
-        n = primitive.get("n", 1)
         if subjects:
-            solver.add(Sum([If(v, 1, 0) for v in subjects]) == n)
-
-    # ─── Temporal Primitives (2) ─────────────────────────────────
+            solver.add(Sum([If(v, 1, 0) for v in subjects]) == primitive.get("n", 1))
 
     def _build_no_overlap(self, solver, z3_vars, primitive, graph):
         from z3 import Or
@@ -484,52 +404,27 @@ class GenericZ3Solver:
         for i in range(len(subjects) - 1):
             solver.add(z3_vars[subjects[i]] + min_gap <= z3_vars[subjects[i + 1]])
 
-    # ─── Inference Methods ───────────────────────────────────────
+    # ─── Inference ─────────────────────────────────────────────────
 
-    def _infer_var_type(self, entity: dict, graph: GenericEntityGraph) -> str:
+    def _infer_var_type(self, entity, graph):
         for c in graph.constraints:
             if entity["id"] in c["subjects"]:
                 if c["params"].get("type") == "bool":
                     return "bool"
         return "int"
 
-    def _extract_primitives_from_template(self, template: dict, graph: GenericEntityGraph) -> list[dict]:
+    def _extract_primitives_from_template(self, template, graph):
         primitives = []
         for p in template.get("primitives", []):
-            mapped_subjects = self._map_subjects(p.get("subjects", []), p.get("selector"), graph)
-            if mapped_subjects:
-                primitives.append({
-                    "type": p["type"],
-                    "subjects": mapped_subjects,
-                    **{k: v for k, v in p.items() if k not in ("type", "subjects")},
-                })
+            mapped = self._map_subjects(p.get("subjects", []), p.get("selector"), graph)
+            if mapped:
+                primitives.append({"type": p["type"], "subjects": mapped,
+                    **{k: v for k, v in p.items() if k not in ("type", "subjects")}})
         return primitives
 
-    def _infer_primitives_from_relations(self, graph: GenericEntityGraph) -> list[dict]:
-        """Infer primitives from entity relations.
-
-        25+ relation type mappings (innate + learned from MHN):
-            different/distinct -> all_different
-            before -> ordered (ascending)
-            after -> ordered (descending)
-            excludes -> excluded
-            limited -> bounded
-            grouped/partitioned -> grouped
-            optimize/maximize/minimize -> optimized
-            sum_to/total -> sum_eq
-            at_least -> at_least
-            at_most -> at_most
-            exactly -> exactly
-            implies/if_then -> implies
-            equivalent/same -> equivalent
-            overlap/conflict -> no_overlap
-            precedence/chain -> precedence
-            ratio/proportional -> ratio
-            count -> count
-        """
+    def _infer_primitives_from_relations(self, graph):
         primitives = []
         entity_ids = [e["id"] for e in graph.entities]
-
         rel_groups = {}
         for rel in graph.relations:
             rtype = rel.get("rel_type", "unknown")
@@ -537,7 +432,6 @@ class GenericZ3Solver:
                 rel_groups[rtype] = []
             rel_groups[rtype].append((rel["src"], rel["tgt"]))
 
-        # Core mappings
         if "different" in rel_groups or "distinct" in rel_groups:
             involved = set()
             for rtype in ["different", "distinct"]:
@@ -574,7 +468,6 @@ class GenericZ3Solver:
             direction = "maximize" if ("maximize" in rel_groups or "optimize" in rel_groups) else "minimize"
             primitives.append({"type": "optimized", "subjects": entity_ids, "direction": direction, "objective": "maximize_min"})
 
-        # Arithmetic mappings
         if "sum_to" in rel_groups or "total" in rel_groups:
             total = self._infer_total(graph)
             if total is not None:
@@ -592,7 +485,6 @@ class GenericZ3Solver:
             n = self._infer_count(rel_groups.get("exactly", []))
             primitives.append({"type": "exactly", "subjects": entity_ids, "n": n})
 
-        # Logical mappings
         if "implies" in rel_groups or "if_then" in rel_groups:
             involved = set()
             for rtype in ["implies", "if_then"]:
@@ -609,7 +501,6 @@ class GenericZ3Solver:
             if involved:
                 primitives.append({"type": "equivalent", "subjects": list(involved)})
 
-        # Temporal mappings
         if "overlap" in rel_groups or "conflict" in rel_groups:
             involved = set()
             for rtype in ["overlap", "conflict"]:
@@ -623,32 +514,23 @@ class GenericZ3Solver:
             if ordered:
                 primitives.append({"type": "precedence", "subjects": ordered, "min_gap": 1})
 
-        # Ratio mapping
         if "ratio" in rel_groups or "proportional" in rel_groups:
             for src, tgt in rel_groups.get("ratio", []) + rel_groups.get("proportional", []):
                 primitives.append({"type": "ratio", "subjects": [src, tgt], "ratio": 2})
 
-        # Count mapping
         if "count" in rel_groups:
             n = self._infer_count(rel_groups.get("count", []))
             primitives.append({"type": "count", "subjects": entity_ids, "condition": "eq", "target": n})
 
-        # Default
-        if not primitives and entity_ids:
-            primitives.append({"type": "bounded", "subjects": entity_ids, "min": 0, "max": 100})
-
         return primitives
 
-    def _constraint_to_primitive(self, constraint: dict, graph: GenericEntityGraph) -> dict | None:
+    def _constraint_to_primitive(self, constraint, graph):
         params = constraint.get("params", {})
         ptype = params.get("primitive_type", "bounded")
-        return {
-            "type": ptype,
-            "subjects": constraint["subjects"],
-            **{k: v for k, v in params.items() if k != "primitive_type"},
-        }
+        return {"type": ptype, "subjects": constraint["subjects"],
+                **{k: v for k, v in params.items() if k != "primitive_type"}}
 
-    def _map_subjects(self, template_subjects: list, selector: np.ndarray | None, graph: GenericEntityGraph) -> list[str]:
+    def _map_subjects(self, template_subjects, selector, graph):
         if not selector:
             return [e["id"] for e in graph.entities[:len(template_subjects)]]
         matches = []
@@ -658,7 +540,7 @@ class GenericZ3Solver:
         matches.sort(key=lambda x: x[1], reverse=True)
         return [eid for eid, sim in matches if sim > 0.30]
 
-    def _build_order_chain(self, relations: list[tuple]) -> list[str]:
+    def _build_order_chain(self, relations):
         from collections import defaultdict, deque
         graph = defaultdict(list)
         in_degree = defaultdict(int)
@@ -681,7 +563,7 @@ class GenericZ3Solver:
                     queue.append(neighbor)
         return ordered if len(ordered) == len(nodes) else []
 
-    def _build_groups(self, relations: list[tuple]) -> list[list[str]]:
+    def _build_groups(self, relations):
         parent = {}
         def find(x):
             if x not in parent:
@@ -703,7 +585,7 @@ class GenericZ3Solver:
             groups[root].append(x)
         return list(groups.values())
 
-    def _infer_bounds(self, graph: GenericEntityGraph) -> dict | None:
+    def _infer_bounds(self, graph):
         max_val = 100
         for e in graph.entities:
             nums = [int(w) for w in e["text"].split() if w.isdigit()]
@@ -711,21 +593,21 @@ class GenericZ3Solver:
                 max_val = max(max_val, max(nums) * 2)
         return {"min": 0, "max": max_val}
 
-    def _infer_total(self, graph: GenericEntityGraph) -> int | None:
+    def _infer_total(self, graph):
         for e in graph.entities:
             nums = [int(w) for w in e["text"].split() if w.isdigit()]
             if nums:
                 return max(nums)
         return None
 
-    def _infer_count(self, relations: list[tuple]) -> int:
+    def _infer_count(self, relations):
         for src, tgt in relations:
             nums = [int(w) for w in src.split() if w.isdigit()] + [int(w) for w in tgt.split() if w.isdigit()]
             if nums:
                 return max(nums)
         return 1
 
-    def _format_solution(self, model, z3_vars, graph, primitives) -> dict:
+    def _format_solution(self, model, z3_vars, graph, primitives):
         lines = []
         for e in graph.entities:
             val = model.eval(z3_vars[e["id"]], model_completion=True)
@@ -733,58 +615,40 @@ class GenericZ3Solver:
         ptypes = [p["type"] for p in primitives]
         method = " + ".join(ptypes) if ptypes else "generic"
         return {
-            "type": "generic_csp",
-            "method": f"z3_{method}",
-            "formatted": "\n".join(lines),
-            "primitives_applied": ptypes,
+            "type": "generic_csp", "method": f"z3_{method}",
+            "formatted": "\n".join(lines), "primitives_applied": ptypes,
         }
 
 
 # =========================================================================
-# The Full Generic Thinking Loop
+# Generic Thinking Loop
 # =========================================================================
 
 class GenericThinkingDust:
-    """Generic reasoning engine -- 18 innate primitives, learned composition."""
-
-    def __init__(
-        self,
-        vocab=None,
-        mhn: ModernHopfieldNetwork | None = None,
-        dim: int = 10_000,
-        max_idp_iterations: int = 5,
-        idp_blend_factor: float = 0.3,
-        convergence_threshold: float = 0.98,
-        pure_mode: bool = False,
-    ):
+    def __init__(self, vocab=None, mhn=None, dim=10_000, max_idp_iterations=5,
+                 idp_blend_factor=0.3, convergence_threshold=0.98, pure_mode=False):
         self.dim = dim
-        self.mhn = mhn or ModernHopfieldNetwork(MHNConfig(
-            dim=dim, min_similarity=0.01, idp_enabled=False,
-        ))
+        self.mhn = mhn or ModernHopfieldNetwork(MHNConfig(dim=dim, min_similarity=0.01, idp_enabled=False))
         self.parser = GenericNLParser(vocab, self.mhn, dim=dim)
         self.z3_solver = GenericZ3Solver()
-
         self.max_idp_iterations = max_idp_iterations
         self.idp_blend_factor = idp_blend_factor
         self.convergence_threshold = convergence_threshold
         self.pure_mode = pure_mode
-
         self.sub_problem_prototypes = self._build_semantic_prototypes()
-
         self.total_thinks = 0
         self.total_learned = 0
         self.avg_iterations = 0.0
         self.seed_count = 0
-
         if not pure_mode:
             self._load_minimal_seed()
 
-    def think(self, problem_text: str, context: dict | None = None) -> ThinkingResult:
+    def think(self, problem_text, context=None):
         t0 = time.perf_counter()
         trace = []
         self.total_thinks += 1
 
-        # Step 1: Generic Parse
+        # Step 1: Parse
         struct = self.parser.extract_structure(problem_text)
         problem_hdc = struct["hdc"]
         graph = struct["graph"]
@@ -805,7 +669,7 @@ class GenericThinkingDust:
         self.avg_iterations = (self.avg_iterations * (self.total_thinks - 1) + avg_iters) / self.total_thinks
 
         # Step 3: HDC Decomposition
-        trace.append("HDC algebraic decomposition (universal roles)...")
+        trace.append("HDC algebraic decomposition...")
         sub_problems = hdc_decompose(evolved_state, self.sub_problem_prototypes, self.mhn)
         for sp in sub_problems:
             trace.append(f"  [{sp['concept']}] sim={sp['retrieved_sim']:.3f}")
@@ -820,41 +684,32 @@ class GenericThinkingDust:
                     trace.append(f"  Retrieved template: {template.get('primitives', [])}")
                 break
 
-        # Step 5: Generic Z3 Solving
-        trace.append("Generic Z3 solving (18 primitives)...")
+        # Step 5: Generic Z3 Solving (ONLY if constraint problem detected)
+        trace.append("Generic Z3 solving...")
         solution = self.z3_solver.solve(graph, template)
         if solution:
             if solution.get("type") == "unsat":
-                trace.append("  Z3: UNSAT -- constraints contradictory")
+                trace.append("  Z3: UNSAT")
             else:
                 trace.append(f"  Z3: SAT -- primitives: {solution.get('primitives_applied', [])}")
         else:
-            trace.append("  Z3: No solution (no matching primitives)")
+            trace.append("  Z3: Not a constraint problem (no relations/template)")
 
-        # Step 5b: If only default bounded, try MHN fallback
-        if solution and solution.get("type") == "generic_csp":
-            prims = solution.get("primitives_applied", [])
-            if prims == ["bounded"]:
-                fallback = self._fallback_mhn_solve(thoughts, graph)
-                if fallback and fallback.get("similarity", 0) > 0.85:
-                    solution = fallback
-                    trace.append("  MHN override: better retrieval than default Z3")
-
-        # Step 6: Fallback if Z3 fails
-        if not solution or solution.get("type") == "unsat":
+        # Step 6: MHN Retrieval (for factual/advice questions)
+        if not solution:
             fallback = self._fallback_mhn_solve(thoughts, graph)
             if fallback:
                 solution = fallback
-                trace.append("  Fallback: MHN retrieved similar solution")
+                trace.append(f"  MHN: Retrieved similar answer (sim={fallback['similarity']:.2f})")
+            else:
+                trace.append("  MHN: No matching patterns")
 
         # Step 7: Store
         sub_solution_vecs = [sp["hdc"] for sp in sub_problems if sp.get("hdc") is not None]
         composed_hdc = hdc_compose(sub_solution_vecs) if sub_solution_vecs else evolved_state
         metadata = {
-            "source": "auto_learned",
-            "problem": problem_text[:200],
-            "entity_count": len(graph.entities),
-            "relation_count": len(graph.relations),
+            "source": "auto_learned", "problem": problem_text[:200],
+            "entity_count": len(graph.entities), "relation_count": len(graph.relations),
             "constraint_count": len(graph.constraints),
             "primitives_applied": solution.get("primitives_applied", []) if solution else [],
             "timestamp": time.time(),
@@ -875,8 +730,7 @@ class GenericThinkingDust:
             latency_ms=latency, trace=trace,
         )
 
-    def teach(self, problem_text: str, solution_text: str,
-              constraint_template: dict | None = None, metadata: dict | None = None):
+    def teach(self, problem_text, solution_text, constraint_template=None, metadata=None):
         problem_hdc = self.parser.parse(problem_text)
         solution_hdc = self.parser.parse(solution_text)
         title = (metadata or {}).get("title", " ".join(solution_text.split()[:6]))
@@ -894,19 +748,18 @@ class GenericThinkingDust:
         self.total_learned += 1
         return {
             "status": "learned", "problem": problem_text[:80],
-            "solution": solution_text[:80],
-            "memory_size": len(self.mhn.patterns),
+            "solution": solution_text[:80], "memory_size": len(self.mhn.patterns),
             "message": "Got it. I'll remember this for next time.",
         }
 
-    def needs_teaching(self, result: ThinkingResult) -> bool:
+    def needs_teaching(self, result):
         if self.total_thinks < 3 and len(self.mhn.patterns) < 10:
             return True
         if result.confidence < 0.25:
             return True
         return False
 
-    def _build_semantic_prototypes(self) -> dict[str, np.ndarray]:
+    def _build_semantic_prototypes(self):
         descriptions = {
             "discover_entities": "find all objects and elements that appear in this problem",
             "discover_constraints": "what are the limits and rules that restrict the solution",
@@ -915,7 +768,7 @@ class GenericThinkingDust:
         }
         return {name: self.parser.parse(text) for name, text in descriptions.items()}
 
-    def _fallback_mhn_solve(self, thoughts: list[Thought], graph: GenericEntityGraph) -> dict | None:
+    def _fallback_mhn_solve(self, thoughts, graph):
         best_sim = 0
         best_meta = {}
         for t in thoughts:
@@ -928,7 +781,7 @@ class GenericThinkingDust:
                 return {"type": "learned", "formatted": text, "similarity": best_sim}
         return None
 
-    def _compute_confidence(self, solution: dict | None, thoughts: list[Thought], sub_problems: list[dict]) -> float:
+    def _compute_confidence(self, solution, thoughts, sub_problems):
         if solution:
             sol_type = solution.get("type", "unknown")
             if sol_type == "generic_csp":
@@ -940,11 +793,14 @@ class GenericThinkingDust:
                 return 0.95
             elif sol_type == "learned":
                 sim = solution.get("similarity", 0.5)
-                if sim < 0.40:       return 0.10
-                elif sim < 0.60:    return 0.25
-                elif sim < 0.75:    return 0.40
-                elif sim < 0.90:    return 0.55
-                else:                return min(sim * 0.85, 0.85)
+                # Better scaling for learned answers
+                if sim >= 0.90:     return 0.85
+                elif sim >= 0.80: return 0.75
+                elif sim >= 0.70: return 0.65
+                elif sim >= 0.60: return 0.55
+                elif sim >= 0.50: return 0.45
+                elif sim >= 0.40: return 0.35
+                else:               return 0.25
         best_sim = max((t.retrieved_similarity for t in thoughts if t.retrieved_hdc is not None), default=0)
         if best_sim > 0.5:
             return min(best_sim * 0.7, 0.70)
@@ -966,7 +822,7 @@ class GenericThinkingDust:
         except ImportError:
             pass
 
-    def stats(self) -> dict:
+    def stats(self):
         total = len(self.mhn.patterns)
         seed_pct = (self.seed_count / total * 100) if total > 0 else 0
         return {
