@@ -171,62 +171,125 @@ PROTOTYPE_CATEGORIES = [
 # Keywords that trigger each prototype category
 PROTOTYPE_KEYWORDS: dict[str, list[str]] = {
     "constraint_satisfaction": ["satisfy", "meet", "fulfill", "subject to", "such that", "constrained"],
-    "constraint_scheduling": ["schedule", "calendar", "time slot", "availability", "book"],
+    "constraint_scheduling": ["schedule", "calendar", "time slot", "availability", "book", "reserve"],
     "constraint_assignment": ["assign", "allocate", "match", "pair"],
+
     "optimization": ["optimize", "minimize", "maximize", "best", "optimal", "efficient"],
     "optimization_linear": ["cheapest", "fastest", "shortest", "minimum cost", "maximum profit"],
     "optimization_multi_objective": ["balance", "trade-off", "tradeoff", "compromise", "pareto"],
+
     "scheduling": ["schedule", "timetable", "agenda", "plan time", "arrange"],
     "scheduling_meetings": ["meeting", "appointment", "booking", "reservation", "calendar"],
     "scheduling_tasks": ["task", "deadline", "sprint", "milestone", "deliverable"],
+
+    # NEW: 50 scheduling/budget/proof prototypes
+    "scheduling_calendar": ["calendar", "week", "monday", "tuesday", "wednesday", "thursday", "friday", "morning", "afternoon"],
+    "scheduling_availability": ["available", "availability", "free", "busy", "time slot", "open"],
+    "scheduling_conflict_resolution": ["conflict", "overlap", "double book", "clash", "reschedule"],
+    "scheduling_priority": ["prioritize", "priority", "urgent", "important", "critical"],
+    "scheduling_recurring": ["recurring", "weekly", "daily", "monthly", "repeat", "recurring meeting"],
+    "scheduling_shift": ["shift", "roster", "rotation", "work schedule", "shift assignment"],
+    "scheduling_exam": ["exam", "test", "proctor", "exam room", "exam scheduling"],
+    "scheduling_travel": ["itinerary", "flight", "hotel", "travel plan", "trip schedule"],
+
     "allocation": ["allocate", "distribute", "assign", "budget", "divide"],
     "allocation_resources": ["resource", "team", "staff", "equipment", "workload"],
     "allocation_budget": ["budget", "cost", "spend", "expense", "financial"],
+
+    # NEW: Budget prototypes
+    "budget_planning": ["budget", "plan", "allocate", "financial", "forecast"],
+    "budget_cut": ["reduce", "cut", "trim", "save", "minimize cost"],
+    "budget_balancing": ["balance", "reconcile", "income", "expense", "break even"],
+    "budget_investment": ["invest", "return", "portfolio", "risk", "allocation"],
+    "budget_grant": ["grant", "funding", "award", "proposal", "scholarship"],
+
+    # NEW: Proof/Logic prototypes
+    "proof_logical": ["implies", "therefore", "if then", "modus", "syllogism", "deduce"],
+    "proof_correctness": ["correct", "sound", "secure", "no bugs", "verified"],
+    "proof_by_contradiction": ["contradiction", "assume", "absurd", "reductio", "opposite"],
+    "proof_induction": ["induction", "base case", "inductive step", "inductive hypothesis"],
+    "proof_contrapositive": ["contrapositive", "converse", "if and only if", "biconditional"],
+    "proof_existence": ["there exists", "existential", "constructive proof", "witness"],
+    "proof_uniqueness": ["unique", "uniqueness", "at most one", "exactly one"],
+    "proof_completeness": ["complete", "incomplete", "decidability", "godel"],
+    "proof_program": ["program correctness", "loop invariant", "precondition", "postcondition", "hoare"],
+    "proof_security": ["secure", "attack", "adversary", "cryptographic", "zero knowledge"],
+
+    # NEW: Math prototypes
+    "math_algebra": ["solve", "equation", "variable", "unknown", "substitute", "factor"],
+    "math_geometry": ["angle", "triangle", "circle", "polygon", "area", "perimeter", "parallel"],
+    "math_calculus": ["derivative", "integral", "limit", "differentiate", "integrate"],
+    "math_probability": ["probability", "random", "expected", "bayesian", "distribution"],
+    "math_statistics": ["mean", "median", "variance", "regression", "correlation", "sample"],
+    "math_number_theory": ["prime", "divisor", "modulo", "congruence", "factor"],
+    "math_optimization": ["objective", "constraint", "feasible", "optimal", "linear program"],
+
+    # NEW: Code prototypes
+    "debugging_logic_error": ["wrong result", "incorrect", "logic error", "off by"],
+    "debugging_runtime_error": ["crash", "exception", "null pointer", "stack trace"],
+    "code_review": ["review", "quality", "maintainability", "code smell", "refactor"],
+    "code_test": ["test", "unit test", "coverage", "mock", "fixture"],
+    "code_complexity": ["time complexity", "space complexity", "big o", "efficient"],
+
+    # NEW: Data prototypes
+    "data_cleaning": ["clean", "missing value", "outlier", "duplicate", "normalize"],
+    "data_aggregation": ["aggregate", "group by", "summarize", "pivot", "rollup"],
+    "data_join": ["join", "merge", "union", "intersection", "lookup"],
+    "data_visualization": ["plot", "chart", "graph", "histogram", "scatter"],
+
+    # Original entries continued
     "transformation": ["convert", "transform", "change", "translate", "map"],
     "transformation_format": ["csv", "json", "yaml", "xml", "format", "export"],
     "transformation_data": ["normalize", "standardize", "clean", "process"],
+
     "validation": ["validate", "check", "verify", "ensure", "confirm"],
     "validation_schema": ["schema", "columns", "fields", "structure", "format check"],
     "validation_logic": ["consistent", "contradiction", "integrity", "correct"],
+
     "comparison": ["compare", "versus", "vs", "difference", "better"],
     "comparison_ranking": ["rank", "sort by quality", "best to worst", "priority"],
     "comparison_equality": ["match", "identical", "same", "duplicate", "equal"],
+
     "sequencing": ["order", "sequence", "arrange", "sort", "prioritize"],
     "sequencing_temporal": ["chronological", "timeline", "date order", "sequence"],
     "sequencing_dependency": ["depend", "before", "after", "prerequisite", "topological"],
+
     "grouping": ["group", "cluster", "categorize", "classify", "segment"],
     "grouping_cluster": ["similar", "cluster", "k-means", "nearest"],
     "grouping_partition": ["split", "partition", "divide into groups", "bin"],
+
     "filtering": ["filter", "select", "find", "where", "query"],
     "filtering_query": ["sql", "select where", "condition", "criteria"],
     "filtering_search": ["search", "find", "locate", "look up"],
+
     "counting": ["count", "how many", "number of", "total"],
     "counting_conditional": ["how many meet", "count where", "count if"],
     "counting_set": ["unique", "distinct", "cardinality", "set size"],
+
     "search": ["find", "search", "locate", "lookup", "get"],
     "search_exact": ["exact match", "find by id", "lookup", "retrieve"],
     "search_approximate": ["fuzzy", "similar", "closest", "nearest", "approximate"],
+
     "sorting": ["sort", "order", "arrange", "organize"],
     "sorting_single_key": ["sort by", "order by", "ascending", "descending"],
     "sorting_multi_key": ["sort by multiple", "primary secondary", "multi-key"],
+
     "parsing": ["parse", "extract", "read", "interpret", "analyze structure"],
     "parsing_structured": ["json", "csv", "xml", "yaml", "parse file"],
     "parsing_natural": ["extract from text", "parse sentence", "ner", "entity"],
+
     "generation": ["generate", "create", "produce", "make", "build"],
     "generation_template": ["template", "fill in", "populate", "from pattern"],
     "generation_creative": ["design", "compose", "invent", "brainstorm"],
-    "proof": ["prove", "show that", "demonstrate", "verify formally"],
-    "proof_logical": ["implies", "therefore", "if then", "modus", "syllogism"],
-    "proof_correctness": ["correct", "sound", "secure", "no bugs", "verified"],
-    "debugging": ["debug", "bug", "error", "wrong", "broken", "fix"],
-    "debugging_logic_error": ["wrong result", "incorrect", "logic error", "off by"],
-    "debugging_runtime_error": ["crash", "exception", "null pointer", "stack trace"],
+
     "explanation": ["explain", "why", "reason", "cause", "because"],
     "explanation_causal": ["why did", "cause of", "reason for", "led to"],
     "explanation_summary": ["summarize", "overview", "recap", "digest"],
+
     "prediction": ["predict", "forecast", "estimate", "project"],
     "prediction_conditional": ["what if", "suppose", "assume", "hypothetical"],
     "prediction_trend": ["trend", "future", "projection", "growth"],
+
     "planning": ["plan", "strategy", "roadmap", "steps", "approach"],
     "planning_sequential": ["step by step", "procedure", "workflow", "process"],
     "planning_conditional": ["if then else", "contingency", "fallback", "backup plan"],
@@ -576,6 +639,26 @@ class Decomposer:
                 "resolve scheduling conflicts between participants",
                 "optimize meeting times for preferences and priorities",
             ],
+            "scheduling_calendar": [
+                "check calendar availability for each participant",
+                "identify overlapping free slots",
+                "select best time considering priorities",
+            ],
+            "scheduling_availability": [
+                "collect availability from all participants",
+                "compute intersection of available times",
+                "rank slots by preference",
+            ],
+            "scheduling_conflict_resolution": [
+                "identify which meetings conflict",
+                "determine priority of conflicting meetings",
+                "reschedule lower priority meeting to next available slot",
+            ],
+            "scheduling_priority": [
+                "list all meetings with their priority levels",
+                "identify which meetings conflict with higher priority ones",
+                "reschedule low priority meetings to make room",
+            ],
             "scheduling": [
                 "identify all tasks and their durations",
                 "determine constraints and dependencies between tasks",
@@ -585,6 +668,21 @@ class Decomposer:
                 "list all tasks with deadlines and priorities",
                 "identify dependencies between tasks",
                 "sequence tasks to meet all deadlines",
+            ],
+            "scheduling_recurring": [
+                "identify the recurrence pattern",
+                "check for conflicts with existing recurring events",
+                "book all future occurrences",
+            ],
+            "scheduling_shift": [
+                "list all staff and their shift preferences",
+                "determine shift coverage requirements",
+                "assign staff to shifts satisfying constraints",
+            ],
+            "scheduling_travel": [
+                "identify flights hotels and activities needed",
+                "optimize schedule to minimize cost and travel time",
+                "book itinerary components in optimal order",
             ],
             "optimization": [
                 "identify decision variables and their domains",
@@ -611,6 +709,106 @@ class Decomposer:
                 "list resources and their capabilities",
                 "list tasks and their requirements",
                 "assign resources to tasks optimally",
+            ],
+            "budget_planning": [
+                "list all expected income sources",
+                "list all expected expense categories",
+                "compute net and allocate surplus",
+            ],
+            "budget_cut": [
+                "identify all expense categories and current spending",
+                "rank categories by importance to operations",
+                "cut lowest priority categories to meet target",
+            ],
+            "budget_balancing": [
+                "list all income sources and amounts",
+                "list all expenses and amounts",
+                "identify shortfall and recommend adjustments",
+            ],
+            "budget_investment": [
+                "identify available capital for investment",
+                "assess risk tolerance and time horizon",
+                "allocate across asset classes to optimize risk return",
+            ],
+            "proof_logical": [
+                "identify premises and the conclusion",
+                "apply inference rules to derive intermediate steps",
+                "connect premises to conclusion via valid inferences",
+            ],
+            "proof_by_contradiction": [
+                "assume the negation of what we want to prove",
+                "derive a contradiction from the assumption",
+                "conclude the original statement must be true",
+            ],
+            "proof_induction": [
+                "verify the base case holds",
+                "assume the statement for n and state inductive hypothesis",
+                "prove the statement holds for n plus one",
+            ],
+            "proof_correctness": [
+                "identify the programs specification and preconditions",
+                "establish loop invariants for all loops",
+                "show each step maintains invariants toward postcondition",
+            ],
+            "proof_security": [
+                "define the security property to prove",
+                "model the adversary capabilities and attack surface",
+                "show no adversarial strategy can violate the property",
+            ],
+            "math_algebra": [
+                "identify the unknowns and given equations",
+                "apply algebraic manipulations to isolate the unknown",
+                "verify the solution satisfies all equations",
+            ],
+            "math_optimization": [
+                "identify the objective function and decision variables",
+                "enumerate the constraints on the variables",
+                "find the variable values that optimize the objective",
+            ],
+            "math_probability": [
+                "identify the sample space and events",
+                "determine probability measure and independence",
+                "compute the desired probability using appropriate rules",
+            ],
+            "math_statistics": [
+                "identify the population and sample characteristics",
+                "compute the relevant descriptive statistics",
+                "draw inference with appropriate confidence level",
+            ],
+            "debugging_logic_error": [
+                "trace through the code execution path",
+                "identify where the output diverges from expected",
+                "determine the root cause of the incorrect logic",
+            ],
+            "debugging_runtime_error": [
+                "read the stack trace to find the crash location",
+                "identify the null or invalid value causing the error",
+                "add a guard or fix the root cause of the invalid value",
+            ],
+            "code_review": [
+                "check code structure and naming conventions",
+                "identify potential bugs and edge cases",
+                "suggest improvements for readability and maintainability",
+            ],
+            "code_test": [
+                "identify the functions and their expected behaviors",
+                "write test cases covering normal edge and error cases",
+                "run tests and verify all pass",
+            ],
+            "data_cleaning": [
+                "scan dataset for missing duplicate and outlier values",
+                "apply appropriate cleaning strategy per column type",
+                "verify cleaned dataset has no remaining issues",
+            ],
+            "data_aggregation": [
+                "identify the grouping key and aggregation metrics",
+                "group records by the key and compute aggregate values",
+                "format and output the summarized results",
+            ],
+            "data_join": [
+                "identify the common key between the two datasets",
+                "merge records on the common key",
+                "handle unmatched records appropriately",
             ],
             "validation_schema": [
                 "parse the input data structure",
@@ -641,16 +839,6 @@ class Decomposer:
                 "identify the goal and starting state",
                 "list all available actions and their preconditions",
                 "find a sequence of actions from start to goal",
-            ],
-            "proof_logical": [
-                "identify premises and the conclusion",
-                "apply inference rules to derive intermediate steps",
-                "connect premises to conclusion via valid inferences",
-            ],
-            "debugging_logic_error": [
-                "trace through the code execution path",
-                "identify where the output diverges from expected",
-                "determine the root cause of the incorrect logic",
             ],
             "filtering_query": [
                 "parse the query conditions",

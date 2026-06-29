@@ -53,26 +53,16 @@ def main():
         mhn_threshold=0.20,
     )
 
-    # Teach it some scheduling patterns
-    print("\nTeaching scheduling patterns...")
-    decomposer.learn(
-        "Schedule a team meeting with 5 people avoiding conflicts",
-        {"action": "find_slots", "approach": "intersection of calendars"},
-        "success",
-        {"domain": "scheduling"},
-    )
-    decomposer.learn(
-        "Find available time slots for all participants next week",
-        {"action": "calendar_intersection", "approach": "compute overlap"},
-        "success",
-        {"domain": "scheduling"},
-    )
-    decomposer.learn(
-        "Resolve scheduling conflicts between participants",
-        {"action": "prioritize", "approach": "rank by priority, reallocate"},
-        "success",
-        {"domain": "scheduling"},
-    )
+    # Teach it all 200 hand-written examples
+    print("\nLoading 200 training examples into MHN...")
+    from td.training_data import EXAMPLES
+    for problem_text, solution, domain, task_type in EXAMPLES:
+        decomposer.learn(
+            problem_text,
+            {"solution": solution, "domain": domain, "task_type": task_type},
+            "success",
+            {"domain": domain, "task_type": task_type},
+        )
     print(f"  Stored {len(decomposer.mhn.patterns)} patterns in MHN")
 
     # Test problems (the main demo)

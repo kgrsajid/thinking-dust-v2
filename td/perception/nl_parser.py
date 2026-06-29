@@ -28,27 +28,52 @@ from .hdc import (
 
 # Keywords that map to roles in encode_record
 ACTION_KEYWORDS = {
+    # Agent actions
     "click", "type", "scroll", "submit", "select", "hover", "drag",
     "navigate", "extract", "fill", "check", "open", "close", "fetch",
     "post", "call", "read", "write", "create", "parse", "validate",
     "convert", "alert", "restart", "monitor", "wait", "refresh",
     "delete", "copy", "move", "export", "import", "search", "filter",
+    # Reasoning actions
+    "schedule", "allocate", "optimize", "minimize", "maximize", "prove",
+    "solve", "rank", "sort", "count", "compare", "transform", "generate",
+    "debug", "explain", "predict", "plan", "balance", "distribute",
+    "arrange", "assign", "book", "reserve",
 }
 
 TARGET_KEYWORDS = {
+    # Agent targets
     "button", "form", "field", "input", "dropdown", "checkbox",
     "link", "table", "modal", "tab", "menu", "page", "url",
     "endpoint", "api", "response", "request", "file", "csv", "json",
     "schema", "column", "service", "process", "cpu", "memory", "disk",
+    # Reasoning targets
+    "meeting", "appointment", "calendar", "deadline", "budget", "cost",
+    "task", "resource", "team", "staff", "department", "constraint",
+    "variable", "objective", "solution", "proof", "theorem", "hypothesis",
+    "bug", "error", "exception", "code", "function", "algorithm",
+    "data", "dataset", "record", "query", "result", "schedule",
+    "plan", "itinerary", "route", "assignment", "allocation",
 }
 
 CONTEXT_KEYWORDS = {
+    # Agent contexts
     "login", "contact", "registration", "checkout", "search",
     "dashboard", "settings", "profile", "admin", "home", "landing",
+    # Reasoning contexts
+    "conflict", "priority", "deadline", "vacation", "availability",
+    "client", "morning", "afternoon", "week", "month", "tuesday",
+    "monday", "wednesday", "thursday", "friday", "weekend",
+    "linear", "quadratic", "exponential", "optimal", "feasible",
+    "consistent", "contradiction", "premise", "conclusion", "inference",
+    "negative", "positive", "integer", "float", "string", "boolean",
+    "ascending", "descending", "alphabetical", "chronological",
 }
 
 # Multi-word concept mappings
+# Multi-word concept mappings
 COMPOUND_CONCEPTS = {
+    # Agent
     "submit button": "submit_button",
     "login form": "login_form",
     "contact form": "contact_form",
@@ -56,6 +81,32 @@ COMPOUND_CONCEPTS = {
     "api key": "api_key",
     "auth token": "auth_token",
     "status code": "status_code",
+    # Scheduling
+    "time slot": "time_slot",
+    "time slots": "time_slot",
+    "meeting room": "meeting_room",
+    "team member": "team_member",
+    "team members": "team_member",
+    "client call": "client_call",
+    "deadline conflict": "deadline_conflict",
+    "scheduling conflict": "scheduling_conflict",
+    "resource allocation": "resource_allocation",
+    "task assignment": "task_assignment",
+    # Budget
+    "budget allocation": "budget_allocation",
+    "cost optimization": "cost_optimization",
+    "expense category": "expense_category",
+    "budget constraint": "budget_constraint",
+    # Logic/Proof
+    "if and only if": "if_and_only_if",
+    "logical proof": "logical_proof",
+    "formal proof": "formal_proof",
+    # Code
+    "logic error": "logic_error",
+    "runtime error": "runtime_error",
+    "null pointer": "null_pointer",
+    "stack trace": "stack_trace",
+    "execution path": "execution_path",
 }
 
 
@@ -125,11 +176,10 @@ class NLParser:
         # Extract target (check compounds first, then single tokens)
         target_found = False
         for compound in compounds:
-            if compound in ("submit_button", "login_form", "contact_form",
-                            "search_bar", "api_key", "auth_token", "status_code"):
-                result["target"] = compound
-                target_found = True
-                break
+            # Any compound can be a target
+            result["target"] = compound
+            target_found = True
+            break
         if not target_found:
             for token in tokens:
                 if token in TARGET_KEYWORDS:
@@ -145,11 +195,12 @@ class NLParser:
         # Check compound concepts for context
         if "context" not in result:
             for compound in compounds:
-                if "form" in compound or "login" in compound:
-                    base = compound.replace("form", "").replace("_", "").strip()
-                    if base and base in CONTEXT_KEYWORDS:
-                        result["context"] = base
+                for word in compound.split("_"):
+                    if word in CONTEXT_KEYWORDS:
+                        result["context"] = word
                         break
+                if "context" in result:
+                    break
 
         return result
 
