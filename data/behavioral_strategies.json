@@ -1,0 +1,123 @@
+[
+  {
+    "id": "pomodoro",
+    "title": "Pomodoro Technique",
+    "description": "Work in 25-minute focused bursts, then take a 5-minute break. After 4 cycles, take a longer 15-30 minute break.",
+    "tags": ["focus", "time_management", "procrastination", "study"],
+    "effectiveness": 0.85,
+    "query_prototypes": [
+      "how to focus without distraction",
+      "tips for avoiding procrastination",
+      "best way to stay productive",
+      "how to stop getting distracted"
+    ]
+  },
+  {
+    "id": "eat_the_frog",
+    "title": "Eat the Frog",
+    "description": "Tackle your hardest, most important task first thing in the morning. Everything after feels easier.",
+    "tags": ["priority", "procrastination", "morning_routine", "willpower"],
+    "effectiveness": 0.80,
+    "query_prototypes": [
+      "how to stop delaying important tasks",
+      "best way to start the day productively",
+      "how to overcome procrastination"
+    ]
+  },
+  {
+    "id": "distraction_free",
+    "title": "Eliminate Distractions",
+    "description": "Phone in another room. Block social media. Use website blockers. Create a dedicated workspace.",
+    "tags": ["focus", "environment", "procrastination", "deep_work"],
+    "effectiveness": 0.75,
+    "query_prototypes": [
+      "how to focus while working",
+      "tips for avoiding distractions",
+      "how to create a productive workspace"
+    ]
+  },
+  {
+    "id": "time_blocking",
+    "title": "Time Blocking",
+    "description": "Assign every task to a specific time slot on your calendar. Treat it like a meeting you cannot miss.",
+    "tags": ["scheduling", "planning", "time_management", "commitment"],
+    "effectiveness": 0.82,
+    "query_prototypes": [
+      "how to plan my day effectively",
+      "best way to schedule tasks",
+      "how to stick to a schedule"
+    ]
+  },
+  {
+    "id": "two_minute_rule",
+    "title": "Two-Minute Rule",
+    "description": "If a task takes less than 2 minutes, do it immediately. Prevents small tasks from piling up.",
+    "tags": ["productivity", "quick_wins", "momentum", "habit"],
+    "effectiveness": 0.78,
+    "query_prototypes": [
+      "how to handle small tasks efficiently",
+      "tips for clearing my todo list",
+      "how to stop feeling overwhelmed"
+    ]
+  },
+  {
+    "id": "accountability_partner",
+    "title": "Accountability Partner",
+    "description": "Tell someone your plan and deadline. The social commitment makes you more likely to follow through.",
+    "tags": ["social", "commitment", "procrastination", "motivation"],
+    "effectiveness": 0.72,
+    "query_prototypes": [
+      "how to stay motivated to complete tasks",
+      "how to follow through on commitments",
+      "tips for staying accountable"
+    ]
+  },
+  {
+    "id": "active_recall",
+    "title": "Active Recall",
+    "description": "Don't re-read. Close the book and write down everything you remember from memory. Test yourself actively.",
+    "tags": ["learning", "memory", "study", "retention"],
+    "effectiveness": 0.90,
+    "query_prototypes": [
+      "how to remember what I study",
+      "best way to learn effectively",
+      "tips for studying for exams"
+    ]
+  },
+  {
+    "id": "spaced_repetition",
+    "title": "Spaced Repetition",
+    "description": "Review material at increasing intervals (1 day, 3 days, 7 days, 14 days). Use Anki or similar tools.",
+    "tags": ["learning", "memory", "long_term", "study"],
+    "effectiveness": 0.88,
+    "query_prototypes": [
+      "how to remember things long term",
+      "best way to review material",
+      "how to not forget what I learned"
+    ]
+  },
+  {
+    "id": "rubber_duck",
+    "title": "Rubber Duck Debugging",
+    "description": "Explain your code line by line to an inanimate object. The act of verbalizing often reveals the bug.",
+    "tags": ["debugging", "verbalization", "insight", "cognitive"],
+    "effectiveness": 0.78,
+    "query_prototypes": [
+      "how to find bugs in my code",
+      "tips for debugging efficiently",
+      "how to understand why my code doesn't work"
+    ]
+  },
+  {
+    "id": "first_principles",
+    "title": "First Principles Thinking",
+    "description": "Break the problem down to fundamental truths. Rebuild from there instead of reasoning by analogy.",
+    "tags": ["problem_solving", "creativity", "innovation", "deep_thinking"],
+    "effectiveness": 0.85,
+    "query_prototypes": [
+      "how to think creatively",
+      "best way to solve hard problems",
+      "how to approach complex challenges"
+    ]
+  }
+]

@@ -42,7 +42,7 @@ def build_td():
 
     decomposer = ReasoningDecomposer(
         vocab=vocab,
-        mhn=ModernHopfieldNetwork(MHNConfig(dim=10_000, min_similarity=0.10)),
+        mhn=ModernHopfieldNetwork(MHNConfig(dim=10_000, min_similarity=0.01)),
         z3_bridge=Z3Bridge(),
         router=router,
     )

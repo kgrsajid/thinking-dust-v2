@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import time
 import re
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -81,7 +82,7 @@ class ReasoningDecomposer:
         max_depth: int = 2,
     ):
         self.vocab = vocab or build_default_vocabulary(dim=dim)
-        self.mhn = mhn or ModernHopfieldNetwork(MHNConfig(dim=dim, min_similarity=0.10))
+        self.mhn = mhn or ModernHopfieldNetwork(MHNConfig(dim=dim, min_similarity=0.01))
         self.z3_bridge = z3_bridge or Z3Bridge()
         self.router = router
         self.dim = dim
@@ -113,8 +114,10 @@ class ReasoningDecomposer:
 
         # Route based on problem type
         if ptype == "advice":
-            trace.append("Mode: ADVICE — retrieving behavioral strategies")
-            advice_solver = AdviceSolver(self.mhn, self.vocab, self.parser)
+            trace.append("Mode: ADVICE — retrieving from MHN")
+            seed_path = str(Path(__file__).parent.parent / "data" / "behavioral_strategies.json")
+            advice_solver = AdviceSolver(self.mhn, self.vocab, self.parser,
+                                         seed_data_path=seed_path)
             advice_result = advice_solver.solve(entities)
             trace.append(f"  Source: {advice_result['source']}, strategies: {len(advice_result['strategies'])}")
             latency = (time.perf_counter() - t0) * 1000
