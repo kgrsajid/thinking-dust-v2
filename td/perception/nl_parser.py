@@ -333,7 +333,7 @@ class NLParser:
             result["problem_type"] = self.detect_problem_type(text)
 
         # 2. Extract numbers
-        numbers = re.findall(r"\d+", text)
+        numbers = re.findall(r"\d+", text)
         if numbers:
             result["how_many"] = int(numbers[0])
 
