@@ -471,6 +471,8 @@ class ThinkingDust:
                 confidence = min(avg_sim * 0.5 + avg_eff * 0.5, 0.85)
             elif sol_type == "info_request":
                 confidence = 0.30  # Can't solve, just flagging
+            elif sol_type == "learned":
+                confidence = min(solution.get("similarity", 0.5) * 0.9, 0.85)
             elif sol_type == "unsat":
                 confidence = 0.95  # Z3 proved impossible
             else:
@@ -629,25 +631,36 @@ class ThinkingDust:
                 "domain": "proof",
             }
 
-        # Default: what did the MHN retrieve?
-        retrieved = []
-        for sp in sub_problems:
-            if sp.get("retrieved_meta"):
-                meta = sp["retrieved_meta"]
-                domain = meta.get("domain", meta.get("title", ""))
-                if domain:
-                    retrieved.append(f"{sp['concept']}: {domain}")
+        # Default: check IDP thoughts for any useful retrieval
+        best_meta = {}
+        best_sim = 0
+        for t in thoughts:
+            if t.retrieved_hdc is not None and t.retrieved_similarity > best_sim:
+                best_sim = t.retrieved_similarity
+                best_meta = t.retrieved_metadata
 
-        if retrieved:
-            return {
-                "type": "retrieved",
-                "formatted": "\n".join(retrieved[:5]),
-                "sub_problem_count": len(sub_problems),
-            }
+        # If we have a high-similarity retrieval, return the stored answer
+        if best_sim > 0.3 and best_meta:
+            # Check for taught solution
+            solution_text = best_meta.get("description", best_meta.get("solution_text", ""))
+            if solution_text:
+                return {
+                    "type": "learned",
+                    "formatted": solution_text,
+                    "similarity": best_sim,
+                }
+            # Check for title/domain
+            title = best_meta.get("title", best_meta.get("domain", ""))
+            if title:
+                return {
+                    "type": "retrieved",
+                    "formatted": title,
+                    "similarity": best_sim,
+                }
 
         return {
             "type": "unknown",
-            "formatted": "Could not find a solution in memory or via reasoning.",
+            "formatted": "I don't have enough knowledge to answer this yet.",
         }
 
     def _try_z3_solve(self, entities: dict, problem_text: str, trace: list[str]) -> dict | None:

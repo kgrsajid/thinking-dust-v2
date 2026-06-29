@@ -423,13 +423,36 @@ class NLParser:
             - problem_type (permute to distinguish from other roles)
             - action, target, context (legacy)
             - who, what, how_many, when, goals (entities)
+            - Raw word content (fallback for unknown types)
         """
         entities = self.extract_entities(text)
 
         if not entities or entities.get("problem_type") == "unknown":
-            return generate_hypervector(self.vocab.dim)
+            # Deterministic encoding from raw words (NOT random)
+            return self._encode_raw_text(text)
 
         return self._encode_entities(entities)
+
+    def _encode_raw_text(self, text: str) -> np.ndarray:
+        """Encode text as a deterministic HDC vector from word-level concepts.
+
+        Each word gets mapped to a concept vector, then bundled together.
+        Same text → same vector (deterministic). Different text → different vector.
+        """
+        words = re.findall(r'[a-z]+', text.lower())
+        if not words:
+            return generate_hypervector(self.vocab.dim)
+
+        word_vectors = []
+        for word in words:
+            if not self.vocab.has(word):
+                self.vocab.add_concept(word)
+            word_vectors.append(self.vocab.get(word))
+
+        if len(word_vectors) == 1:
+            return word_vectors[0]
+
+        return bundle(*word_vectors)
 
     def _encode_entities(self, entities: dict[str, Any]) -> np.ndarray:
         """Encode extracted entities into a single HDC vector."""

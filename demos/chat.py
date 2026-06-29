@@ -104,7 +104,7 @@ def main():
             for line in formatted.split("\n"):
                 print(f"     {line}")
             print(f"     ({result.confidence:.0%} confidence, Z3 verified)")
-        elif sol_type == "advice":
+        elif sol_type in ("advice", "learned", "retrieved"):
             print()
             for line in formatted.split("\n"):
                 print(f"     {line}")
