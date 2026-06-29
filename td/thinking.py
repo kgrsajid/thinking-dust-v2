@@ -346,6 +346,7 @@ class ThinkingDust:
         max_idp_iterations: int = 5,
         idp_blend_factor: float = 0.3,
         convergence_threshold: float = 0.98,
+        pure_mode: bool = False,  # True = 0 seed, False = 50 seed
     ):
         self.vocab = vocab or build_default_vocabulary(dim=dim)
         self.mhn = mhn or ModernHopfieldNetwork(MHNConfig(
@@ -358,18 +359,23 @@ class ThinkingDust:
         self.max_idp_iterations = max_idp_iterations
         self.idp_blend_factor = idp_blend_factor
         self.convergence_threshold = convergence_threshold
+        self.pure_mode = pure_mode
 
-        # P0 FIX #2: Encode sub-problem prototypes from ACTUAL SENTENCES
-        # (not random concept vectors)
+        # Sub-problem prototypes (semantic, not random)
         self.sub_problem_prototypes = self._build_semantic_prototypes()
 
-        # P0 FIX #1: Load behavioral strategies from JSON into MHN
-        self._load_behavioral_strategies()
+        # Load seed data (0 or 50 patterns depending on mode)
+        self.seed_count = 0
+        if not pure_mode:
+            self._load_minimal_seed()
+            self._load_behavioral_strategies()
 
-        # Stats
+        # Stats + tracking
         self.total_thinks = 0
         self.total_learned = 0
         self.avg_iterations = 0
+        self.seed_patterns = self.seed_count
+        self.learned_patterns = 0
 
     def think(self, problem_text: str, context: dict | None = None) -> ThinkingResult:
         """Run the full thinking loop on a problem.
@@ -430,8 +436,8 @@ class ThinkingDust:
 
         composed_hdc = hdc_compose(sub_solution_vecs) if sub_solution_vecs else evolved_state
 
-        # Extract concrete solution from sub-problem metadata
-        solution = self._extract_solution(sub_problems, entities, problem_text, trace)
+        # Extract concrete solution from sub-problem metadata + IDP thoughts
+        solution = self._extract_solution(sub_problems, thoughts, entities, problem_text, trace)
 
         # ─── Step 5: Automatic Attractor Storage ──────────────────
         # Store the problem and its evolved solution as a NEW attractor
@@ -520,11 +526,12 @@ class ThinkingDust:
     def _extract_solution(
         self,
         sub_problems: list[dict],
+        thoughts: list[Thought],
         entities: dict,
         problem_text: str,
         trace: list[str],
     ) -> dict:
-        """Extract a human-readable solution from the decomposed sub-problems.
+        """Extract a human-readable solution from the decomposed sub-problems and IDP thoughts.
 
         This is where Z3 would normally run (Mechanism 3).
         For now, we use the retrieved metadata + entity-based reasoning.
@@ -542,9 +549,9 @@ class ThinkingDust:
             if solution:
                 return solution
 
-        # For advice: retrieve from sub-problem metadata
+        # For advice: retrieve from sub-problem metadata + IDP thoughts
         if ptype == "advice":
-            return self._format_advice(sub_problems, entities)
+            return self._format_advice(sub_problems, thoughts, entities)
 
         # For proof: report what was retrieved, but be honest about limits
         if ptype == "proof":
@@ -698,38 +705,59 @@ class ThinkingDust:
 
         return None
 
-    def _format_advice(self, sub_problems: list[dict], entities: dict) -> dict:
-        """Format advice from MHN-retrieved behavioral strategies."""
-        # Check IDP-evolved state thoughts for behavioral strategies
+    def _format_advice(self, sub_problems: list[dict], thoughts: list[Thought], entities: dict) -> dict:
+        """Format advice from MHN-retrieved behavioral strategies (minimal seed)."""
         strategies = []
         seen_ids = set()
 
-        # First: check sub-problem retrievals for strategy metadata
-        for sp in sub_problems:
-            meta = sp.get("retrieved_meta", {})
-            if meta.get("label") == "behavioral_strategy":
-                sid = meta.get("id", "")
+        def is_strategy(meta):
+            # Behavioral strategies have title + effectiveness in metadata
+            return meta.get("title") and meta.get("effectiveness", 0) > 0
+
+        # First: check IDP thoughts for strategy metadata
+        for t in thoughts:
+            meta = t.retrieved_metadata
+            if meta and is_strategy(meta):
+                sid = meta.get("id", meta.get("concept", ""))
                 if sid not in seen_ids:
                     seen_ids.add(sid)
                     strategies.append({
-                        "title": meta.get("title", ""),
+                        "title": meta.get("title", meta.get("concept", "Strategy")),
+                        "description": meta.get("description", ""),
+                        "effectiveness": meta.get("effectiveness", 0.5),
+                        "similarity": t.retrieved_similarity,
+                    })
+
+        # Second: check sub-problem retrievals for strategy metadata
+        for sp in sub_problems:
+            meta = sp.get("retrieved_meta", {})
+            if is_strategy(meta):
+                sid = meta.get("id", meta.get("concept", ""))
+                if sid not in seen_ids:
+                    seen_ids.add(sid)
+                    strategies.append({
+                        "title": meta.get("title", meta.get("concept", "Strategy")),
                         "description": meta.get("description", ""),
                         "effectiveness": meta.get("effectiveness", 0.5),
                         "similarity": sp.get("retrieved_sim", 0),
                     })
 
-        # Also: retrieve directly from MHN using problem goals
-        if not strategies and entities.get("goals"):
-            goal_text = " ".join(entities["goals"]).replace("avoid_", "")
-            goal_hdc = self.parser.parse(goal_text)
-            results = self.mhn.retrieve(goal_hdc, top_k=5)
+        # Third: retrieve directly from MHN using the FULL problem text
+        if not strategies:
+            full_text = entities.get("raw_text", "")
+            if not full_text and entities.get("goals"):
+                full_text = " ".join(entities["goals"])
+            if not full_text:
+                full_text = "schedule without procrastination"
+            query_hdc = self.parser.parse(full_text)
+            results = self.mhn.retrieve(query_hdc, top_k=5)
             for _, sim, meta in results:
-                if meta.get("label") == "behavioral_strategy":
-                    sid = meta.get("id", "")
+                if is_strategy(meta):
+                    sid = meta.get("id", meta.get("concept", ""))
                     if sid not in seen_ids and sim > 0.01:
                         seen_ids.add(sid)
                         strategies.append({
-                            "title": meta.get("title", ""),
+                            "title": meta.get("title", meta.get("concept", "Strategy")),
                             "description": meta.get("description", ""),
                             "effectiveness": meta.get("effectiveness", 0.5),
                             "similarity": sim,
@@ -769,36 +797,25 @@ class ThinkingDust:
         }
         return {name: self.parser.parse(text) for name, text in prototype_sentences.items()}
 
+    def _load_minimal_seed(self):
+        """Load exactly 50 seed patterns — innate reflexes, not pretraining."""
+        from .minimal_seed import ALL_SEED_PATTERNS
+        for pattern in ALL_SEED_PATTERNS:
+            query_hdc = self.parser.parse(pattern.text)
+            solution_hdc = self.parser.parse(pattern.solution)
+            self.mhn.store(query_hdc, solution_hdc, {
+                "label": "seed",
+                **pattern.metadata,
+            })
+            self.seed_count += 1
+
     def _load_behavioral_strategies(self):
-        """P0 FIX #1: Load behavioral strategies from JSON into MHN.
-
-        Each strategy's query prototypes are encoded as HDC and stored
-        as MHN attractors. This makes them retrievable by the thinking loop.
+        """Load behavioral strategies from JSON (optional, adds to seed count).
+        
+        NOTE: For minimal seed compliance (50 max), this should NOT be called.
+        The 10 behavioral strategies in minimal_seed.py are sufficient.
         """
-        import json
-        from pathlib import Path
-
-        json_path = Path(__file__).parent.parent / "data" / "behavioral_strategies.json"
-        if not json_path.exists():
-            return
-
-        with open(json_path) as f:
-            strategies = json.load(f)
-
-        for strategy in strategies:
-            # Encode the strategy as an HDC vector
-            strategy_hdc = self._encode_strategy_hdc(strategy)
-
-            for proto_text in strategy.get("query_prototypes", [strategy["title"]]):
-                query_hdc = self.parser.parse(proto_text)
-                self.mhn.store(query_hdc, strategy_hdc, {
-                    "label": "behavioral_strategy",
-                    "id": strategy["id"],
-                    "title": strategy["title"],
-                    "description": strategy["description"],
-                    "tags": strategy.get("tags", []),
-                    "effectiveness": strategy.get("effectiveness", 0.5),
-                })
+        pass  # Disabled to keep seed under 50 patterns
 
     def _encode_strategy_hdc(self, strategy: dict) -> np.ndarray:
         """Encode a strategy dict as HDC vector using parser."""
@@ -806,10 +823,18 @@ class ThinkingDust:
         return self.parser.parse(text)
 
     def stats(self) -> dict:
-        """Return engine statistics."""
+        """Return engine statistics with seed/learned ratio."""
+        total = len(self.mhn.patterns)
+        seed_pct = (self.seed_patterns / total * 100) if total > 0 else 0
+        learned_pct = ((total - self.seed_patterns) / total * 100) if total > 0 else 0
         return {
             "total_thinks": self.total_thinks,
             "total_learned": self.total_learned,
-            "memory_size": len(self.mhn.patterns),
+            "memory_size": total,
+            "seed_patterns": self.seed_patterns,
+            "learned_patterns": total - self.seed_patterns,
+            "seed_ratio_pct": round(seed_pct, 1),
+            "learned_ratio_pct": round(learned_pct, 1),
             "avg_iterations": round(self.avg_iterations, 2),
+            "pure_mode": self.pure_mode,
         }

@@ -10,6 +10,7 @@ Shows all four mechanisms working:
 Usage:
     .venv/bin/python3 demos/demo_thinking.py "Schedule meetings with Alice and Bob"
     .venv/bin/python3 demos/demo_thinking.py --stress
+    .venv/bin/python3 demos/demo_thinking.py --pure "How to schedule without procrastination"
 """
 
 import sys
@@ -20,7 +21,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 from td.perception.hdc import build_default_vocabulary
 from td.memory.mhn import ModernHopfieldNetwork, MHNConfig
-from td.training_data import EXAMPLES
 from td.thinking import ThinkingDust
 
 
@@ -30,25 +30,17 @@ class C:
     B = "\033[34m"; M = "\033[35m"; CY = "\033[36m"; GR = "\033[90m"
 
 
-def build_td():
-    """Build TD with seed data."""
+def build_td(pure_mode=False):
+    """Build TD with minimal seed (50 patterns) or pure mode (0 patterns)."""
     print(f"{C.DIM}Initializing Thinking Dust...{C.RESET}", file=sys.stderr)
+    print(f"{C.DIM}Mode: {'PURE (0 seed)' if pure_mode else 'SEED (50 innate reflexes)'}{C.RESET}", file=sys.stderr)
     vocab = build_default_vocabulary(dim=10_000)
     mhn = ModernHopfieldNetwork(MHNConfig(dim=10_000, min_similarity=0.01, idp_enabled=False))
 
-    # Load seed patterns
-    from td.perception.nl_parser import NLParser
-    parser = NLParser(vocab)
-    for problem_text, solution, domain, task_type in EXAMPLES:
-        problem_hdc = parser.parse(problem_text)
-        solution_hdc = parser.parse(str(solution)[:300])
-        mhn.store(problem_hdc, solution_hdc, {
-            "domain": domain, "task_type": task_type,
-            "solution": solution, "title": f"{domain}/{task_type}",
-        })
-
-    td = ThinkingDust(vocab=vocab, mhn=mhn, max_idp_iterations=5)
-    print(f"{C.DIM}Loaded {len(EXAMPLES)} seed patterns. Ready.{C.RESET}\n", file=sys.stderr)
+    td = ThinkingDust(vocab=vocab, mhn=mhn, max_idp_iterations=5, pure_mode=pure_mode)
+    stats = td.stats()
+    print(f"{C.DIM}Memory: {stats['seed_patterns']} seed + {stats['learned_patterns']} learned = {stats['memory_size']} total{C.RESET}", file=sys.stderr)
+    print(f"{C.DIM}Seed ratio: {stats['seed_ratio_pct']:.1f}%{C.RESET}\n", file=sys.stderr)
     return td
 
 
@@ -91,8 +83,11 @@ def solve_with_trace(td, problem_text):
         print(f"{C.R}❌ No solution{C.RESET}")
     print()
 
-    # Show memory growth
-    print(f"{C.GR}Memory: {len(td.mhn.patterns)} patterns (grew by 1){C.RESET}")
+    # Show memory growth with seed/learned ratio
+    stats = td.stats()
+    print(f"{C.GR}Memory: {stats['memory_size']} patterns "
+          f"({stats['seed_patterns']} seed, {stats['learned_patterns']} learned) "
+          f"seed ratio: {stats['seed_ratio_pct']:.1f}%{C.RESET}")
 
     # Summary
     print(f"{C.GR}{'─' * 64}{C.RESET}")
@@ -167,9 +162,12 @@ def stress_test(td, n=20):
         else:
             tag = f"{C.R}???"
 
+        stats = td.stats()
         print(f"  {i+1:2d}. [{tag}{C.RESET}] {result.confidence:.0%} "
               f"iter={iters} {elapsed:5.0f}ms "
-              f"mem={len(td.mhn.patterns):4d} — {problem[:38]}")
+              f"mem={stats['memory_size']:4d} "
+              f"seed={stats['seed_ratio_pct']:.0f}% "
+              f"— {problem[:32]}")
 
     print(f"\n{C.GR}{'─' * 64}{C.RESET}")
     print(f"{C.BOLD}Results:{C.RESET}")
@@ -178,26 +176,38 @@ def stress_test(td, n=20):
     print(f"  Memory growth:   +{results['memory_grown']} patterns")
     print(f"  Avg iterations:  {total_iters/n:.1f}")
     print(f"  Avg latency:     {total_time/n:.0f}ms")
-    print(f"  Final memory:    {len(td.mhn.patterns)} patterns")
+    stats = td.stats()
+    print(f"  Final memory:    {stats['memory_size']} patterns")
+    print(f"  Seed ratio:      {stats['seed_ratio_pct']:.1f}% (target: <5% after 1000 interactions)")
 
 
 def main():
     if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} \"<problem>\" | --stress [N]")
+        print(f"Usage: {sys.argv[0]} [--pure] \"\u003cproblem\u003e\" | --stress [N]")
         print(f"\nExamples:")
         print(f"  {sys.argv[0]} \"Schedule meetings with Alice and Bob\"")
-        print(f"  {sys.argv[0]} \"How to schedule without procrastination\"")
-        print(f"  {sys.argv[0]} \"Allocate 5000 across 3 departments\"")
+        print(f"  {sys.argv[0]} --pure \"How to schedule without procrastination\"")
         print(f"  {sys.argv[0]} --stress")
+        print(f"\n--pure: Start with 0 seed patterns (research demo mode)")
         sys.exit(1)
 
-    td = build_td()
+    pure_mode = False
+    args = sys.argv[1:]
+    if args[0] == "--pure":
+        pure_mode = True
+        args = args[1:]
 
-    if sys.argv[1] == "--stress":
-        n = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+    if not args:
+        print("Error: provide a problem text after --pure")
+        sys.exit(1)
+
+    td = build_td(pure_mode=pure_mode)
+
+    if args[0] == "--stress":
+        n = int(args[1]) if len(args) > 1 else 20
         stress_test(td, n)
     else:
-        solve_with_trace(td, " ".join(sys.argv[1:]))
+        solve_with_trace(td, " ".join(args))
 
 
 if __name__ == "__main__":
