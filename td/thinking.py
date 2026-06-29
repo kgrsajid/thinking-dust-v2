@@ -359,6 +359,13 @@ class ThinkingDust:
         self.idp_blend_factor = idp_blend_factor
         self.convergence_threshold = convergence_threshold
 
+        # P0 FIX #2: Encode sub-problem prototypes from ACTUAL SENTENCES
+        # (not random concept vectors)
+        self.sub_problem_prototypes = self._build_semantic_prototypes()
+
+        # P0 FIX #1: Load behavioral strategies from JSON into MHN
+        self._load_behavioral_strategies()
+
         # Stats
         self.total_thinks = 0
         self.total_learned = 0
@@ -409,7 +416,7 @@ class ThinkingDust:
 
         # ─── Step 3: HDC Algebraic Decomposition ──────────────────
         trace.append("HDC algebraic decomposition...")
-        sub_problems = hdc_decompose(evolved_state, self.vocab, self.mhn)
+        sub_problems = self._hdc_decompose_semantic(evolved_state)
 
         for sp in sub_problems:
             trace.append(f"  [{sp['concept']}] sim={sp['retrieved_sim']:.3f}")
@@ -444,9 +451,29 @@ class ThinkingDust:
         self.total_learned += 1
         trace.append(f"Stored as new attractor (memory: {len(self.mhn.patterns)} patterns)")
 
-        # ─── Confidence ───────────────────────────────────────────
-        best_sim = max((t.retrieved_similarity for t in thoughts if t.retrieved_hdc is not None), default=0)
-        confidence = min(best_sim * 0.5 + (1 - abs(len(thoughts) - 2) * 0.1), 0.95)
+        # ─── Confidence (real, not fake) ─────────────────────────
+        if solution:
+            sol_type = solution.get("type", "unknown")
+            if sol_type == "schedule":
+                confidence = 0.90  # Z3 SAT = high confidence
+            elif sol_type == "budget":
+                confidence = 0.88  # Z3 optimized
+            elif sol_type == "advice":
+                # Advice confidence based on actual retrieval similarity
+                avg_sim = solution.get("avg_similarity", 0.3)
+                avg_eff = 0.7  # Average strategy effectiveness
+                confidence = min(avg_sim * 0.5 + avg_eff * 0.5, 0.85)
+            elif sol_type == "info_request":
+                confidence = 0.30  # Can't solve, just flagging
+            elif sol_type == "unsat":
+                confidence = 0.95  # Z3 proved impossible
+            else:
+                # Generic retrieval — confidence from IDP similarity
+                best_sim = max((t.retrieved_similarity for t in thoughts
+                               if t.retrieved_hdc is not None), default=0)
+                confidence = min(best_sim * 0.5, 0.70)
+        else:
+            confidence = 0.20  # No solution found
 
         latency = (time.perf_counter() - t0) * 1000
 
@@ -460,6 +487,35 @@ class ThinkingDust:
             latency_ms=latency,
             trace=trace,
         )
+
+    def _hdc_decompose_semantic(self, state_hdc: np.ndarray) -> list[dict]:
+        """HDC decomposition using semantic prototypes (not random vectors).
+
+        bind(state, semantic_prototype) extracts the component of the
+        problem relevant to that prototype.
+        """
+        sub_problems = []
+        for name, proto_hdc in self.sub_problem_prototypes.items():
+            component = bind(state_hdc, proto_hdc)
+            results = self.mhn.retrieve(component, top_k=1)
+            if results:
+                _, sim, meta = results[0]
+                sub_problems.append({
+                    "concept": name,
+                    "hdc": component,
+                    "retrieved_sim": sim,
+                    "retrieved_meta": meta,
+                    "solution": meta.get("solution", meta),
+                })
+            else:
+                sub_problems.append({
+                    "concept": name,
+                    "hdc": component,
+                    "retrieved_sim": 0.0,
+                    "retrieved_meta": {},
+                    "solution": None,
+                })
+        return sub_problems
 
     def _extract_solution(
         self,
@@ -641,29 +697,115 @@ class ThinkingDust:
         return None
 
     def _format_advice(self, sub_problems: list[dict], entities: dict) -> dict:
-        """Format advice from retrieved patterns."""
-        goals = entities.get("goals", [])
-
-        # Gather advice from sub-problem retrievals
+        """Format advice from MHN-retrieved behavioral strategies."""
+        # Check IDP-evolved state thoughts for behavioral strategies
         strategies = []
+        seen_ids = set()
+
+        # First: check sub-problem retrievals for strategy metadata
         for sp in sub_problems:
             meta = sp.get("retrieved_meta", {})
-            title = meta.get("title")
-            desc = meta.get("description", "")
-            if title and desc and sp.get("retrieved_sim", 0) > 0.01:
-                strategies.append(f"  {title}: {desc[:80]}")
+            if meta.get("label") == "behavioral_strategy":
+                sid = meta.get("id", "")
+                if sid not in seen_ids:
+                    seen_ids.add(sid)
+                    strategies.append({
+                        "title": meta.get("title", ""),
+                        "description": meta.get("description", ""),
+                        "effectiveness": meta.get("effectiveness", 0.5),
+                        "similarity": sp.get("retrieved_sim", 0),
+                    })
+
+        # Also: retrieve directly from MHN using problem goals
+        if not strategies and entities.get("goals"):
+            goal_text = " ".join(entities["goals"]).replace("avoid_", "")
+            goal_hdc = self.parser.parse(goal_text)
+            results = self.mhn.retrieve(goal_hdc, top_k=5)
+            for _, sim, meta in results:
+                if meta.get("label") == "behavioral_strategy":
+                    sid = meta.get("id", "")
+                    if sid not in seen_ids and sim > 0.01:
+                        seen_ids.add(sid)
+                        strategies.append({
+                            "title": meta.get("title", ""),
+                            "description": meta.get("description", ""),
+                            "effectiveness": meta.get("effectiveness", 0.5),
+                            "similarity": sim,
+                        })
 
         if strategies:
+            strategies.sort(key=lambda x: x.get("similarity", 0), reverse=True)
+            lines = []
+            how_many = entities.get("how_many")
+            if how_many:
+                lines.append(f"Strategy for {how_many} tasks:")
+            else:
+                lines.append("Strategy:")
+            for i, s in enumerate(strategies[:5], 1):
+                lines.append(f"  {i}. {s['title']}: {s['description']}")
+
+            avg_sim = sum(s.get("similarity", 0) for s in strategies) / len(strategies)
             return {
                 "type": "advice",
-                "formatted": "\n".join(strategies[:5]),
+                "formatted": "\n".join(lines),
                 "strategy_count": len(strategies),
+                "avg_similarity": avg_sim,
             }
 
         return {
             "type": "advice",
             "formatted": "No specific strategies in memory for this query.",
         }
+
+    def _build_semantic_prototypes(self) -> dict[str, np.ndarray]:
+        """P0 FIX #2: Build sub-problem prototypes from actual sentences.
+
+        Instead of random concept vectors, encode meaningful prototype
+        sentences so HDC decomposition retrieves real content.
+        """
+        prototype_sentences = {
+            "extract_entities": "find all people and objects mentioned in the problem",
+            "identify_constraints": "what limits restrictions and constraints apply",
+            "find_solution": "how to solve and satisfy all requirements",
+            "validate_result": "check that the answer is correct and complete",
+        }
+        return {name: self.parser.parse(text) for name, text in prototype_sentences.items()}
+
+    def _load_behavioral_strategies(self):
+        """P0 FIX #1: Load behavioral strategies from JSON into MHN.
+
+        Each strategy's query prototypes are encoded as HDC and stored
+        as MHN attractors. This makes them retrievable by the thinking loop.
+        """
+        import json
+        from pathlib import Path
+
+        json_path = Path(__file__).parent.parent / "data" / "behavioral_strategies.json"
+        if not json_path.exists():
+            return
+
+        with open(json_path) as f:
+            strategies = json.load(f)
+
+        for strategy in strategies:
+            # Encode the strategy as an HDC vector
+            strategy_hdc = self._encode_strategy_hdc(strategy)
+
+            for proto_text in strategy.get("query_prototypes", [strategy["title"]]):
+                query_hdc = self.parser.parse(proto_text)
+                self.mhn.store(query_hdc, strategy_hdc, {
+                    "label": "behavioral_strategy",
+                    "id": strategy["id"],
+                    "title": strategy["title"],
+                    "description": strategy["description"],
+                    "tags": strategy.get("tags", []),
+                    "effectiveness": strategy.get("effectiveness", 0.5),
+                })
+
+    def _encode_strategy_hdc(self, strategy: dict) -> np.ndarray:
+        """Encode a strategy dict as HDC vector using parser."""
+        text = f"{strategy['title']} {strategy['description']}"
+        return self.parser.parse(text)
 
     def stats(self) -> dict:
         """Return engine statistics."""
