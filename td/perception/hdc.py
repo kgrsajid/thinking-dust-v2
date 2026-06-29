@@ -168,6 +168,20 @@ def inverse(v: np.ndarray) -> np.ndarray:
     return v.copy()
 
 
+def normalize_hdc(v: np.ndarray) -> np.ndarray:
+    """Normalize HDC vector to bipolar {-1, +1}.
+
+    Args:
+        v: Input vector (may be float from bundling).
+
+    Returns:
+        Bipolar int8 vector.
+    """
+    result = np.sign(v).astype(np.int8)
+    result[result == 0] = 1  # Ties → +1
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Concept Vocabulary
 # ---------------------------------------------------------------------------
@@ -218,6 +232,23 @@ class ConceptVocabulary:
     def has(self, concept: str) -> bool:
         """Check if a concept exists in the vocabulary."""
         return concept in self.concepts
+
+    def get_char_vector(self, char: str) -> np.ndarray:
+        """Get stable HDC vector for a character (Kleyko 2022 n-gram encoding).
+
+        Each character gets a stable random vector derived from its ASCII code.
+        This enables character-level HDC encoding without a dictionary.
+        """
+        import string as _string
+        char = char.lower()
+        key = f"__char_{char}"
+        if key not in self.concepts:
+            # Deterministic from char code
+            code = ord(char)
+            rng = np.random.RandomState(code * 31337 + 42)
+            vec = rng.choice([-1, 1], size=self.dim).astype(np.int8)
+            self.concepts[key] = vec
+        return self.concepts[key]
 
     def add_concept(self, name: str, vector: np.ndarray | None = None) -> np.ndarray:
         """Add a new concept to the vocabulary.
