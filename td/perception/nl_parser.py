@@ -335,11 +335,21 @@ class NLParser:
         fast_type = self._fast_detect_problem_type(text)
         result["problem_type"] = fast_type or self.detect_problem_type(text)
 
-        # 2. Extract ALL numbers (not just first)
-        all_numbers = re.findall(r"\d+", text)
+        # 2. Extract ALL numbers (digits + word numbers)
+        word_to_num = {
+            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+            "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+            "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+            "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
+            "fifty": 50, "hundred": 100, "thousand": 1000,
+        }
+        digit_numbers = [int(x) for x in re.findall(r"\d+", text)]
+        word_numbers = [word_to_num[w] for w in tokens if w in word_to_num]
+        all_numbers = digit_numbers + word_numbers
         if all_numbers:
-            result["how_many"] = int(all_numbers[0])
-            result["all_numbers"] = [int(n) for n in all_numbers]
+            result["how_many"] = all_numbers[0]
+            result["all_numbers"] = all_numbers
 
         # 3. Extract currency amounts ($5000, 5000 dollars, etc.)
         dollar_matches = re.findall(r'\$(\d[\d,]*)', text)

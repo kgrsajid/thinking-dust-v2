@@ -729,12 +729,13 @@ class ThinkingDust:
 
     def _z3_budget_entities(self, entities, trace):
         from z3 import Optimize, Int, sat
-        import re
-        raw = entities.get("raw_text", "")
-        nums = [int(x) for x in re.findall(r'\d+', raw)]
-        if len(nums) >= 2: total, nparts = nums[0], nums[1]
-        elif nums: total, nparts = nums[0], 3
-        else: total, nparts = 10000, 3
+        all_nums = entities.get("all_numbers", [])
+        if len(all_nums) >= 2:
+            total, nparts = all_nums[0], all_nums[1]
+        elif all_nums:
+            total, nparts = all_nums[0], 3
+        else:
+            total, nparts = 10000, 3
         names = [f"Group_{i+1}" for i in range(nparts)]
         s = Optimize()
         vars = {}
@@ -776,11 +777,10 @@ class ThinkingDust:
 
     def _z3_csp_entities(self, entities, trace):
         from z3 import Optimize, Int, sat
-        import re
         raw = entities.get("raw_text", "").lower()
         if "knapsack" in raw or "optimize" in raw:
-            nums = [int(x) for x in re.findall(r'\d+', raw)]
-            n = min(nums[0] if nums else 8, 20)
+            all_nums = entities.get("all_numbers", [])
+            n = min(all_nums[0] if all_nums else 8, 20)
             # Deterministic generation from index (not hardcoded)
             weights = [(i * 3 + 2) % 10 + 1 for i in range(n)]
             values = [(i * 5 + 3) % 10 + 1 for i in range(n)]
