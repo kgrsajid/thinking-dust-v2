@@ -107,6 +107,34 @@ def bundle(*vectors: np.ndarray) -> np.ndarray:
     return np.sign(total).astype(np.int8)
 
 
+def weighted_bundle(weights: list[float], vectors: list[np.ndarray]) -> np.ndarray:
+    """Bundle with per-vector weights (weighted superposition).
+
+    Scales each vector by its weight before summing, then takes sign.
+    Useful for IDP blend factors, attention weighting, and composition
+    where some vectors matter more than others.
+
+    Args:
+        weights: Per-vector weights (e.g. [0.7, 0.3]).
+        vectors: Corresponding hypervectors.
+
+    Returns:
+        Bipolar hypervector.
+
+    Example:
+        >>> weighted_bundle([0.7, 0.3], [token_vec, context_vec])
+    """
+    if len(weights) != len(vectors):
+        raise ValueError("weights and vectors must have same length")
+    if len(vectors) < 1:
+        raise ValueError("need at least 1 vector")
+    if len(vectors) == 1:
+        return np.sign(vectors[0]).astype(np.int8)
+    total = sum(w * v for w, v in zip(weights, vectors))
+    total[total == 0] = 1
+    return np.sign(total).astype(np.int8)
+
+
 def permute(v: np.ndarray, shift: int = 1) -> np.ndarray:
     """Cyclic permutation (rotation) of a hypervector.
 
