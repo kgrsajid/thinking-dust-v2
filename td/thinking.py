@@ -650,6 +650,13 @@ class GenericThinkingDust:
         # Classification: intent = argmax(similarity(encode(input), prototype))
         self.intent_prototypes = self._build_intent_prototypes()
 
+        # Structural pattern prototypes for short utterance classification
+        self.structural_prototypes = {
+            "short_social": self.parser.parse(
+                "hello hi hey ok okay bye thanks yes no great cool awesome"
+            ),
+        }
+
         # Innate social responses for conversation intent
         self.social_responses = self._build_social_responses()
 
@@ -692,57 +699,99 @@ class GenericThinkingDust:
     # ─── Intent Classification (Kleyko 2022: HDC prototype similarity) ──
 
     def _classify_intent(self, text):
-        """Classify input intent by HDC similarity to innate prototypes.
+        """Classify input intent by HDC similarity with margin-based rejection.
 
         Based on Kleyko et al. (2022) ACM Computing Surveys:
-        prototype-based classification = similarity(encode(input), class_prototype).
-        The class with highest similarity is the predicted intent.
+        prototype-based classification with margin filtering.
+        Long-sentence prototypes reduce overlap vs keyword lists.
         """
         text_hdc = self.parser.parse(text)
-        best_intent = "question"  # default
-        best_sim = -1.0
+        text_lower = text.lower().strip()
+        tokens = text_lower.split()
 
+        # Get HDC similarities to all intent prototypes
+        sims = {}
         for intent_name, proto_hdc in self.intent_prototypes.items():
-            sim = similarity(text_hdc, proto_hdc)
-            if sim > best_sim:
-                best_sim = sim
-                best_intent = intent_name
+            sims[intent_name] = similarity(text_hdc, proto_hdc)
 
-        # Threshold: if no prototype is similar enough, default to question
+        # Structural check: very short utterances (< 4 tokens)
+        # These are likely conversation (greetings, thanks, ok, bye)
+        if len(tokens) <= 3:
+            short_hdc = self.parser.parse(" ".join(tokens))
+            social_sim = similarity(short_hdc, self.structural_prototypes.get("short_social", short_hdc))
+            if social_sim > 0.25:
+                return "conversation"
+
+        # Find best and second best with margin
+        sorted_intents = sorted(sims.items(), key=lambda x: x[1], reverse=True)
+        best_intent, best_sim = sorted_intents[0]
+        second_sim = sorted_intents[1][1] if len(sorted_intents) > 1 else 0.0
+        margin = best_sim - second_sim
+
+        # Rejection rules:
+        # 1. If margin is tiny → uncertain, default to conversation (acknowledge)
+        # 2. If absolute similarity is very low → default to conversation
+        # 3. If margin is small AND input is short → conversation
         if best_sim < 0.15:
-            return "question"
+            return "conversation"  # Uncertain → acknowledge, don't pretend to answer
+        if margin < 0.03:
+            return "conversation"  # Ambiguous → acknowledge
+        if margin < 0.06 and len(tokens) <= 5:
+            return "conversation"  # Short and ambiguous → acknowledge
+        if margin < 0.04:
+            return "conversation"  # Weak margin → acknowledge
+
         return best_intent
 
     def _build_intent_prototypes(self):
-        """Build 6 innate intent prototypes from semantic sentences.
+        """Build 6 innate intent prototypes from LONG specific sentences.
 
-        These are NOT keyword lists. They are HDC-encoded natural language
-        descriptions that capture the semantic essence of each intent type.
+        Design: prototypes are ORTHOGONAL — use long, distinctive sentences
+        that capture the full semantic context of each intent. Short keyword
+        lists overlap; long sentences create distinctive HDC vectors.
         """
         return {
             "question": self.parser.parse(
-                "what is how do why does when did where can who should "
-                "what are the how many what kind of tell me about"
+                "what is the capital city of france and how many people live there "
+                "where is the nearest hospital from here and when did it open "
+                "who won the nobel prize in physics last year and tell me about "
+                "their research what is the answer to this mathematics problem"
             ),
             "constraint": self.parser.parse(
-                "schedule assign allocate distribute optimize prove solve "
-                "book arrange plan organize fit pack color with constraints"
+                "schedule three meetings with alice bob and carol on monday morning "
+                "assign tasks to team members based on their skills and availability "
+                "allocate budget across marketing engineering and operations departments "
+                "optimize the delivery route to minimize total travel distance "
+                "prove that if a implies b and b implies c then a implies c "
+                "solve this logic puzzle with knights and knaves on the island"
             ),
             "suggestion": self.parser.parse(
-                "you should try using i recommend consider using it would be better "
-                "have you thought about maybe you could why not try"
+                "you should try using the pomodoro technique for better focus and "
+                "i recommend taking short breaks every twenty five minutes of work "
+                "consider using a different approach if the current one fails and "
+                "it would be better to start early in the morning before meetings "
+                "have you thought about automating the repetitive parts of this task"
             ),
             "command": self.parser.parse(
-                "remember that store this note that keep in mind "
-                "save this information dont forget make sure to always"
+                "remember that i prefer morning meetings over afternoon ones and "
+                "store this information about the project deadline being next friday "
+                "note that the budget is limited to five thousand dollars total and "
+                "keep in mind the client requirements for responsive design and "
+                "save this for later reference when we discuss the implementation"
             ),
             "conversation": self.parser.parse(
-                "hello hi hey thanks thank you ok okay bye goodbye "
-                "good morning nice to meet you how are you doing"
+                "hello there it is nice to meet you and welcome to the system "
+                "thanks so much for helping me with this problem today "
+                "ok that sounds good to me and i understand what you mean "
+                "goodbye for now and see you later when we continue working "
+                "good morning to you and how are you doing today my friend"
             ),
             "meta": self.parser.parse(
-                "are you sure why did you say explain how do you know "
-                "what makes you think can you prove that why do you believe"
+                "are you absolutely sure about that answer and can you justify it "
+                "explain your reasoning step by step so i can understand how "
+                "you reached that conclusion and demonstrate your logic clearly "
+                "prove that your solution is correct and show me the evidence "
+                "why did you say that and what makes you believe this claim"
             ),
         }
 
@@ -1039,6 +1088,10 @@ class GenericThinkingDust:
             "bye goodbye": "Goodbye! Come back when you have more problems to solve.",
             "good morning": "Good morning! Ready to think?",
             "how are you": "I'm a reasoning engine — always ready to learn!",
+            "i am working on": "Got it. Let me know if you need help with that.",
+            "i am doing": "Sounds good. What would you like to work on?",
+            "this is": "I see. Tell me more about that.",
+            "that is": "Got it. What would you like me to do with that?",
         }
 
     def _fallback_mhn_solve(self, thoughts, graph):
