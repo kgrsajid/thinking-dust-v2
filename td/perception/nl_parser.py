@@ -54,6 +54,10 @@ TARGET_KEYWORDS = {
     "bug", "error", "exception", "code", "function", "algorithm",
     "data", "dataset", "record", "query", "result", "schedule",
     "plan", "itinerary", "route", "assignment", "allocation",
+    "interviewer", "candidate", "panel", "examiner", "proctor",
+    "participant", "attendee", "guest", "speaker", "presenter",
+    "customer", "vendor", "client", "stakeholder", "manager",
+    "employee", "volunteer", "student", "teacher", "researcher",
 }
 
 CONTEXT_KEYWORDS = {
