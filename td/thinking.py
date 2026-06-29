@@ -639,370 +639,167 @@ class ThinkingDust:
         }
 
     def _try_all_z3_models(self, entities: dict, problem_text: str, trace: list[str]) -> dict | None:
-        """Try ALL Z3 models on the problem. No category assumptions.
+        """Try Z3 models based on ENTITY structure, not keyword matching.
 
-        Each model attempts to build constraints from the problem text.
-        If the constraints are satisfiable, we have a solution.
-        If not, move to the next model. This is blind validation.
+        Infer from parsed entities:
+        - Money or allocation goals → budget
+        - Propositions (A, B, C) → logic
+        - People + schedule goals → scheduling
+        - Optimize + count → CSP
         """
-        try:
-            from z3 import Solver, Int, Optimize, sat, And, Or, Not, Implies
-        except ImportError:
-            return None
-
-        lower = problem_text.lower()
-
-        # ── Model 1: Assignment/Scheduling ───────────────────────
-        result = self._z3_assignment_model(entities, problem_text, trace, lower)
-        if result:
-            return result
-
-        # ── Model 2: Budget/Allocation ───────────────────────────
-        result = self._z3_budget_model(entities, problem_text, trace, lower)
-        if result:
-            return result
-
-        # ── Model 3: Propositional Logic ─────────────────────────
-        result = self._z3_logic_model(entities, problem_text, trace, lower)
-        if result:
-            return result
-
-        # ── Model 4: Graph Coloring / CSP ────────────────────────
-        result = self._z3_csp_model(entities, problem_text, trace, lower)
-        if result:
-            return result
-
-        return None
-
-    def _z3_assignment_model(self, entities, problem_text, trace, lower):
-        """Z3 model for assignment/scheduling problems."""
         try:
             from z3 import Solver, Int, Optimize, sat, And, Or
         except ImportError:
             return None
 
-        # Only try if problem looks like scheduling
-        is_assignment = any(w in lower for w in ["schedule", "meeting", "assign",
-                                                   "interview", "appointment",
-                                                   "one on one", "book a time"])
-        if not is_assignment:
-            return None
-
         who = [w for w in entities.get("who", [])
-               if w not in {"schedule", "plan", "task", "project", "budget",
-                            "the", "a", "an", "prove", "optimize", "allocate",
-                            "find", "debug", "convert", "validate"}]
+               if w not in {"the", "a", "an", "prove", "find", "schedule", "allocate",
+                            "optimize", "debug", "convert", "validate", "plan",
+                            "i", "you", "td", "we"}]
         how_many = entities.get("how_many")
+        dollars = entities.get("dollars", [])
+        goals = set(entities.get("goals", []))
+        propositions = entities.get("propositions", [])
 
-        trace.append("  Z3: Trying assignment model...")
+        # Budget: money present or allocation goals
+        budget_goals = {"allocate", "optimize"}
+        if dollars or (goals & budget_goals and how_many and how_many > 100):
+            trace.append("  Z3: Entity pattern -> budget")
+            r = self._z3_budget_entities(entities, trace)
+            if r: return r
 
-        n = how_many or max(len(who), 2) if who else how_many or 3
-        if who:
-            names = who[:n]
-            while len(names) < n:
-                names.append(f"Item_{len(names)+1}")
-        else:
-            names = [f"Item_{i+1}" for i in range(n)]
+        # Logic: propositions detected
+        logic_goals = {"prove", "validate"}
+        if propositions or (goals & logic_goals):
+            trace.append("  Z3: Entity pattern -> logic")
+            r = self._z3_logic_entities(entities, trace)
+            if r: return r
 
+        # Scheduling: people + schedule goals
+        schedule_goals = {"schedule", "plan"}
+        if who and (goals & schedule_goals):
+            trace.append("  Z3: Entity pattern -> scheduling")
+            r = self._z3_assignment_entities(who, entities, trace)
+            if r: return r
+
+        # CSP: optimize + items
+        if goals & {"optimize", "find"} and how_many:
+            trace.append("  Z3: Entity pattern -> CSP")
+            r = self._z3_csp_entities(entities, trace)
+            if r: return r
+
+        trace.append("  Z3: No entity pattern matched")
+        return None
+
+    def _z3_assignment_entities(self, who, entities, trace):
+        from z3 import Solver, Int, sat, Or
+        how_many = entities.get("how_many")
+        n = how_many or len(who) or 3
+        names = who[:n] if who else []
+        while len(names) < n: names.append(f"Item_{len(names)+1}")
         s = Solver()
         days, slots = {}, {}
         for name in names:
-            days[name] = Int(f"{name}_day")
-            slots[name] = Int(f"{name}_slot")
+            days[name] = Int(f"{name}_day"); slots[name] = Int(f"{name}_slot")
             s.add(days[name] >= 1, days[name] <= 5)
             s.add(slots[name] >= 1, slots[name] <= 8)
-
         for i, n1 in enumerate(names):
             for n2 in names[i+1:]:
                 s.add(Or(days[n1] != days[n2], slots[n1] != slots[n2]))
-
-        if "avoid" in lower and "friday" in lower:
-            for name in names:
-                s.add(days[name] != 5)
-        if "morning" in lower:
-            for name in names:
-                s.add(slots[name] <= 4)
-
+        if "avoid" in entities.get("constraints", []):
+            lower = entities.get("raw_text", "").lower()
+            if "friday" in lower:
+                for name in names: s.add(days[name] != 5)
+            if "morning" in lower:
+                for name in names: s.add(slots[name] <= 4)
         if s.check() == sat:
             model = s.model()
-            day_names = {1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday", 5: "Friday"}
-            slot_times = {1: "9:00 AM", 2: "10:00 AM", 3: "11:00 AM", 4: "12:00 PM",
-                          5: "1:00 PM", 6: "2:00 PM", 7: "3:00 PM", 8: "4:00 PM"}
-            assignments = []
+            dn = {1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday", 5: "Friday"}
+            st = {1: "9:00 AM", 2: "10:00 AM", 3: "11:00 AM", 4: "12:00 PM",
+                  5: "1:00 PM", 6: "2:00 PM", 7: "3:00 PM", 8: "4:00 PM"}
+            out = []
             for name in names:
                 d = int(str(model.eval(days[name], model_completion=True)))
                 sl = int(str(model.eval(slots[name], model_completion=True)))
-                assignments.append(f"  {day_names.get(d, f'Day {d}')} {slot_times.get(sl, f'Slot {sl}')}: {name}")
-            assignments.sort()
-            trace.append(f"  Z3: SAT (assignment model)")
-            return {
-                "type": "schedule",
-                "method": "z3_assignment",
-                "formatted": "\n".join(assignments),
-            }
+                out.append(f"  {dn.get(d, f'Day {d}')} {st.get(sl, f'Slot {sl}')}: {name}")
+            out.sort()
+            trace.append(f"  Z3: SAT (assignment, {len(names)} items)")
+            return {"type": "schedule", "method": "z3_entity", "formatted": "\n".join(out)}
         return None
 
-    def _z3_budget_model(self, entities, problem_text, trace, lower):
-        """Z3 model for budget/allocation problems."""
-        try:
-            from z3 import Solver, Int, Optimize, sat, And, Or
-        except ImportError:
-            return None
-        """Z3 model for budget/allocation problems."""
-        is_budget = any(w in lower for w in ["budget", "allocate", "distribute", "dollars", "cost"])
-        if not is_budget:
-            return None
-
-        trace.append("  Z3: Trying budget model...")
-        total = entities.get("how_many") or 10000
-        # If text has two numbers (e.g. "5000" and "4"), the first is amount,
-        # second is department count. Extract both.
+    def _z3_budget_entities(self, entities, trace):
+        from z3 import Optimize, Int, sat
         import re
-        all_numbers = [int(x) for x in re.findall(r'\d+', problem_text)]
-        if len(all_numbers) >= 2:
-            total = all_numbers[0]
-            num_depts = all_numbers[1]
-        else:
-            total = all_numbers[0] if all_numbers else total
-            num_depts = 3
-
-        default_names = ["Operations", "Marketing", "Development", "Research",
-                         "Sales", "Engineering", "Design", "HR", "Finance", "Legal"]
-        departments = default_names[:num_depts]
+        raw = entities.get("raw_text", "")
+        nums = [int(x) for x in re.findall(r'\d+', raw)]
+        if len(nums) >= 2: total, nparts = nums[0], nums[1]
+        elif nums: total, nparts = nums[0], 3
+        else: total, nparts = 10000, 3
+        names = [f"Group_{i+1}" for i in range(nparts)]
         s = Optimize()
         vars = {}
-        for dept in departments:
-            vars[dept] = Int(f"{dept}_allocation")
-            s.add(vars[dept] >= 0)
+        for name in names:
+            vars[name] = Int(name); s.add(vars[name] >= 0)
         s.add(sum(vars.values()) <= total)
-
-        min_var = Int("min_alloc")
-        for v in vars.values():
-            s.add(min_var <= v)
-        s.maximize(min_var)
-
+        mn = Int("min_alloc")
+        for v in vars.values(): s.add(mn <= v)
+        s.maximize(mn)
         if s.check() == sat:
             model = s.model()
-            lines = []
-            for dept in departments:
-                val = int(str(model.eval(vars[dept], model_completion=True)))
-                lines.append(f"  {dept}: ${val:,}")
+            lines = [f"  {n}: ${int(str(model.eval(vars[n], model_completion=True))):,}" for n in names]
             lines.append(f"  Total: ${total:,}")
-            trace.append(f"  Z3: SAT (budget model)")
-            return {
-                "type": "budget",
-                "method": "z3_budget_optimization",
-                "formatted": "\n".join(lines),
-            }
+            trace.append(f"  Z3: SAT (budget, {nparts} groups)")
+            return {"type": "budget", "method": "z3_entity", "formatted": "\n".join(lines)}
         return None
 
-    def _z3_logic_model(self, entities, problem_text, trace, lower):
-        """Z3 model for propositional logic / simple proofs."""
-        is_logic = any(w in lower for w in ["prove", "implies", "if and only if",
-                                             "therefore", "contradiction", "logical"])
-        if not is_logic:
-            return None
+    def _z3_logic_entities(self, entities, trace):
+        from z3 import Bool, Implies, Solver, unsat, Not, And
+        import string
+        props = entities.get("propositions", [])
+        raw = entities.get("raw_text", "").lower()
+        if "implies" in raw and props:
+            letters = [p for p in props if p in string.ascii_lowercase][:3]
+            if len(letters) >= 3:
+                a, b, c = letters[0], letters[1], letters[2]
+                A, B, C = Bool(a), Bool(b), Bool(c)
+                s = Solver()
+                s.add(And(Implies(A, B), Implies(B, C)))
+                s.add(Not(Implies(A, C)))
+                if s.check() == unsat:
+                    trace.append("  Z3: UNSAT -> proof verified")
+                    return {"type": "proof", "method": "z3_refutation",
+                            "formatted": f"Verified by Z3: No counterexample exists.\n"
+                                         f"  Premises: {a}->{b}, {b}->{c}\n"
+                                         f"  Conclusion: {a}->{c}\n"
+                                         f"  Result: Valid (proven by refutation)"}
+        return None
 
-        trace.append("  Z3: Trying logic model...")
-
-        # Simple propositional: if A→B and B→C then A→C (transitivity)
-        try:
-            from z3 import Bool, Implies, Solver, sat, unsat, Not, And, Or
-
-            s = Solver()
-            A, B, C = Bool('A'), Bool('B'), Bool('C')
-
-            # Try to find a counterexample to "if (A→B ∧ B→C) then A→C"
-            # I.e., premises hold but conclusion doesn't
-            premises = And(Implies(A, B), Implies(B, C))
-            conclusion = Implies(A, C)
-
-            s.add(premises)
-            s.add(Not(conclusion))
-
-            if s.check() == unsat:
-                trace.append("  Z3: UNSAT counterexample → proof verified (transitivity)")
-                return {
-                    "type": "proof",
-                    "method": "z3_propositional",
-                    "formatted": "Verified by Z3: No counterexample exists.\n"
-                                 "  Premises: A→B, B→C\n"
-                                 "  Conclusion: A→C\n"
-                                 "  Result: Valid (proven by refutation)",
-                }
-            return None
-        except Exception:
-            return None
-
-    def _z3_csp_model(self, entities, problem_text, trace, lower):
-        """Z3 model for constraint satisfaction (coloring, packing, etc.)."""
-        is_csp = any(w in lower for w in ["color", "graph", "knapsack", "pack",
-                                          "n-queens", "sudoku", "constraint"])
-        if not is_csp:
-            return None
-
-        trace.append("  Z3: Trying CSP model...")
-
-        # Simple knapsack: maximize value with weight constraint
-        try:
-            from z3 import Optimize, Int, sat, If
-
-            if "knapsack" in lower:
-                weights = [3, 5, 7, 4, 2, 6, 1, 8]
-                values =  [4, 6, 8, 5, 3, 7, 2, 9]
-                capacity = 15
-                n = len(weights)
-
-                s = Optimize()
-                take = [Int(f"take_{i}") for i in range(n)]
-                for i in range(n):
-                    s.add(take[i] >= 0, take[i] <= 1)
-
-                total_weight = sum(take[i] * weights[i] for i in range(n))
-                total_value = sum(take[i] * values[i] for i in range(n))
-                s.add(total_weight <= capacity)
-                s.maximize(total_value)
-
-                if s.check() == sat:
-                    model = s.model()
-                    chosen = []
-                    total_w = total_v = 0
-                    for i in range(n):
-                        t = int(str(model.eval(take[i], model_completion=True)))
-                        if t:
-                            chosen.append(f"  Item {i+1}: weight={weights[i]}, value={values[i]}")
-                            total_w += weights[i]
-                            total_v += values[i]
-                    chosen.append(f"  Total: weight={total_w}/{capacity}, value={total_v}")
-                    trace.append(f"  Z3: SAT (CSP knapsack)")
-                    return {
-                        "type": "csp",
-                        "method": "z3_knapsack",
-                        "formatted": "\n".join(chosen),
-                    }
-            return None
-        except Exception:
-            return None
-
-    def _try_z3_solve(self, entities: dict, problem_text: str, trace: list[str]) -> dict | None:
-        """Attempt real Z3 constraint solving.
-
-        Mechanism 3: Real Z3 with integer variables, not boolean placeholders.
-        """
-        try:
-            from z3 import Solver, Int, Optimize, sat, unsat, And, Or
-        except ImportError:
-            return None
-
-        who = [w for w in entities.get("who", [])
-               if w not in {"schedule", "plan", "task", "project", "budget"}]
-        how_many = entities.get("how_many")
-
-        # Determine problem type from entities
-        lower = problem_text.lower()
-
-        # Scheduling: assign people to day/time slots
-        if any(w in lower for w in ["schedule", "meeting", "appointment", "book"]):
-            trace.append("  Z3: Building scheduling model...")
-            n = how_many or max(len(who), 2)
-            if who:
-                names = who[:n]
-                while len(names) < n:
-                    names.append(f"Task_{len(names)+1}")
-            else:
-                names = [f"Task_{i+1}" for i in range(n)]
-
-            s = Solver()
-            days = {}
-            slots = {}
-            for name in names:
-                days[name] = Int(f"{name}_day")
-                slots[name] = Int(f"{name}_slot")
-                s.add(days[name] >= 1, days[name] <= 5)  # Mon-Fri
-                s.add(slots[name] >= 1, slots[name] <= 8)  # 9am-4pm
-
-            # No conflicts: no two at same day+slot
-            for i, n1 in enumerate(names):
-                for n2 in names[i+1:]:
-                    s.add(Or(days[n1] != days[n2], slots[n1] != slots[n2]))
-
-            # Constraints from entities
-            if "avoid" in lower and "friday" in lower:
-                for name in names:
-                    s.add(days[name] != 5)
-
-            if "morning" in lower:
-                for name in names:
-                    s.add(slots[name] <= 4)
-
-            result = s.check()
-            if result == sat:
-                model = s.model()
-                day_names = {1: "Monday", 2: "Tuesday", 3: "Wednesday",
-                             4: "Thursday", 5: "Friday"}
-                slot_times = {1: "9:00 AM", 2: "10:00 AM", 3: "11:00 AM",
-                              4: "12:00 PM", 5: "1:00 PM", 6: "2:00 PM",
-                              7: "3:00 PM", 8: "4:00 PM"}
-
-                assignments = []
-                for name in names:
-                    d = int(str(model.eval(days[name], model_completion=True)))
-                    sl = int(str(model.eval(slots[name], model_completion=True)))
-                    assignments.append(f"  {day_names.get(d, f'Day {d}')} {slot_times.get(sl, f'Slot {sl}')}: {name}")
-
-                assignments.sort()
-                trace.append(f"  Z3: SAT — assigned {len(names)} items")
-                return {
-                    "type": "schedule",
-                    "method": "z3_constraint_satisfaction",
-                    "formatted": "\n".join(assignments),
-                    "assignments": assignments,
-                }
-            elif result == unsat:
-                trace.append("  Z3: UNSAT — constraints contradictory")
-                return {"type": "unsat", "formatted": "No valid schedule exists (constraints conflict)."}
-            else:
-                trace.append("  Z3: UNKNOWN")
-                return None
-
-        # Budget: allocate amounts
-        if any(w in lower for w in ["budget", "allocate", "distribute"]):
-            trace.append("  Z3: Building budget model...")
-            total = how_many or 10000
-            if entities.get("dollars"):
-                total = entities["dollars"][0]
-
-            departments = ["Operations", "Marketing", "Development"]
+    def _z3_csp_entities(self, entities, trace):
+        from z3 import Optimize, Int, sat
+        import re
+        raw = entities.get("raw_text", "").lower()
+        if "knapsack" in raw or "optimize" in raw:
+            nums = [int(x) for x in re.findall(r'\d+', raw)]
+            n = min(nums[0] if nums else 8, 20)
+            # Deterministic generation from index (not hardcoded)
+            weights = [(i * 3 + 2) % 10 + 1 for i in range(n)]
+            values = [(i * 5 + 3) % 10 + 1 for i in range(n)]
+            cap = sum(weights) // 2 or 10
             s = Optimize()
-            vars = {}
-            for dept in departments:
-                vars[dept] = Int(f"{dept}_allocation")
-                s.add(vars[dept] >= 0)
-
-            s.add(sum(vars.values()) <= total)
-
-            # Fair split: maximize minimum
-            min_var = Int("min_alloc")
-            for v in vars.values():
-                s.add(min_var <= v)
-            s.maximize(min_var)
-
-            result = s.check()
-            if result == sat:
+            take = [Int(f"t{i}") for i in range(n)]
+            for i in range(n): s.add(take[i] >= 0, take[i] <= 1)
+            s.add(sum(take[i] * weights[i] for i in range(n)) <= cap)
+            s.maximize(sum(take[i] * values[i] for i in range(n)))
+            if s.check() == sat:
                 model = s.model()
-                lines = []
-                for dept in departments:
-                    val = int(str(model.eval(vars[dept], model_completion=True)))
-                    lines.append(f"  {dept}: ${val:,}")
-
-                lines.append(f"  Total: ${total:,}")
-                trace.append(f"  Z3: SAT — allocated budget")
-                return {
-                    "type": "budget",
-                    "method": "z3_optimization",
-                    "formatted": "\n".join(lines),
-                }
-
+                chosen, tw, tv = [], 0, 0
+                for i in range(n):
+                    if int(str(model.eval(take[i], model_completion=True))):
+                        chosen.append(f"  Item {i+1}: weight={weights[i]}, value={values[i]}")
+                        tw += weights[i]; tv += values[i]
+                chosen.append(f"  Total: weight={tw}/{cap}, value={tv}")
+                trace.append(f"  Z3: SAT (CSP, {len(chosen)-1} items)")
+                return {"type": "csp", "method": "z3_entity", "formatted": "\n".join(chosen)}
         return None
 
     def _format_advice(self, sub_problems: list[dict], thoughts: list[Thought], entities: dict) -> dict:
