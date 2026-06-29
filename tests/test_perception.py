@@ -17,9 +17,9 @@ class TestNLParser:
         return NLParser(vocab)
 
     def test_extract_concepts(self, parser):
-        concepts = parser.extract_concepts("Click the submit button on the login form")
-        assert "action" in concepts
-        assert concepts["action"] == "click"
+        concepts = parser.extract_entities("Click the submit button on the login form")
+        assert "problem_type" in concepts
+        assert "who" in concepts
 
     def test_parse_shape(self, parser):
         vec = parser.parse("Click the submit button")
@@ -30,14 +30,14 @@ class TestNLParser:
         assert vec.shape == (2000,)
 
     def test_parse_api_command(self, parser):
-        concepts = parser.extract_concepts("Fetch user profile from API")
-        assert "action" in concepts
-        assert concepts["action"] == "fetch"
+        concepts = parser.extract_entities("Fetch user profile from API")
+        assert "problem_type" in concepts
+        assert "goals" in concepts
 
     def test_parse_monitor_command(self, parser):
-        concepts = parser.extract_concepts("Restart the nginx service")
-        assert "action" in concepts
-        assert concepts["action"] == "restart"
+        concepts = parser.extract_entities("Restart the nginx service")
+        assert "problem_type" in concepts
+        assert "who" in concepts
 
 
 class TestDOMEncoder:
