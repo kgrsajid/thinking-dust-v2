@@ -494,6 +494,72 @@ class ThinkingDust:
             trace=trace,
         )
 
+    def needs_teaching(self, result: ThinkingResult) -> bool:
+        """Check if the system should ask to be taught.
+
+        Returns True when:
+        - Memory is nearly empty (pure mode, early interactions)
+        - Confidence is very low
+        - No useful retrieval happened
+        """
+        if self.total_thinks < 3 and len(self.mhn.patterns) < 10:
+            return True
+        if result.confidence < 0.25:
+            return True
+        return False
+
+    def teach(self, problem_text: str, solution_text: str, metadata: dict | None = None):
+        """Learn from explicit human teaching.
+
+        This is the 'teaching dust to think' moment. The human provides
+        a problem and its solution. TD encodes both as HDC vectors and
+        stores them as a new attractor in MHN.
+
+        Next time a similar problem is encountered, TD will retrieve
+        this taught solution.
+
+        Args:
+            problem_text: The problem or question.
+            solution_text: The solution or answer.
+            metadata: Optional metadata (title, tags, etc.)
+
+        Returns:
+            dict with storage confirmation.
+        """
+        problem_hdc = self.parser.parse(problem_text)
+        solution_hdc = self.parser.parse(solution_text)
+
+        # Extract a reasonable title from the solution
+        title = (metadata or {}).get("title", "")
+        if not title:
+            # Use first 6 words of solution as title
+            words = solution_text.split()[:6]
+            title = " ".join(words)
+
+        meta = {
+            "source": "human_taught",
+            "title": title,
+            "effectiveness": (metadata or {}).get("effectiveness", 0.75),
+            "description": solution_text,
+            "problem": problem_text[:200],
+            "solution_text": solution_text[:200],
+            "timestamp": time.time(),
+        }
+        # Merge any extra metadata
+        if metadata:
+            meta.update(metadata)
+
+        self.mhn.store(problem_hdc, solution_hdc, meta)
+        self.total_learned += 1
+
+        return {
+            "status": "learned",
+            "problem": problem_text[:80],
+            "solution": solution_text[:80],
+            "memory_size": len(self.mhn.patterns),
+            "message": f"Got it. I'll remember this for next time.",
+        }
+
     def _hdc_decompose_semantic(self, state_hdc: np.ndarray) -> list[dict]:
         """HDC decomposition using semantic prototypes (not random vectors).
 
@@ -711,33 +777,40 @@ class ThinkingDust:
         seen_ids = set()
 
         def is_strategy(meta):
-            # Behavioral strategies have title + effectiveness in metadata
-            return meta.get("title") and meta.get("effectiveness", 0) > 0
+            # Behavioral strategies have title + effectiveness in metadata,
+            # or were explicitly taught by a human
+            return (
+                (meta.get("title") and meta.get("effectiveness", 0) > 0) or
+                meta.get("source") == "human_taught"
+            )
 
         # First: check IDP thoughts for strategy metadata
+        seen_descs = set()  # dedup by description text
         for t in thoughts:
             meta = t.retrieved_metadata
             if meta and is_strategy(meta):
-                sid = meta.get("id", meta.get("concept", ""))
-                if sid not in seen_ids:
-                    seen_ids.add(sid)
+                desc = meta.get("description", meta.get("solution_text", ""))
+                desc_key = desc[:80]
+                if desc_key not in seen_descs:
+                    seen_descs.add(desc_key)
                     strategies.append({
-                        "title": meta.get("title", meta.get("concept", "Strategy")),
-                        "description": meta.get("description", ""),
+                        "title": meta.get("title", "Learned Strategy"),
+                        "description": desc,
                         "effectiveness": meta.get("effectiveness", 0.5),
                         "similarity": t.retrieved_similarity,
                     })
 
-        # Second: check sub-problem retrievals for strategy metadata
+        # Second: check sub-problem retrievals
         for sp in sub_problems:
             meta = sp.get("retrieved_meta", {})
             if is_strategy(meta):
-                sid = meta.get("id", meta.get("concept", ""))
-                if sid not in seen_ids:
-                    seen_ids.add(sid)
+                desc = meta.get("description", meta.get("solution_text", ""))
+                desc_key = desc[:80]
+                if desc_key not in seen_descs:
+                    seen_descs.add(desc_key)
                     strategies.append({
-                        "title": meta.get("title", meta.get("concept", "Strategy")),
-                        "description": meta.get("description", ""),
+                        "title": meta.get("title", "Learned Strategy"),
+                        "description": desc,
                         "effectiveness": meta.get("effectiveness", 0.5),
                         "similarity": sp.get("retrieved_sim", 0),
                     })
@@ -753,12 +826,13 @@ class ThinkingDust:
             results = self.mhn.retrieve(query_hdc, top_k=5)
             for _, sim, meta in results:
                 if is_strategy(meta):
-                    sid = meta.get("id", meta.get("concept", ""))
-                    if sid not in seen_ids and sim > 0.01:
-                        seen_ids.add(sid)
+                    desc = meta.get("description", meta.get("solution_text", ""))
+                    desc_key = desc[:80]
+                    if desc_key not in seen_descs and sim > 0.01:
+                        seen_descs.add(desc_key)
                         strategies.append({
-                            "title": meta.get("title", meta.get("concept", "Strategy")),
-                            "description": meta.get("description", ""),
+                            "title": meta.get("title", "Learned Strategy"),
+                            "description": desc,
                             "effectiveness": meta.get("effectiveness", 0.5),
                             "similarity": sim,
                         })
@@ -772,7 +846,13 @@ class ThinkingDust:
             else:
                 lines.append("Strategy:")
             for i, s in enumerate(strategies[:5], 1):
-                lines.append(f"  {i}. {s['title']}: {s['description']}")
+                title = s["title"]
+                desc = s["description"]
+                # Avoid title prefix duplication (e.g. "Pomodoro: Pomodoro: work...")
+                if desc.startswith(title):
+                    lines.append(f"  {i}. {desc}")
+                else:
+                    lines.append(f"  {i}. {title}: {desc}")
 
             avg_sim = sum(s.get("similarity", 0) for s in strategies) / len(strategies)
             return {
