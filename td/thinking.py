@@ -864,7 +864,7 @@ class GenericThinkingDust:
             if prims == ["bounded"]:
                 # Default bounded is not meaningful — check MHN first
                 fallback = self._fallback_mhn_solve(thoughts, graph)
-                if fallback and fallback.get("similarity", 0) > 0.3:
+                if fallback:
                     solution = fallback
                     trace.append("  MHN override: better retrieval than default Z3")
 
