@@ -70,6 +70,12 @@ class CAReservoir:
 
         We use a sparse XOR projection: each of the `input_dim` output bits
         is computed as the XOR of 3 randomly selected input bits.
+
+        Known limitation: If evolve() is called with a larger input after
+        a smaller one, the projection is rebuilt with new random indices,
+        making results order-dependent. For deterministic multi-input use,
+        pre-build with the largest expected input via evolve_batch, or
+        instantiate separate reservoirs. (See external review bug #6.)
         """
         n_samples = 3  # XOR of 3 random bits per output — good mixing, sparse
         self._projection_indices = self.rng.integers(

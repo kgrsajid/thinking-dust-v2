@@ -37,9 +37,9 @@ class ConfidenceScore:
         Returns:
             One of "execute", "confirm", "escalate".
         """
-        if self.combined > 0.9:
+        if self.combined >= 0.9:
             return "execute"
-        elif self.combined > 0.7:
+        elif self.combined >= 0.7:
             return "confirm"
         return "escalate"
 
@@ -75,7 +75,8 @@ def compute_confidence(
     Returns:
         ConfidenceScore.
     """
-    w = weights or {"router": 0.4, "mhn": 0.3, "z3": 0.3}
+    # Copy to avoid mutating caller's dict (bug fix from external review #2)
+    w = dict(weights) if weights else {"router": 0.4, "mhn": 0.3, "z3": 0.3}
 
     router_conf = routing_result.combined_confidence
 

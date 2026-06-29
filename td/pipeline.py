@@ -272,10 +272,11 @@ class TDPipeline:
                 action_plan = meta.get("action_plan", [
                     {"action": "retrieved", "metadata": meta}
                 ])
-            # Z3 validation
+            # Z3 validation — deep-copy constraints to avoid mutating global CONSTRAINT_MAP
             constraint_key = f"{routing.domain}/{routing.task_type}"
-            constraints = CONSTRAINT_MAP.get(constraint_key, {})
-            constraints.update(context.get("constraints", {}))
+            constraints = dict(CONSTRAINT_MAP.get(constraint_key, {}))
+            extra_constraints = context.get("constraints") or {}
+            constraints.update(extra_constraints)
 
             if constraints:
                 z3_result = self.z3_bridge.validate_action(action_plan, constraints)
@@ -286,6 +287,11 @@ class TDPipeline:
         elif strategy == "ESCALATE":
             trace.append("Strategy: ESCALATE — too novel for v2")
             action_plan = [{"action": "escalate", "reason": "low_confidence"}]
+
+        else:
+            # Unknown strategy — escalate rather than returning empty plan (bug fix #9)
+            trace.append(f"Strategy: UNKNOWN ({strategy}) — escalating")
+            action_plan = [{"action": "escalate", "reason": f"unknown_strategy:{strategy}"}]
 
         # 5. Confidence scoring
         confidence = compute_confidence(routing, mhn_results, z3_result)

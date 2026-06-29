@@ -167,6 +167,12 @@ class NLParser:
         will have low similarity to all stored patterns → triggers
         escalation).
 
+        Note: This method auto-expands the shared vocabulary by calling
+        add_concept for new roles/fillers. This is intentional — it
+        enables online learning where previously unseen concepts become
+        first-class citizens. If isolation is needed, pass a copy of the
+        vocabulary. (See external review bug #10.)
+
         Args:
             text: Natural language input.
 

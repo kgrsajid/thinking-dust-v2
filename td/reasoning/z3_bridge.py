@@ -18,7 +18,6 @@ import numpy as np
 
 # Lazy Z3 import — don't crash the whole package if Z3 is unavailable
 _z3_available = False
-_z3_modules = {}
 try:
     from z3 import (
         Solver, Bool, Int, Real, And, Or, Not, Implies, If,

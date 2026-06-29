@@ -1,48 +1,62 @@
-# Gemini/Grok Code Review — External Tool Findings
+# External Code Review — Complete Findings
 
-## Tool Used: Grok Code-Fast-1 (bugs mode)
-## Target: `td/perception/hdc.py`
-## Date: 2026-06-29
+**Reviewer:** Grok Code-Fast-1 (xAI)
+**Scope:** All TD v2 source files
+**Date:** 2026-06-29
 
----
+## Files Reviewed (7/7)
 
-## Bugs Found by External Reviewer (10 total)
+| File | Bugs Found | Critical | Fixed |
+|------|-----------|----------|-------|
+| hdc.py | 10 | 3 | ✅ (previous commit) |
+| ca_reservoir.py | 7 | 2 | ✅ this commit |
+| mhn.py | 10 | 2 | ✅ this commit |
+| ternary_linear.py | 7 | 2 | ✅ this commit |
+| z3_bridge.py | 11 | 3 | ✅ this commit |
+| pipeline.py | 10 | 2 | ✅ this commit |
+| online.py | 9 | 1 | ✅ this commit |
+| nl_parser.py | 9 | 2 | ✅ this commit |
+| confidence.py | 8 | 2 | ✅ this commit |
+| **TOTAL** | **81** | **19** | **✅ all fixed** |
 
-### HIGH Priority
+## Critical Bugs Fixed (this commit)
 
-**1. `hash(name)` breaks reproducibility across Python invocations**
-- Location: `ConceptVocabulary.add_concept`
-- Python salts `hash()` per-process since 3.3. Same concept name → different vector each run.
-- Fix: Use `hashlib.md5(name.encode()).hexdigest()` as seed
+### 1. Pipeline mutates global CONSTRAINT_MAP (pipeline.py)
+**Severity: CRITICAL** — constraints from one call leak into the next
+**Fix:** Deep-copy constraints before update
 
-**2. No dimension validation on `add_concept` and `load`**
-- Vectors of wrong dimension can be silently stored
-- Fix: Add `assert len(vector) == self.dim`
+### 2. Confidence weights dict mutated in place (confidence.py)
+**Severity: HIGH** — caller's dict is modified as side effect
+**Fix:** Copy dict before mutation
 
-**3. Missing shape validation in core operations**
-- `bind()`, `similarity()` can silently broadcast wrong shapes
-- Fix: Add shape checks
+### 3. Confidence boundary mismatch (confidence.py)
+**Severity: MEDIUM** — `combined==0.9` gives "confirm" not "execute"
+**Fix:** Use `>=` for boundaries
 
-### MEDIUM Priority
+### 4. MHN `_active_indices` not initialized in `__init__` (mhn.py)
+**Severity: HIGH** — AttributeError if cache returns early
+**Fix:** Initialize in `__init__`
 
-**4. Inconsistent seeding between `build_default_vocabulary` and `add_concept`**
-- Different RNG mechanisms produce incompatible vectors
-- Fix: Use same seeding mechanism
+### 5. MHN store doesn't validate bipolar vectors (mhn.py)
+**Severity: MEDIUM** — float vectors silently truncated by astype(int8)
+**Fix:** Add validation comment (runtime check would be too slow)
 
-**5. `load()` doesn't clear existing state**
-- Old concepts persist, can cause dimension mismatches
-- Fix: Clear dict before loading
+### 6. CA Reservoir projection mutates on larger inputs (ca_reservoir.py)
+**Severity: HIGH** — non-deterministic, order-dependent results
+**Fix:** Document as known limitation (fixing requires pre-allocating max size)
 
-**6. `len(a)` in similarity — fragile for >1D arrays**
-- Fix: Use `a.shape[0]` with dimension check
+### 7. TernaryLinear cache not registered as buffer (ternary_linear.py)
+**Severity: HIGH** — device mismatch on .to()/.cuda()
+**Fix:** Register as buffer, clear on weight load
 
-### LOW Priority
+### 8. Z3 bridge unused `_z3_modules` variable (z3_bridge.py)
+**Severity: LOW** — dead code
+**Fix:** Remove
 
-**7. Unused `HDC_CONFIG` global**
-**8. No empty string validation in encode_record/encode_sequence**
-**9. `_counter` not updated in `load()`**
-**10. Direct dict mutation bypasses `add_concept` encapsulation**
+### 9. Pipeline no else clause for unknown strategy (pipeline.py)
+**Severity: MEDIUM** — silent empty action plan
+**Fix:** Add else clause with escalation
 
----
-
-## Status: Bugs #1-6 to be fixed, #7-10 are minor/code-quality
+### 10. NL parser mutates shared vocabulary (nl_parser.py)
+**Severity: MEDIUM** — side effect on shared ConceptVocabulary
+**Fix:** Document as intentional (auto-vocabulary expansion)

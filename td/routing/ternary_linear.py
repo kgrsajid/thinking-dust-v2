@@ -52,7 +52,8 @@ class TernaryLinear(nn.Module):
         nn.init.kaiming_uniform_(self.weight, a=5 ** 0.5)
 
         # Store ternarized weights cache for inference
-        self._ternary_cache: torch.Tensor | None = None
+        # Registered as buffer so it moves with .to()/.cuda() (bug fix #7)
+        self.register_buffer("_ternary_cache", torch.zeros(out_features, in_features), persistent=False)
         self._cache_valid = False
 
     def _ternarize(self, w: torch.Tensor) -> torch.Tensor:
@@ -115,7 +116,7 @@ class TernaryLinear(nn.Module):
             # Use cached ternary weights in eval mode
             if not self._cache_valid:
                 with torch.no_grad():
-                    self._ternary_cache = self._ternarize(self.weight)
+                    self._ternary_cache.copy_(self._ternarize(self.weight))
                     self._cache_valid = True
             w_ste = self._ternary_cache
 

@@ -73,6 +73,7 @@ class ModernHopfieldNetwork:
         self.config = config
         self.patterns: list[StoredPattern] = []
         self._pattern_matrix: np.ndarray | None = None  # Cache for speed
+        self._active_indices: list[int] = []  # Initialized here to avoid AttributeError (bug fix #4)
         self._dirty: bool = True  # Cache needs rebuild
 
     def _rebuild_cache(self) -> None:
@@ -99,6 +100,10 @@ class ModernHopfieldNetwork:
 
         The composite is bind(key, value), which allows algebraic
         value retrieval: composite ⊗ key ≈ value.
+
+        Note: Vectors should be bipolar int8 {-1, +1}. Non-bipolar inputs
+        are cast via astype(int8) which silently truncates floats — callers
+        must ensure proper encoding. (See external review bug #5.)
 
         Args:
             key: Situation HDC vector.
