@@ -82,29 +82,27 @@ def solve_with_trace(decomposer, problem_text):
             src = sp.source
             print(f"   {i+1}. {status} [{sp.prototype}] {src}{C.RESET}")
             print(f"      {C.GRAY}{sp.description[:70]}{C.RESET}")
-            if sp.solution:
-                for k, v in list(sp.solution.items())[:3]:
-                    print(f"      {C.GREEN}{k}:{C.RESET} {v}")
+            if sp.solution and sp.solution.get("formatted"):
+                print(f"      {C.GREEN}{sp.solution['formatted']}{C.RESET}")
         print()
 
     # Show final solution
     if result.solution:
         print(f"{C.GREEN}✅ Solution:{C.RESET}")
-        if isinstance(result.solution, dict):
-            if "steps" in result.solution:
-                print(f"   Method: {result.solution.get('method', '?')}")
-                print(f"   Steps: {result.solution.get('total_steps', 0)}")
-                for step in result.solution.get("steps", []):
-                    sol = step.get("solution", {})
-                    method = step.get("source", "?")
-                    desc = step.get("sub_problem", "")[:60]
-                    print(f"   {step['step']}. [{method}] {desc}")
-                    if isinstance(sol, dict) and sol.get("status") == "solved":
-                        print(f"      {C.GREEN}Z3 constraints: {sol.get('constraint_count', '?')} "
-                              f"variables: {len(sol.get('variables', {}))}{C.RESET}")
-            else:
-                for k, v in list(result.solution.items())[:5]:
-                    print(f"   {k}: {v}")
+        # Look for formatted output from Z3
+        formatted_found = False
+        if isinstance(result.solution, dict) and "steps" in result.solution:
+            for step in result.solution.get("steps", []):
+                sol = step.get("solution", {})
+                if isinstance(sol, dict) and sol.get("formatted"):
+                    formatted_found = True
+                    print(f"   {C.BOLD}{step.get('sub_problem', '')[:60]}{C.RESET}")
+                    print(f"   {C.GREEN}{sol['formatted']}{C.RESET}")
+                    print()
+        if not formatted_found and isinstance(result.solution, dict):
+            method = result.solution.get("method", "decomposition")
+            steps = result.solution.get("steps", [])
+            print(f"   Method: {method}, Steps: {len(steps)}")
     else:
         print(f"{C.RED}❌ No solution found{C.RESET}")
 

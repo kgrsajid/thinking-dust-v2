@@ -28,6 +28,10 @@ from .decomposer import (
     PrototypeBank, SubProblem, DecompositionResult,
     PROTOTYPE_KEYWORDS,
 )
+from .z3_solver import (
+    extract_entities, build_z3_model, solve_z3_model,
+    requires_external_data, handle_external_data_problem,
+)
 
 
 # Keywords that ALWAYS require actual reasoning, never just MHN retrieval
@@ -449,134 +453,44 @@ class ReasoningDecomposer:
 
     def _z3_solve(self, problem_text: str, hdc_vector: np.ndarray,
                   context: dict, trace: list) -> tuple[dict | None, str]:
-        """Attempt to solve using Z3 constraint solver.
+        """Attempt to solve using Z3 with REAL constraint generation.
 
-        This is where actual reasoning happens. For TD v2, we use
-        template-based constraint generation. For TD Pro, the hypernetwork
-        would generate these constraints.
+        Extracts entities from problem text, builds a problem-specific
+        Z3 model, solves it, and formats the solution as human-readable.
         """
-        lower = problem_text.lower()
+        # Check for external data requirement
+        if requires_external_data(problem_text):
+            trace.append(f"  Requires external data — cannot solve with Z3 alone")
+            result = handle_external_data_problem(problem_text)
+            return result, "external"
 
-        # Check if Z3 is available
-        try:
-            from z3 import Solver, Bool, Int, Real, And, Or, Not, Implies, If, sat, unsat
-        except ImportError:
-            trace.append(f"  Z3 unavailable — cannot reason about: {problem_text[:50]}")
+        # Extract entities and build Z3 model
+        entities = extract_entities(problem_text)
+        ctx = {**context, "text": problem_text}
+        solver, variables, ptype = build_z3_model(entities, ctx)
+
+        if solver is None:
+            trace.append(f"  Z3 unavailable — falling back")
             return self._router_fallback(hdc_vector, trace)
 
-        # Generate constraints based on problem type
-        constraints = self._generate_constraints(problem_text, hdc_vector, context)
-        s = Solver()
+        # Solve
+        solution = solve_z3_model(solver, variables, ptype)
 
-        z3_vars: dict[str, Any] = {}
-        for key, constraint_def in constraints.items():
-            var_name = key.replace(" ", "_")
-            if isinstance(constraint_def, bool):
-                z3_vars[var_name] = Bool(var_name)
-                if constraint_def:
-                    s.add(z3_vars[var_name])
-                else:
-                    s.add(Not(z3_vars[var_name]))
-            elif isinstance(constraint_def, (int, float)):
-                z3_vars[var_name] = Int(var_name)
-                s.add(z3_vars[var_name] == int(constraint_def))
-
-        result = s.check()
-        if result == sat:
-            model = s.model()
-            solution = {
-                "status": "solved",
-                "method": "z3_constraint_satisfaction",
-                "variables": {k: str(model.eval(v, model_completion=True)) for k, v in z3_vars.items()},
-                "constraint_count": len(constraints),
-                "problem": problem_text[:100],
-            }
-            trace.append(f"  Z3: SAT with {len(constraints)} constraints")
+        if solution and solution.get("status") == "solved":
+            n_vars = len(variables)
+            formatted = solution.get("formatted", "")
+            trace.append(f"  Z3: SAT — {ptype} with {n_vars} real variables")
+            if formatted:
+                for line in formatted.split("\n")[:3]:
+                    trace.append(f"    {line}")
             self.stats["z3_solved"] += 1
             return solution, "z3"
-        elif result == unsat:
-            trace.append(f"  Z3: UNSAT — constraints are contradictory")
-            return {"status": "unsat", "reason": "contradictory_constraints"}, "z3"
+        elif solution and solution.get("status") == "unsat":
+            trace.append(f"  Z3: UNSAT — {solution.get('error', 'constraints contradictory')}")
+            return solution, "z3"
         else:
-            trace.append(f"  Z3: UNKNOWN — cannot determine")
-            return {"status": "unknown"}, "z3"
-
-    def _generate_constraints(self, problem_text: str, hdc_vector: np.ndarray,
-                               context: dict) -> dict:
-        """Generate Z3 constraints from problem text.
-
-        This is template-based for TD v2. The templates are derived from
-        the problem's prototype category.
-        """
-        lower = problem_text.lower()
-        constraints = {}
-
-        # Scheduling constraints
-        if any(w in lower for w in ["schedule", "meeting", "time slot", "availability", "book"]):
-            constraints["participants_available"] = True
-            constraints["no_time_conflicts"] = True
-            constraints["within_business_hours"] = True
-            if "priority" in lower or "prioritize" in lower:
-                constraints["priority_order_respected"] = True
-            if "friday" in lower and "avoid" in lower:
-                constraints["friday_afternoon_avoided"] = True
-
-        # Budget/allocation constraints
-        elif any(w in lower for w in ["budget", "allocate", "distribute", "cost"]):
-            constraints["total_within_budget"] = True
-            constraints["all_minimums_met"] = True
-            constraints["no_negative_allocation"] = True
-            if "cut" in lower or "reduce" in lower:
-                constraints["target_reduction_met"] = True
-
-        # Proof constraints
-        elif any(w in lower for w in ["prove", "proof", "implies", "induction"]):
-            constraints["premises_hold"] = True
-            constraints["inference_rules_valid"] = True
-            constraints["conclusion_follows"] = True
-            if "induction" in lower:
-                constraints["base_case_verified"] = True
-                constraints["inductive_step_proven"] = True
-
-        # Optimization constraints
-        elif any(w in lower for w in ["optimize", "minimize", "maximize", "optimal"]):
-            constraints["constraints_satisfied"] = True
-            constraints["objective_optimized"] = True
-
-        # Debugging constraints
-        elif any(w in lower for w in ["debug", "bug", "error", "wrong", "fix"]):
-            constraints["error_located"] = True
-            constraints["root_cause_identified"] = True
-
-        # Validation constraints
-        elif any(w in lower for w in ["validate", "check", "verify", "ensure"]):
-            constraints["schema_checked"] = True
-            constraints["all_fields_present"] = True
-
-        # Data operations
-        elif any(w in lower for w in ["parse", "extract", "filter", "count", "sort"]):
-            constraints["input_parsed"] = True
-            constraints["output_correct"] = True
-
-        # Transformation
-        elif any(w in lower for w in ["convert", "transform", "map"]):
-            constraints["source_parsed"] = True
-            constraints["mapping_complete"] = True
-            constraints["output_valid"] = True
-
-        # Planning
-        elif any(w in lower for w in ["plan", "design", "create", "build"]):
-            constraints["goal_achievable"] = True
-            constraints["steps_ordered"] = True
-
-        # Default: generic constraint
-        else:
-            constraints["problem_well_formed"] = True
-
-        # Merge with context constraints
-        constraints.update(context.get("constraints", {}))
-
-        return constraints
+            trace.append(f"  Z3: could not solve — falling back to router")
+            return self._router_fallback(hdc_vector, trace)
 
     def _router_fallback(self, hdc_vector: np.ndarray, trace: list) -> tuple[dict | None, str]:
         """Use router as last resort fallback."""
