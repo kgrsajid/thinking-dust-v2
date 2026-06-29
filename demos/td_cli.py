@@ -89,20 +89,33 @@ def solve_with_trace(decomposer, problem_text):
     # Show final solution
     if result.solution:
         print(f"{C.GREEN}✅ Solution:{C.RESET}")
-        # Look for formatted output from Z3
-        formatted_found = False
-        if isinstance(result.solution, dict) and "steps" in result.solution:
-            for step in result.solution.get("steps", []):
-                sol = step.get("solution", {})
-                if isinstance(sol, dict) and sol.get("formatted"):
-                    formatted_found = True
+        sol = result.solution
+
+        # Advice mode
+        if sol.get("type") == "advice" and sol.get("formatted"):
+            print(f"   {C.BOLD}Strategy ({sol.get('category', '?')}):{C.RESET}")
+            print(f"   {C.GREEN}{sol['formatted']}{C.RESET}")
+
+        # External data
+        elif sol.get("type") == "info_request" and sol.get("formatted"):
+            print(f"   {C.YELLOW}{sol['formatted']}{C.RESET}")
+
+        # Decomposition with formatted sub-solutions
+        elif isinstance(sol, dict) and "steps" in sol:
+            for step in sol.get("steps", []):
+                step_sol = step.get("solution", {})
+                if isinstance(step_sol, dict) and step_sol.get("formatted"):
                     print(f"   {C.BOLD}{step.get('sub_problem', '')[:60]}{C.RESET}")
-                    print(f"   {C.GREEN}{sol['formatted']}{C.RESET}")
+                    print(f"   {C.GREEN}{step_sol['formatted']}{C.RESET}")
                     print()
-        if not formatted_found and isinstance(result.solution, dict):
-            method = result.solution.get("method", "decomposition")
-            steps = result.solution.get("steps", [])
-            print(f"   Method: {method}, Steps: {len(steps)}")
+
+        # Direct formatted solution
+        elif isinstance(sol, dict) and sol.get("formatted"):
+            print(f"   {C.GREEN}{sol['formatted']}{C.RESET}")
+
+        else:
+            for k, v in list(sol.items())[:5]:
+                print(f"   {k}: {v}")
     else:
         print(f"{C.RED}❌ No solution found{C.RESET}")
 

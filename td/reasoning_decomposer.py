@@ -31,6 +31,7 @@ from .decomposer import (
 from .z3_solver import (
     extract_entities, build_z3_model, solve_z3_model,
     requires_external_data, handle_external_data_problem,
+    get_advice,
 )
 
 
@@ -105,15 +106,49 @@ class ReasoningDecomposer:
 
         # 1. Encode
         hdc_vector = self.parser.parse(problem_text)
-        concepts = self.parser.extract_concepts(problem_text)
-        trace.append(f"Perception: {concepts}")
+        entities = self.parser.extract_entities(problem_text)
+        ptype = entities.get("problem_type", "unknown")
+        trace.append(f"Perception: type={ptype}, entities={ {k: v for k, v in entities.items() if k != 'problem_type' and v} }")
+
+        # Route based on problem type
+        if ptype == "advice":
+            trace.append("Mode: ADVICE — retrieving behavioral strategies")
+            advice = get_advice(entities)
+            if advice:
+                trace.append(f"  Advice category: {advice['category']}")
+                latency = (time.perf_counter() - t0) * 1000
+                return DecompositionResult(
+                    root=SubProblem(problem_text, "advice", hdc_vector, 0.5,
+                                  solution=advice, source="advice"),
+                    prototype_match="advice",
+                    prototype_similarity=0.5,
+                    sub_problems=[],
+                    solution=advice,
+                    confidence=0.75,
+                    latency_ms=latency,
+                    trace=trace,
+                )
+
+        elif ptype == "info_request":
+            trace.append("Mode: INFO_REQUEST — needs external data")
+            result = handle_external_data_problem(problem_text)
+            latency = (time.perf_counter() - t0) * 1000
+            return DecompositionResult(
+                root=SubProblem(problem_text, "info_request", hdc_vector, 0.3,
+                              solution=result, source="external"),
+                prototype_match="info_request",
+                prototype_similarity=0.3,
+                sub_problems=[],
+                solution=result,
+                confidence=0.3,
+                latency_ms=latency,
+                trace=trace,
+            )
 
         # 2. Prototype match
         proto_matches = self.prototypes.match(hdc_vector, top_k=3)
         best_proto, best_sim = proto_matches[0]
         trace.append(f"Prototype: {best_proto} (sim={best_sim:.3f})")
-
-        # 3. Check MHN for decomposition plan (NOT final answer)
         mhn_results = self.mhn.retrieve(hdc_vector, top_k=1)
         mhn_plan = None
         if mhn_results and mhn_results[0][1] >= 0.15:
@@ -150,7 +185,7 @@ class ReasoningDecomposer:
         # 5. Solve each sub-problem
         sub_problems = []
         for desc in sub_descs:
-            sp = self._solve_sub_problem(desc, context, trace)
+            sp = self._solve_sub_problem(desc, context, trace, parent_entities=entities)
             sub_problems.append(sp)
 
         # 6. Compose
@@ -433,14 +468,16 @@ class ReasoningDecomposer:
             ],
         }
 
-    def _solve_sub_problem(self, desc: str, context: dict, trace: list) -> SubProblem:
+    def _solve_sub_problem(self, desc: str, context: dict, trace: list,
+                          parent_entities: dict | None = None) -> SubProblem:
         """Solve a single sub-problem. Always tries Z3."""
         hdc = self.parser.parse(desc)
         proto_matches = self.prototypes.match(hdc, top_k=1)
         proto, sim = proto_matches[0]
 
-        # Try Z3 solve (this is the key fix — Z3 always runs)
-        solution, source = self._z3_solve(desc, hdc, context, trace)
+        # Pass parent entities so Z3 has access to people names etc
+        solution, source = self._z3_solve(desc, hdc, context, trace,
+                                          entities=parent_entities)
 
         return SubProblem(
             description=desc,
@@ -452,7 +489,8 @@ class ReasoningDecomposer:
         )
 
     def _z3_solve(self, problem_text: str, hdc_vector: np.ndarray,
-                  context: dict, trace: list) -> tuple[dict | None, str]:
+                  context: dict, trace: list,
+                  entities: dict | None = None) -> tuple[dict | None, str]:
         """Attempt to solve using Z3 with REAL constraint generation.
 
         Extracts entities from problem text, builds a problem-specific
@@ -464,8 +502,16 @@ class ReasoningDecomposer:
             result = handle_external_data_problem(problem_text)
             return result, "external"
 
-        # Extract entities and build Z3 model
-        entities = extract_entities(problem_text)
+        # Extract entities (use parser if available, or our own extraction)
+        if entities is None:
+            entities = self.parser.extract_entities(problem_text)
+        else:
+            # Merge with our own extraction to catch anything we missed
+            own = self.parser.extract_entities(problem_text)
+            for k, v in own.items():
+                if k not in entities or not entities[k]:
+                    entities[k] = v
+
         ctx = {**context, "text": problem_text}
         solver, variables, ptype = build_z3_model(entities, ctx)
 

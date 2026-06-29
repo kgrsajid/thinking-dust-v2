@@ -26,64 +26,36 @@ if _z3_available:
 def extract_entities(text: str) -> dict:
     """Extract problem-specific entities from natural language text.
 
-    Returns:
-        Dict with entities like 'people', 'budget', 'days', 'items', etc.
+    Uses the NLParser's entity extraction if available, falls back to regex.
     """
+    # Try to use the NLParser for rich entity extraction
+    try:
+        from .perception.nl_parser import NLParser
+        from .perception.hdc import build_default_vocabulary
+        vocab = build_default_vocabulary(dim=10_000)
+        parser = NLParser(vocab)
+        entities = parser.extract_entities(text)
+        # Also add text-derived entities
+        entities["_text"] = text
+        return entities
+    except Exception:
+        pass
+
+    # Fallback: basic regex extraction
     lower = text.lower()
     entities = {}
-
-    # Extract numbers
     numbers = [int(n) for n in re.findall(r'\b(\d+)\b', text)]
     entities["numbers"] = numbers
-
-    # Extract dollar amounts
-    dollars = [int(d) for d in re.findall(r'\$(\d+)', text)]
-    if not dollars:
-        dollars = [int(d) for d in re.findall(r'\b(\d+)\s*(?:dollars?|usd|budget)', lower)]
-    entities["dollars"] = dollars
-
-    # Extract names (capitalized words that aren't sentence starts)
-    names = re.findall(r'\b([A-Z][a-z]+)\b', text)
-    # Filter common non-name words
-    stop = {"The", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
-            "Saturday", "Sunday", "Prove", "Find", "Debug", "Plan", "Allocate",
-            "Schedule", "Balance", "Optimize", "Convert", "Validate"}
-    names = [n for n in names if n not in stop]
-    if names:
-        entities["names"] = list(set(names))
-
-    # Detect days
-    days = []
-    for i, day in enumerate(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]):
-        if day in lower:
-            days.append(i + 1)
-    entities["days"] = days
-
-    # Detect problem type
-    if any(w in lower for w in ["schedule", "meeting", "appointment", "interview"]):
-        entities["type"] = "scheduling"
-    elif any(w in lower for w in ["budget", "allocate", "distribute", "cost"]):
-        entities["type"] = "budget"
-    elif any(w in lower for w in ["prove", "proof", "induction", "theorem", "implies"]):
-        entities["type"] = "proof"
-    elif any(w in lower for w in ["optimize", "minimize", "maximize", "knapsack"]):
-        entities["type"] = "optimization"
-    elif any(w in lower for w in ["debug", "bug", "error", "fix"]):
-        entities["type"] = "debugging"
-    elif any(w in lower for w in ["convert", "transform", "parse"]):
-        entities["type"] = "transformation"
-    elif any(w in lower for w in ["validate", "check", "verify"]):
-        entities["type"] = "validation"
-    elif any(w in lower for w in ["plan", "design", "create"]):
-        entities["type"] = "planning"
-    else:
-        entities["type"] = "generic"
-
+    entities["dollars"] = [int(d) for d in re.findall(r'\$(\d+)', text)]
+    entities["type"] = "generic"
     return entities
 
 
 def build_z3_model(entities: dict, context: dict | None = None):
     """Build a problem-specific Z3 model with real variables.
+
+    If entities contains 'who' from parent problem, those names are used
+    for Z3 variables instead of generic Person_N labels.
 
     Returns:
         Tuple of (solver, variables_dict, problem_type)
@@ -91,8 +63,41 @@ def build_z3_model(entities: dict, context: dict | None = None):
     if not _z3_available:
         return None, {}, entities.get("type", "generic")
 
-    ptype = entities.get("type", "generic")
-    context = context or {}
+    # Determine problem type from entities
+    ptype = entities.get("type", entities.get("problem_type", "generic"))
+
+    # Map parser problem_type to z3 problem type
+    if ptype == "concrete_plan" or entities.get("action") in ("schedule", "book", "allocate", "assign"):
+        # Check if there are scheduling-related targets
+        what = entities.get("what", [])
+        if any(w in str(what) for w in ["meeting", "schedule", "appointment", "interview"]):
+            ptype = "scheduling"
+        elif any(w in str(what) for w in ["budget", "cost", "allocation"]):
+            ptype = "budget"
+        else:
+            # Use 'who' presence as scheduling indicator
+            who = [w for w in entities.get("who", [])
+                   if w not in {"schedule", "plan", "task", "project"}]
+            if who:
+                ptype = "scheduling"
+            else:
+                ptype = "generic"
+    elif ptype == "advice":
+        return None, {}, "advice"  # Advice doesn't use Z3
+    elif ptype == "proof":
+        ptype = "proof"
+    elif ptype == "optimization":
+        ptype = "optimization"
+
+    # Also check context text for problem type
+    ctx_text = (context or {}).get("text", "").lower()
+    if ptype == "generic":
+        if any(w in ctx_text for w in ["schedule", "meeting", "appointment"]):
+            ptype = "scheduling"
+        elif any(w in ctx_text for w in ["budget", "allocate", "distribute"]):
+            ptype = "budget"
+        elif any(w in ctx_text for w in ["prove", "proof", "induction"]):
+            ptype = "proof"
 
     if ptype == "scheduling":
         return _build_scheduling_model(entities, context)
@@ -115,17 +120,25 @@ def _build_scheduling_model(entities: dict, context: dict):
     s = Solver()
     vars = {}
 
-    # Determine participants
-    names = entities.get("names", [])
-    n_meetings = entities.get("numbers", [3])[0] if entities.get("numbers") else 3
-    n_people = max(len(names), n_meetings, 3)
+    # Determine participants from entities
+    who = entities.get("who", [])
+    # Filter out false positives (non-name words caught as people)
+    false_positives = {"schedule", "plan", "task", "project", "budget", "deadline"}
+    who = [w for w in who if w not in false_positives]
 
-    # Generate participant names if none extracted
-    if not names:
-        names = [f"Person_{i+1}" for i in range(n_people)]
+    how_many = entities.get("how_many")
+    if how_many and isinstance(how_many, int):
+        n_people = max(len(who), how_many, 2)
     else:
+        n_people = max(len(who), 3)
+
+    # Generate participant names: use extracted names, fill gaps with Task_N
+    if who:
+        names = list(who[:n_people])
         while len(names) < n_people:
-            names.append(f"Person_{len(names)+1}")
+            names.append(f"Task_{len(names)+1}")
+    else:
+        names = [f"Task_{i+1}" for i in range(n_people)]
 
     # Days: Monday(1) to Friday(5) unless specified
     max_day = 5
@@ -432,16 +445,16 @@ def format_solution(model, variables: dict, problem_type: str) -> dict:
 
 
 def requires_external_data(problem_text: str) -> bool:
-    """Check if a problem requires real-time external data.
-
-    TD cannot solve these alone — it needs an external data source.
-    """
+    """Check if a problem requires real-time external data."""
     lower = problem_text.lower()
     data_keywords = [
         "cheapest", "current price", "today", "right now", "live",
         "stock", "weather", "news", "trending",
-        "flight", "hotel price", "airfare",
+        "flight price", "hotel price", "airfare",
     ]
+    # "find" + data keyword = info request, not "find duplicates"
+    if "find" in lower and any(k in lower for k in ["cheapest", "price", "flight", "hotel"]):
+        return True
     return any(kw in lower for kw in data_keywords)
 
 
@@ -449,10 +462,148 @@ def handle_external_data_problem(problem_text: str) -> dict:
     """Generate a helpful response for problems needing external data."""
     return {
         "status": "needs_external_data",
+        "type": "info_request",
         "message": ("This problem requires real-time data that I don't have. "
                     "I can help plan the approach — what data source should I check?"),
-        "plan": f"1. Identify data source for: {problem_text[:60]}\n"
-                f"2. Retrieve current data\n"
-                f"3. Apply constraints and optimize\n"
-                f"4. Return recommendation",
+        "formatted": ("I need real-time data for this.\n"
+                      "I can plan the structure, but you'll need to provide:\n"
+                      f"  - Current prices/data for: {problem_text[:60]}"),
+    }
+
+
+# ── ADVICE MODE ──
+
+# Behavioral strategy database
+BEHAVIORAL_ADVICE: dict[str, list[str]] = {
+    "procrastination": [
+        "Pomodoro technique: 25 min focused work, 5 min break",
+        "Eat the Frog: tackle the hardest task first thing",
+        "Eliminate distractions: phone in another room, block social media",
+        "Time-block: assign each task to a specific time slot",
+        "Accountability partner: tell someone your plan and deadline",
+    ],
+    "focus": [
+        "Single-task: close all tabs/apps not related to current task",
+        "Environment design: dedicated workspace with minimal stimuli",
+        "Energy management: align hardest tasks with peak energy hours",
+        "Pomodoro: 25 min sprints with 5 min recovery",
+        "Mindfulness: 2 min breathing reset between tasks",
+    ],
+    "learn": [
+        "Active recall: test yourself instead of re-reading",
+        "Spaced repetition: review at increasing intervals",
+        "Interleaving: mix different topics in each session",
+        "Teaching: explain concepts to someone else",
+        "Feynman technique: explain in simple language",
+    ],
+    "debug": [
+        "Reproduce first: get a reliable reproduction steps",
+        "Isolate: use binary search to narrow down the cause",
+        "Rubber duck: explain the code line by line to a duck",
+        "Check assumptions: verify inputs match expectations",
+        "Git bisect: find the exact commit that introduced the bug",
+    ],
+    "code": [
+        "Small functions: each function does one thing",
+        "Meaningful names: code reads like English",
+        "DRY: don't repeat yourself — extract shared logic",
+        "Single responsibility: each module handles one concern",
+        "Test-driven: write the test before the fix",
+    ],
+    "productivity": [
+        "Two-minute rule: if it takes <2 min, do it now",
+        "Batch similar tasks: group emails, calls, admin together",
+        "Priority matrix: urgent+important first, important-not-urgent second",
+        "Time audit: track where your hours actually go for one week",
+        "Default to action: when unsure, do the next physical step",
+    ],
+    "schedule": [
+        "Time-block your day: assign specific hours to specific tasks",
+        "Buffer time: leave 15 min between meetings for context switch",
+        "Hard stops: set a firm end time to prevent scope creep",
+        "Review weekly: spend 15 min Friday planning next week",
+        "Theme days: focus Monday on planning, Tuesday on deep work, etc.",
+    ],
+    "budget": [
+        "50/30/20 rule: 50% needs, 30% wants, 20% savings",
+        "Track everything: use an app or spreadsheet for one month",
+        "Pay yourself first: automate savings before discretionary spending",
+        "Zero-based budget: assign every dollar a job",
+        "Audit subscriptions: cancel anything unused in the last 30 days",
+    ],
+    "study": [
+        "Cornell notes: split page into cues, notes, and summary",
+        "Pomodoro: 25 min study, 5 min break, repeat 4x then long break",
+        "Practice tests: simulate exam conditions before the real thing",
+        "Concept maps: draw connections between topics visually",
+        "Sleep on it: review key concepts before bed for memory consolidation",
+    ],
+}
+
+
+def get_advice(entities: dict) -> dict | None:
+    """Retrieve behavioral advice based on extracted entities.
+
+    Returns formatted advice dict, or None if no matching advice.
+    """
+    goals = [g.lower() for g in entities.get("goals", [])]
+    what = [w.lower() for w in entities.get("what", [])]
+    action = entities.get("action", "").lower()
+
+    # Match advice category
+    advice_list = None
+    category = None
+
+    for goal in goals:
+        if "procrastination" in goal or "procrastinate" in goal:
+            category = "procrastination"
+        elif "focus" in goal or "concentrate" in goal:
+            category = "focus"
+        elif "avoid_distraction" in goal:
+            category = "focus"
+
+    if not category:
+        if action == "debug" or any("bug" in w for w in what):
+            category = "debug"
+        elif action == "code" or any("code" in w for w in what):
+            category = "code"
+        elif action in ("learn", "study"):
+            category = "study"
+        elif action == "schedule":
+            category = "schedule"
+        elif action in ("budget", "allocate"):
+            category = "budget"
+        elif any("task" in w for w in what):
+            category = "productivity"
+
+    if not category:
+        # Try matching what keywords
+        all_text = " ".join(what + goals + [action]).lower()
+        for key in BEHAVIORAL_ADVICE:
+            if key in all_text:
+                category = key
+                break
+
+    if not category or category not in BEHAVIORAL_ADVICE:
+        return None
+
+    advice = BEHAVIORAL_ADVICE[category]
+    how_many = entities.get("how_many", "?")
+
+    # Customize advice based on entity count
+    formatted_lines = []
+    for i, tip in enumerate(advice, 1):
+        formatted_lines.append(f"  {i}. {tip}")
+
+    formatted = "\n".join(formatted_lines)
+
+    if how_many != "?":
+        formatted = f"Strategy for {how_many} tasks:\n" + formatted
+
+    return {
+        "status": "solved",
+        "type": "advice",
+        "category": category,
+        "details": {"strategies": advice, "task_count": how_many},
+        "formatted": formatted,
     }
