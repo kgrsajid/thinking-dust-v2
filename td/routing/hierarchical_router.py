@@ -10,6 +10,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+import torch.nn as nn
 
 from .router_a import RouterA, DOMAINS
 from .router_b import RouterB, TASK_TYPES
@@ -36,8 +37,8 @@ class RoutingResult:
                 f"{self.strategy} conf={self.combined_confidence:.3f})")
 
 
-class HierarchicalRouter:
-    """Full 3-level router cascade.
+class HierarchicalRouter(nn.Module):
+    """Full 3-level router cascade (nn.Module).
 
     Pipeline: HDC → RouterA (domain) → RouterB (task type) → RouterC (strategy)
 
@@ -57,21 +58,18 @@ class HierarchicalRouter:
             input_dim: HDC vector dimensionality.
             device: torch device for computation.
         """
+        super().__init__()
         self.input_dim = input_dim
         self.device = device
 
-        self.router_a = RouterA(input_dim=input_dim).to(device)
-        self.router_b_instances = {
-            domain: RouterB(domain, input_dim=input_dim).to(device)
+        self.router_a = RouterA(input_dim=input_dim)
+        self.router_b_dict = nn.ModuleDict({
+            domain: RouterB(domain, input_dim=input_dim)
             for domain in DOMAINS
-        }
-        self.router_c = RouterC(input_dim=input_dim).to(device)
+        })
+        self.router_c = RouterC(input_dim=input_dim)
 
-        self._all_modules = (
-            [self.router_a] +
-            list(self.router_b_instances.values()) +
-            [self.router_c]
-        )
+        self.to(device)
 
     def route(self, hdc_vector: np.ndarray,
               mhn_retrieval_vector: np.ndarray | None = None) -> RoutingResult:
@@ -95,7 +93,7 @@ class HierarchicalRouter:
             domain_conf = float(domain_probs[domain_idx])
 
             # Level 2: Task type detection (only for selected domain)
-            router_b = self.router_b_instances[domain]
+            router_b = self.router_b_dict[domain]
             task_probs = router_b(x.unsqueeze(0)).squeeze(0)
             task_idx = task_probs.argmax().item()
             task_type = router_b.task_types[task_idx]
@@ -128,30 +126,31 @@ class HierarchicalRouter:
 
     def parameters(self):
         """Yield all trainable parameters (for unified training)."""
-        for module in self._all_modules:
-            yield from module.parameters()
+        return super().parameters()
 
     def train(self, mode: bool = True):
         """Set training mode for all sub-modules."""
-        for module in self._all_modules:
-            module.train(mode)
+        super().train(mode)
+        return self
 
     def eval(self):
         """Set eval mode for all sub-modules."""
-        self.train(False)
+        return super().eval()
 
     def save(self, path: str):
         """Save all router weights."""
         torch.save({
+            "input_dim": self.input_dim,
+            "device": self.device,
             "router_a": self.router_a.state_dict(),
-            "router_b": {d: rb.state_dict() for d, rb in self.router_b_instances.items()},
+            "router_b": {d: rb.state_dict() for d, rb in self.router_b_dict.items()},
             "router_c": self.router_c.state_dict(),
         }, path)
 
     def load(self, path: str):
         """Load all router weights."""
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         self.router_a.load_state_dict(checkpoint["router_a"])
-        for domain, rb in self.router_b_instances.items():
+        for domain, rb in self.router_b_dict.items():
             rb.load_state_dict(checkpoint["router_b"][domain])
         self.router_c.load_state_dict(checkpoint["router_c"])

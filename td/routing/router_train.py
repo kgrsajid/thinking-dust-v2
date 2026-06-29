@@ -16,6 +16,7 @@ from ..perception.nl_parser import NLParser
 from .router_a import RouterA, DOMAINS
 from .router_b import RouterB, TASK_TYPES
 from .router_c import RouterC, STRATEGIES
+from .hierarchical_router import HierarchicalRouter
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +246,7 @@ def train_router(
 
     # --- Train Router B (per domain) ---
     metrics["router_b"] = {}
+    routers_b: dict[str, RouterB] = {}
     for domain in DOMAINS:
         mask = domain_labels == DOMAINS.index(domain)
         if mask.sum() == 0:
@@ -256,6 +258,7 @@ def train_router(
             print(f"Training Router B ({domain})... ({len(X_d)} examples)")
 
         router_b = RouterB(domain, input_dim=vocab.dim)
+        routers_b[domain] = router_b
         optimizer_b = optim.Adam(router_b.parameters(), lr=lr)
 
         if len(X_d) <= batch_size:
@@ -319,4 +322,9 @@ def train_router(
             print(f"  Router B ({d}) accuracy: {m['final_acc']:.3f}")
         print(f"  Router C accuracy: {metrics['router_c']['final_acc']:.3f}")
 
-    return metrics
+    return {
+        "metrics": metrics,
+        "router_a": router_a,
+        "routers_b": routers_b,
+        "router_c": router_c,
+    }

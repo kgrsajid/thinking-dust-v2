@@ -90,8 +90,8 @@ def compute_confidence(
     if z3_result is not None:
         z3_sat = z3_result.satisfiability_score
     else:
-        z3_sat = 0.5  # Neutral — no Z3 validation done
-        # Redistribute z3 weight equally
+        z3_sat = 0.0  # No Z3 validation — don't inflate confidence with neutral score
+        # Redistribute z3 weight proportionally
         remaining = w.pop("z3", 0.3)
         total_remaining = sum(w.values())
         for k in w:

@@ -55,8 +55,12 @@ class OnlineLearner:
         Returns:
             Pattern index in MHN.
         """
-        meta = metadata or {}
-        meta["outcome"] = outcome
+        valid_outcomes = ("success", "failure", "partial")
+        if outcome not in valid_outcomes:
+            raise ValueError(f"outcome must be one of {valid_outcomes}, got '{outcome}'")
+
+        # Copy to avoid mutating caller's dict
+        meta = {**(metadata or {}), "outcome": outcome}
 
         idx = self.mhn.store(situation_hdc, action_hdc, meta)
 
@@ -75,33 +79,31 @@ class OnlineLearner:
     ) -> int:
         """Learn from user correction.
 
-        1. Find the closest stored pattern matching (situation, wrong_action).
-        2. Mark it as inactive (superseded).
+        1. Find all stored patterns matching the situation (key similarity).
+        2. Mark them as inactive (superseded).
         3. Store new pattern (situation, correct_action) as positive attractor.
 
         Args:
             situation_hdc: HDC vector of the situation.
-            wrong_action_hdc: HDC vector of the wrong action.
+            wrong_action_hdc: HDC vector of the wrong action (unused —
+                we match on situation keys, consistent with retrieval).
             correct_action_hdc: HDC vector of the correct action.
             metadata: Additional metadata.
 
         Returns:
             New pattern index in MHN.
         """
-        meta = metadata or {}
-        meta["corrected"] = True
-        meta["outcome"] = "success"
+        meta = {**(metadata or {}), "corrected": True, "outcome": "success"}
 
-        # Find and deactivate the old wrong pattern
+        # Find and deactivate ALL patterns matching the situation (not just first)
+        threshold = self.mhn.config.min_similarity
         for i, p in enumerate(self.mhn.patterns):
             if not p.active:
                 continue
             key_sim = similarity(p.key, situation_hdc)
-            val_sim = similarity(p.value, wrong_action_hdc)
-            if key_sim > 0.5 and val_sim > 0.5:
+            if key_sim > threshold:
                 self.mhn.patterns[i].active = False
                 self.mhn._dirty = True
-                break
 
         # Store the corrected pattern
         idx = self.mhn.store(situation_hdc, correct_action_hdc, meta)

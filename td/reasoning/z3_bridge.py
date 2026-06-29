@@ -134,6 +134,8 @@ class Z3Bridge:
         for name, concept_vec in vocabulary.concepts.items():
             if name.startswith("_"):
                 continue
+            # Cosine similarity for bipolar vectors: dot / dim.
+            # For bipolar {-1,+1}, this equals true cosine since ||x||² = dim.
             sim = float(np.dot(query_f, concept_vec.astype(np.float32)) / len(query_f))
             if sim >= threshold:
                 results[name] = sim

@@ -34,7 +34,7 @@ class HDCConfig:
     seed: int = 42
 
 
-HDC_CONFIG = HDCConfig()
+HDC_CONFIG = HDCConfig()  # Reserved for future use — not yet wired into functions
 
 
 # ---------------------------------------------------------------------------
@@ -97,10 +97,10 @@ def bundle(*vectors: np.ndarray) -> np.ndarray:
 
     Time: O(n * dim) where n = number of vectors.
     """
-    if len(vectors) == 1:
-        return vectors[0].astype(np.int8)
     if len(vectors) < 1:
         raise ValueError("bundle requires at least 1 vector")
+    if len(vectors) == 1:
+        return vectors[0].astype(np.int8)
     stacked = np.stack(vectors, axis=0)
     total = stacked.sum(axis=0)
     total[total == 0] = 1  # Deterministic tie-breaking
@@ -236,9 +236,10 @@ class ConceptVocabulary:
         if name in self.concepts:
             return self.concepts[name]
         if vector is not None:
-            assert len(vector) == self.dim, (
-                f"Vector dim {len(vector)} != vocab dim {self.dim}"
-            )
+            if len(vector) != self.dim:
+                raise ValueError(
+                    f"Vector dim {len(vector)} != vocab dim {self.dim}"
+                )
         else:
             # Reproducible seed from name using hashlib (NOT Python's salted hash())
             import hashlib
@@ -325,9 +326,10 @@ class ConceptVocabulary:
             data = json.load(f)
         for name, vec_list in data.items():
             vec = np.array(vec_list, dtype=np.int8)
-            assert len(vec) == self.dim, (
-                f"Loaded concept '{name}' has dim {len(vec)} != {self.dim}"
-            )
+            if len(vec) != self.dim:
+                raise ValueError(
+                    f"Loaded concept '{name}' has dim {len(vec)} != {self.dim}"
+                )
             self.concepts[name] = vec
         self._counter = len(data)
 

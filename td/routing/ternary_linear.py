@@ -107,10 +107,10 @@ class TernaryLinear(nn.Module):
             Output tensor of shape (batch, out_features).
         """
         if self.training:
-            # Ternarize with STE
+            # Ternarize with STE (BitNet b1.58 standard formulation)
             w_t = self._ternarize(self.weight)
-            # STE: detach ternarized for forward, but keep gradient flowing
-            w_ste = w_t + self.weight - self.weight.detach()
+            # STE: forward uses ternary, backward flows through continuous weights only
+            w_ste = w_t.detach() + (self.weight - self.weight.detach())
             self._cache_valid = False
         else:
             # Use cached ternary weights in eval mode

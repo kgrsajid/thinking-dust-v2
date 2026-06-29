@@ -5,6 +5,7 @@ Pipeline: DOM tree → feature extraction → CA Reservoir → HDC vector
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import Counter
 
@@ -109,12 +110,11 @@ class DOMEncoder:
         """Convert features to binary array for CA Reservoir input.
 
         Each feature above threshold 0.5 contributes a 1, others 0.
-        We also add random padding for CA reservoir mixing.
+        Uses deterministic SHA-256 hashing (NOT Python's salted hash()).
         """
-        # Use deterministic positions based on feature name hash
         binary = np.zeros(200, dtype=np.uint8)
         for name, value in features.items():
-            pos = hash(name) % 200
+            pos = int(hashlib.sha256(name.encode()).hexdigest(), 16) % 200
             binary[pos] = 1 if value > 0.5 else 0
         return binary
 

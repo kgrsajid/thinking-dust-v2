@@ -34,7 +34,6 @@ class RouterC(nn.Module):
         super().__init__()
         self.fc1 = TernaryLinear(input_dim, hidden_dim)
         self.fc2 = TernaryLinear(hidden_dim, len(STRATEGIES))
-        self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, hdc_vector: torch.Tensor) -> torch.Tensor:
         """Classify HDC vector into strategy probabilities.
@@ -52,7 +51,7 @@ class RouterC(nn.Module):
         x = self.fc1(hdc_vector.float())
         x = torch.relu(x)
         x = self.fc2(x)
-        return self.softmax(x)
+        return torch.softmax(x, dim=-1)
 
     def classify(self, hdc_vector_numpy: np.ndarray):
         """Classify numpy HDC vector.

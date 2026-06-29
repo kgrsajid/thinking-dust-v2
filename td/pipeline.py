@@ -257,6 +257,11 @@ class TDPipeline:
         z3_result = None
         strategy = routing.strategy
 
+        # If memory-dependent strategy but no MHN hits, escalate
+        if strategy in ("MEMORY_ONLY", "MEMORY_THEN_VALIDATE") and not mhn_results:
+            strategy = "ESCALATE"
+            trace.append("Strategy: ESCALATE (no MHN patterns for memory strategy)")
+
         if strategy == "MEMORY_ONLY":
             if mhn_results:
                 # Reconstruct action plan from metadata

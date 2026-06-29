@@ -57,7 +57,7 @@ class TestDimensionValidation:
         """Adding a vector with wrong dimension should assert."""
         vocab = ConceptVocabulary(dim=1000)
         wrong_vec = generate_hypervector(dim=500)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             vocab.add_concept("bad", wrong_vec)
 
     def test_bind_shape_mismatch_raises(self):
@@ -91,7 +91,7 @@ class TestDimensionValidation:
             f.flush()
             path = f.name
         try:
-            with pytest.raises(AssertionError):
+            with pytest.raises(ValueError):
                 vocab.load(path)
         finally:
             os.unlink(path)

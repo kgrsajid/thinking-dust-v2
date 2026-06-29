@@ -5,8 +5,7 @@ Classifies input HDC vector into 5 domains.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -33,7 +32,6 @@ class RouterA(nn.Module):
         super().__init__()
         self.fc1 = TernaryLinear(input_dim, hidden_dim)
         self.fc2 = TernaryLinear(hidden_dim, len(DOMAINS))
-        self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, hdc_vector: torch.Tensor) -> torch.Tensor:
         """Classify HDC vector into domain probabilities.
@@ -51,20 +49,16 @@ class RouterA(nn.Module):
         x = self.fc1(hdc_vector.float())
         x = torch.relu(x)
         x = self.fc2(x)
-        return self.softmax(x)
+        return torch.softmax(x, dim=-1)
 
-    def classify(self, hdc_vector_numpy) -> "RoutingResult":
+    def classify(self, hdc_vector_numpy: np.ndarray) -> tuple[str, float, np.ndarray]:
         """Convenience: classify numpy HDC vector and return domain name + confidence.
 
         Returns:
-            Tuple-like: (domain_name, confidence, all_probs)
+            Tuple of (domain_name, confidence, all_probs).
         """
         with torch.no_grad():
             x = torch.from_numpy(hdc_vector_numpy.astype(np.float32))
             probs = self.forward(x).squeeze(0)
             idx = probs.argmax().item()
             return DOMAINS[idx], float(probs[idx]), probs.numpy()
-
-
-# Avoid circular import at module level — import inside method
-import numpy as np  # noqa: E402

@@ -23,12 +23,10 @@ class CAConfig:
     """Configuration for CA Reservoir.
 
     Attributes:
-        rule: Elementary CA rule number (90 = XOR of neighbors).
         steps: Number of evolution steps. 50 is standard.
         input_dim: Projection dimension (should match HDC dim).
         seed: Random seed for reproducible projection.
     """
-    rule: int = 90
     steps: int = 50
     input_dim: int = 10_000
     seed: int = 42
@@ -66,16 +64,17 @@ class CAReservoir:
         self._projection_max_input: int = 0
 
     def _build_projection(self, input_length: int) -> None:
-        """Build or resize the random projection for a given input length.
+        """Build the random projection for a given input length.
 
         We use a sparse XOR projection: each of the `input_dim` output bits
         is computed as the XOR of 3 randomly selected input bits.
 
-        Known limitation: If evolve() is called with a larger input after
-        a smaller one, the projection is rebuilt with new random indices,
-        making results order-dependent. For deterministic multi-input use,
-        pre-build with the largest expected input via evolve_batch, or
-        instantiate separate reservoirs. (See external review bug #6.)
+        IMPORTANT: This rebuilds the projection matrix. To maintain
+        reproducibility, call evolve_batch() (which pre-builds for max
+        input) or build the projection once at init for your max expected
+        input length. Evolving with variable-length inputs sequentially
+        will use the last-built projection for all subsequent calls of
+        equal or smaller size.
         """
         n_samples = 3  # XOR of 3 random bits per output — good mixing, sparse
         self._projection_indices = self.rng.integers(
@@ -136,8 +135,8 @@ class CAReservoir:
     def evolve_batch(self, inputs: list[np.ndarray]) -> np.ndarray:
         """Evolve multiple inputs.
 
-        Uses the additive property for efficiency when possible:
-        CA(A ⊕ B) = CA(A) ⊕ CA(B) for Rule 90.
+        Pre-builds projection for the largest input to ensure
+        reproducibility (no mid-batch rebuilds).
 
         Args:
             inputs: List of binary arrays.
@@ -145,6 +144,12 @@ class CAReservoir:
         Returns:
             np.ndarray[int8] of shape (len(inputs), input_dim).
         """
+        if not inputs:
+            return np.zeros((0, self.config.input_dim), dtype=np.int8)
+        max_len = max(inp.size for inp in inputs)
+        if (self._projection_indices is None
+                or max_len > self._projection_max_input):
+            self._build_projection(max_len)
         results = np.zeros((len(inputs), self.config.input_dim), dtype=np.int8)
         for i, inp in enumerate(inputs):
             results[i] = self.evolve(inp)

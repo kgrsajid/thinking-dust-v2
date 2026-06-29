@@ -59,8 +59,11 @@ def load_state(pipeline, path: str | Path) -> None:
     mhn_path = path / "mhn_patterns.json"
     if mhn_path.exists():
         from ..memory.mhn import StoredPattern
-        with open(mhn_path, "r") as f:
-            patterns_data = json.load(f)
+        try:
+            with open(mhn_path, "r") as f:
+                patterns_data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Corrupt MHN patterns file {mhn_path}: {e}")
         pipeline.mhn.patterns = []
         for pd in patterns_data:
             p = StoredPattern(

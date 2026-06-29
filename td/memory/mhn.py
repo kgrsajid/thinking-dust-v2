@@ -40,7 +40,8 @@ class MHNConfig:
     max_iters: int = 100
     tol: float = 1e-4
     idp_enabled: bool = True
-    idp_threshold: float = 0.3
+    idp_threshold: float = 0.05  # Center of sigmoid (typical random sim ≈ ±0.01 for 10K-dim)
+    idp_gain: float = 100.0  # Steepness — must be high for 10K-dim similarity range
     min_similarity: float = 0.3
 
 
@@ -243,7 +244,7 @@ class ModernHopfieldNetwork:
         Returns:
             Per-pattern β values.
         """
-        gain = 10.0  # Steepness of sigmoid
+        gain = self.config.idp_gain  # Must be high for 10K-dim (typical sim ≈ ±0.01)
         sigmoid = 1.0 / (1.0 + np.exp(-gain * (sims - self.config.idp_threshold)))
         return self.config.beta * (0.1 + 0.9 * sigmoid)
 
