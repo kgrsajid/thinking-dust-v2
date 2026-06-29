@@ -736,6 +736,10 @@ class ThinkingDust:
             total, nparts = all_nums[0], 3
         else:
             total, nparts = 10000, 3
+        # Sanity: total should be the LARGER number (money), nparts the smaller (count)
+        if total < nparts:
+            total, nparts = nparts, total
+        nparts = min(nparts, 100)  # Z3 performance guard
         names = [f"Group_{i+1}" for i in range(nparts)]
         s = Optimize()
         vars = {}

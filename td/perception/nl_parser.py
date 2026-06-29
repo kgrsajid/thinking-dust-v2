@@ -335,17 +335,16 @@ class NLParser:
         fast_type = self._fast_detect_problem_type(text)
         result["problem_type"] = fast_type or self.detect_problem_type(text)
 
-        # 2. Extract ALL numbers (digits + word numbers)
-        word_to_num = {
-            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
-            "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
-            "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
-            "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
-            "fifty": 50, "hundred": 100, "thousand": 1000,
-        }
+        # 2. Extract ALL numbers (digits + word numbers via library)
+        from word2number import w2n
         digit_numbers = [int(x) for x in re.findall(r"\d+", text)]
-        word_numbers = [word_to_num[w] for w in tokens if w in word_to_num]
+        word_numbers = []
+        for token in tokens:
+            if token.isalpha():  # Only convert word numbers, not digits
+                try:
+                    word_numbers.append(w2n.word_to_num(token))
+                except Exception:
+                    pass
         all_numbers = digit_numbers + word_numbers
         if all_numbers:
             result["how_many"] = all_numbers[0]
