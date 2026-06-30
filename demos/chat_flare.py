@@ -264,7 +264,9 @@ def main():
     print()
 
     print(f"  {C['gray']}Commands:{C['reset']}")
-    print(f"    {C['yellow']}teach: <problem> | <solution>{C['reset']}  — teach the system")
+    print(f"    {C['yellow']}teach: <problem> | <solution>{C['reset']}  — teach a fact with answer")
+    print(f"    {C['yellow']}teach: <fact>{C['reset']}                   — teach a fact (triple only)")
+    print(f"    {C['yellow']}relation: <name> <property>{C['reset']}     — teach relation logic")
     print(f"    {C['yellow']}stats{C['reset']}                      — show memory state")
     print(f"    {C['yellow']}trace{C['reset']}                      — toggle reasoning trace")
     print(f"    {C['yellow']}quit{C['reset']}                       — exit")
@@ -309,14 +311,31 @@ def main():
         # Handle teach command
         if user_input.lower().startswith("teach:"):
             rest = user_input[6:].strip()
-            if "|" not in rest:
-                print(f"\n  {C['red']}Format: teach: <problem> | <solution>{C['reset']}\n")
-                continue
-            problem, solution = rest.split("|", 1)
-            r = td.teach(problem.strip(), solution.strip())
-            print(f"\n  {C['green']}✓ {r['message']}{C['reset']}")
+            if "|" in rest:
+                # Full teach: problem | solution
+                problem, solution = rest.split("|", 1)
+                r = td.teach(problem.strip(), solution.strip())
+                print(f"\n  {C['green']}✓ {r['message']}{C['reset']}")
+            else:
+                # Triple-only teach: just extract facts, no answer
+                td.teach(rest, rest)  # store as both question and answer
+                print(f"\n  {C['green']}✓ Fact stored.{C['reset']}")
             print(f"\n  {C['green']}✦ NEW PATTERN STORED ✦{C['reset']}")
             print_memory_state(td)
+            print()
+            continue
+
+        # ─── relation property teaching ──────────────────────────────
+        if user_input.lower().startswith("relation:"):
+            rest = user_input[9:].strip()
+            parts = rest.split()
+            if len(parts) >= 2:
+                rel = parts[0]
+                props = parts[1:]
+                r = td.teach_relation(rel, *props)
+                print(f"\n  {C['green']}✓ {r['message']}{C['reset']}")
+            else:
+                print(f"\n  {C['red']}Format: relation: <name> <property>{C['reset']}")
             print()
             continue
 

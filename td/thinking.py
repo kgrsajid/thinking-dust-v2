@@ -1318,8 +1318,10 @@ class GenericThinkingDust:
                     "method": result.method,
                 }
 
-        # Pattern: are X and Y the same? / is X the same as Y?
+        # Pattern: are X and Y the same? (both word orders)
         m = re.match(r'are\s+(\w+)\s+and\s+(\w+)\s+(?:the\s+same|equal|identical)\??', text_lower)
+        if not m:
+            m = re.match(r'(?:are\s+)?(\w+)\s+and\s+(\w+)\s+are\s+(?:the\s+same|equal|identical)\??', text_lower)
         if m:
             result = self.kg.check_same(m.group(1), m.group(2))
             if result.answer is not None:
