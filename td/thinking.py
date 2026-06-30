@@ -648,6 +648,10 @@ class GenericThinkingDust:
         # If loaded, use encode_query() for position-independent semantic keys
         self.wvm = word_vectors
 
+        # Knowledge Graph for multi-hop inference (the "thinking" layer)
+        from .kg import KnowledgeGraph
+        self.kg = KnowledgeGraph()
+
         # Sub-problem prototypes for reasoning decomposition
         self.sub_problem_prototypes = self._build_semantic_prototypes()
 
@@ -698,6 +702,23 @@ class GenericThinkingDust:
                      f"{len(graph.relations)} relations, "
                      f"{len(graph.constraints)} constraints")
 
+        # ─── Check Knowledge Graph first (inference > constraint) ────
+        # If the KG can answer this via derivation, use it
+        if self.kg and self.kg.triples:
+            kg_result = self._query_knowledge_graph(problem_text)
+            if kg_result:
+                trace.append(f"Route: KG inference ({kg_result['method']})")
+                latency = (time.perf_counter() - t0) * 1000
+                # Auto-derive new facts periodically
+                self.kg.derive_all()
+                return ThinkingResult(
+                    problem=problem_text, evolved_state=problem_hdc,
+                    thoughts=[], sub_problems=[],
+                    solution=kg_result,
+                    confidence=kg_result["confidence"],
+                    latency_ms=latency, intent="inference", trace=trace,
+                )
+
         # ─── Route by discovered structure ──────────────────────────
         if graph.relations:
             # Relations between entities → constraint problem → Z3
@@ -717,6 +738,7 @@ class GenericThinkingDust:
                         f"{'-> CONVERGED' if t.converged else ''}")
 
         fallback = self._fallback_mhn_solve(thoughts, graph)
+
         if fallback:
             trace.append(f"Route: MHN match (sim={fallback['similarity']:.3f})")
             latency = (time.perf_counter() - t0) * 1000
@@ -1106,6 +1128,11 @@ class GenericThinkingDust:
             self.wvm.train_incremental(problem_text)
             self.wvm.train_incremental(solution_text)
 
+        # Try to extract knowledge graph triples
+        triples = self._extract_triples(problem_text, solution_text)
+        for (s, r, o) in triples:
+            self.kg.add_fact(s, r, o)
+
         return {
             "status": "learned", "problem": problem_text[:80],
             "solution": solution_text[:80], "memory_size": len(self.mhn.patterns),
@@ -1159,6 +1186,113 @@ class GenericThinkingDust:
         if self.wvm is not None:
             return self.wvm.encode_query(text)
         return self.parser.parse(text)
+
+    # ─── Knowledge Graph Triple Extraction ──────────────────────────
+
+    def _extract_triples(self, problem: str, solution: str) -> list[tuple[str, str, str]]:
+        """Extract knowledge graph triples from teach() input.
+
+        Uses structural patterns (not hardcoded facts). These are general
+        English constructions that work with ANY entities.
+
+        Examples:
+            "Paris is the capital of France" → (paris, capital_of, france)
+            "France is in the EU" → (france, in, eu)
+            "A is before B" → (a, before, b)
+        """
+        import re
+
+        triples = []
+        # Combine problem + solution for extraction
+        text = f"{problem} {solution}".lower().strip()
+
+        # Pattern: X is the Y of Z → (X, Y, Z)
+        # "Paris is the capital of France" → (paris, capital, france)
+        m = re.search(r'(\w+)\s+is\s+(?:the\s+)?(\w+)\s+of\s+(?:the\s+)?(\w+)', text)
+        if m:
+            s, r, o = m.group(1), m.group(2), m.group(3)
+            # Normalize relation: "capital" → "capital_of"
+            triples.append((s, f"{r}_of", o))
+
+        # Pattern: X is in Y → (X, in, Y)
+        m = re.search(r'(\w+)\s+is\s+in\s+(?:the\s+)?(\w+)', text)
+        if m:
+            triples.append((m.group(1), "in", m.group(2)))
+
+        # Pattern: X is part of Y → (X, part_of, Y)
+        m = re.search(r'(\w+)\s+is\s+part\s+of\s+(?:the\s+)?(\w+)', text)
+        if m:
+            triples.append((m.group(1), "part_of", m.group(2)))
+
+        # Pattern: X is before Y → (X, before, Y)
+        m = re.search(r'(\w+)\s+is\s+before\s+(\w+)', text)
+        if m:
+            triples.append((m.group(1), "before", m.group(2)))
+
+        # Pattern: X is after Y → (X, after, Y)
+        m = re.search(r'(\w+)\s+is\s+after\s+(\w+)', text)
+        if m:
+            triples.append((m.group(1), "after", m.group(2)))
+
+        # Pattern: X means Y → (X, means, Y)
+        m = re.search(r'(\w+)\s+means\s+(\w+)', text)
+        if m:
+            triples.append((m.group(1), "means", m.group(2)))
+
+        return triples
+
+    def _query_knowledge_graph(self, text: str) -> dict | None:
+        """Query the knowledge graph for inferred answers.
+
+        If the KG has enough facts to answer the query (either directly or
+        via derivation), return the answer with proof trace.
+        """
+        import re
+        text_lower = text.lower().strip()
+
+        # Pattern: is X the Y of Z? / is X in Y? / is X part of Y?
+        m = re.match(r'(?:is|what\s+is)\s+(\w+)\s+(?:the\s+)?(\w+)(?:\s+of)\s+(\w+)\??', text_lower)
+        if m:
+            subj, rel_root, obj = m.group(1), m.group(2), m.group(3)
+            # Build relation name
+            if rel_root in ('capital', 'president', 'king', 'queen'):
+                rel = f"{rel_root}_of"
+            else:
+                rel = rel_root
+            result = self.kg.query(subj, rel, obj)
+            if result.answer is not None:
+                return {
+                    "type": "inferred",
+                    "formatted": result.proof_trace,
+                    "confidence": result.confidence,
+                    "method": result.method,
+                }
+
+        # Pattern: is X in Y?
+        m = re.match(r'is\s+(\w+)\s+in\s+(?:the\s+)?(\w+)\??', text_lower)
+        if m:
+            result = self.kg.query(m.group(1), "in", m.group(2))
+            if result.answer is not None:
+                return {
+                    "type": "inferred",
+                    "formatted": result.proof_trace,
+                    "confidence": result.confidence,
+                    "method": result.method,
+                }
+
+        # Pattern: is X part of Y?
+        m = re.match(r'is\s+(\w+)\s+part\s+of\s+(?:the\s+)?(\w+)\??', text_lower)
+        if m:
+            result = self.kg.query(m.group(1), "part_of", m.group(2))
+            if result.answer is not None:
+                return {
+                    "type": "inferred",
+                    "formatted": result.proof_trace,
+                    "confidence": result.confidence,
+                    "method": result.method,
+                }
+
+        return None
 
     def _fallback_mhn_solve(self, thoughts, graph):
         best_sim = 0
