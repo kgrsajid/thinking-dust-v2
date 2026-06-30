@@ -797,7 +797,8 @@ class GenericThinkingDust:
                 trace.append("  MHN: No matching patterns")
             intent_label = "question"
 
-        # Step 6: Store experience
+        # Step 6: Store experience ONLY if we have a real answer
+        # (Don't pollute MHN with "I don't know" patterns that have no solution_text)
         sub_solution_vecs = [sp["hdc"] for sp in sub_problems if sp.get("hdc") is not None]
         composed_hdc = hdc_compose(sub_solution_vecs) if sub_solution_vecs else evolved_state
         metadata = {
@@ -812,9 +813,11 @@ class GenericThinkingDust:
         if solution and solution.get("formatted") and solution.get("type") not in ("unknown", "unsat"):
             metadata["description"] = solution["formatted"][:500]
             metadata["solution_text"] = solution["formatted"][:500]
-        store_experience(self.mhn, problem_hdc, composed_hdc, metadata)
-        self.total_learned += 1
-        trace.append(f"Stored as new attractor (memory: {len(self.mhn.patterns)} patterns)")
+            store_experience(self.mhn, problem_hdc, composed_hdc, metadata)
+            self.total_learned += 1
+            trace.append(f"Stored as new attractor (memory: {len(self.mhn.patterns)} patterns)")
+        else:
+            trace.append("Not stored — no valid solution to remember")
 
         confidence = self._compute_confidence(solution, thoughts, sub_problems)
         latency = (time.perf_counter() - t0) * 1000
@@ -881,9 +884,8 @@ class GenericThinkingDust:
                 best_sim = t.retrieved_similarity
                 best_meta = meta
         if best_sim > 0.3 and best_meta:
-            text = (best_meta.get("description") or
-                    best_meta.get("solution_text") or
-                    best_meta.get("problem", ""))
+            # ONLY use actual answer text — NEVER fall back to the original problem text
+            text = best_meta.get("description") or best_meta.get("solution_text") or ""
             if text and text != "I don't know this one yet.":
                 return {"type": "learned", "formatted": text, "similarity": best_sim}
         return None

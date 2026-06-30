@@ -84,8 +84,8 @@ def print_banner():
     """Print the banner."""
     print(f"""
 {C['cyan']}  ╔═══════════════════════════════════════════════════════════════╗{C['reset']}
-{C['cyan']}  ║{C['reset']}  {C['bold']}✦ THINKING DUST v2 — Intent-Aware Reasoning Engine{C['reset']}       {C['cyan']}║{C['reset']}
-{C['cyan']}  ║{C['reset']}  {C['dim']}6 intents · 18 primitives · HDC · Z3 · MHN · Zero seed{C['reset']}  {C['cyan']}║{C['reset']}
+{C['cyan']}  ║{C['reset']}  {C['bold']}✦ THINKING DUST v2 — Honest Neuro-Symbolic Engine{C['reset']}       {C['cyan']}║{C['reset']}
+{C['cyan']}  ║{C['reset']}  {C['dim']}2 intents · 18 primitives · HDC · Z3 · MHN · Zero seed{C['reset']}  {C['cyan']}║{C['reset']}
 {C['cyan']}  ╚═══════════════════════════════════════════════════════════════╝{C['reset']}
 """)
 
