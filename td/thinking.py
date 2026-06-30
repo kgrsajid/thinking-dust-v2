@@ -632,7 +632,8 @@ class GenericThinkingDust:
     """
 
     def __init__(self, vocab=None, mhn=None, dim=10_000, max_idp_iterations=5,
-                 idp_blend_factor=0.3, convergence_threshold=0.98, pure_mode=False):
+                 idp_blend_factor=0.3, convergence_threshold=0.98, pure_mode=False,
+                 word_vectors=None):
         self.dim = dim
         self.mhn = mhn or ModernHopfieldNetwork(MHNConfig(dim=dim, min_similarity=0.01, idp_enabled=False))
         self.parser = GenericNLParser(vocab, self.mhn, dim=dim)
@@ -641,6 +642,11 @@ class GenericThinkingDust:
         self.idp_blend_factor = idp_blend_factor
         self.convergence_threshold = convergence_threshold
         self.pure_mode = pure_mode
+
+        # Semantic word vectors (BEAGLE-style, trained on corpus)
+        # If None, fall back to parser.parse() for MHN keys
+        # If loaded, use encode_query() for position-independent semantic keys
+        self.wvm = word_vectors
 
         # Sub-problem prototypes for reasoning decomposition
         self.sub_problem_prototypes = self._build_semantic_prototypes()
@@ -698,9 +704,10 @@ class GenericThinkingDust:
             trace.append("Route: relations → constraint solving")
             return self._handle_constraint(problem_text, problem_hdc, graph, trace, t0)
 
-        # No relations. Try MHN retrieval for past similar problems.
+        # No relations. Try MHN retrieval using semantic key.
+        query_hdc = self._encode_key(problem_text)
         evolved_state, thoughts = idp_refine(
-            problem_hdc, self.mhn,
+            query_hdc, self.mhn,
             max_iterations=self.max_idp_iterations,
             convergence_threshold=self.convergence_threshold,
             blend_factor=self.idp_blend_factor,
@@ -712,8 +719,6 @@ class GenericThinkingDust:
         fallback = self._fallback_mhn_solve(thoughts, graph)
         if fallback:
             trace.append(f"Route: MHN match (sim={fallback['similarity']:.3f})")
-            # Store the experience
-            self._auto_store(problem_hdc, graph, fallback, "retrieval", trace)
             latency = (time.perf_counter() - t0) * 1000
             return ThinkingResult(
                 problem=problem_text, evolved_state=evolved_state,
@@ -1079,7 +1084,8 @@ class GenericThinkingDust:
     # ─── Teach ────────────────────────────────────────────────────────
 
     def teach(self, problem_text, solution_text, constraint_template=None, metadata=None):
-        problem_hdc = self.parser.parse(problem_text)
+        # Use semantic key for storage (enables paraphrase matching)
+        problem_hdc = self._encode_key(problem_text)
         solution_hdc = self.parser.parse(solution_text)
         title = (metadata or {}).get("title", " ".join(solution_text.split()[:6]))
         meta = {
@@ -1094,6 +1100,12 @@ class GenericThinkingDust:
             meta.update(metadata)
         self.mhn.store(problem_hdc, solution_hdc, meta)
         self.total_learned += 1
+
+        # Online BEAGLE update: word vectors learn from this interaction
+        if self.wvm is not None:
+            self.wvm.train_incremental(problem_text)
+            self.wvm.train_incremental(solution_text)
+
         return {
             "status": "learned", "problem": problem_text[:80],
             "solution": solution_text[:80], "memory_size": len(self.mhn.patterns),
@@ -1132,6 +1144,21 @@ class GenericThinkingDust:
             "this is": "I see. Tell me more about that.",
             "that is": "Got it. What would you like me to do with that?",
         }
+
+    def _encode_key(self, text: str) -> np.ndarray:
+        """Encode text as MHN storage/retrieval key.
+
+        If semantic word vectors (BEAGLE) are loaded, use position-independent
+        bag-of-content-words encoding. This enables paraphrase matching:
+        "what is the capital of france" and "capital of france?" produce the
+        same key.
+
+        If no word vectors, fall back to parser.parse() (position-dependent,
+        no paraphrase matching).
+        """
+        if self.wvm is not None:
+            return self.wvm.encode_query(text)
+        return self.parser.parse(text)
 
     def _fallback_mhn_solve(self, thoughts, graph):
         best_sim = 0

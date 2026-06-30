@@ -142,10 +142,11 @@ class TestPureMode:
 
     def test_stats_track_learning(self, td):
         td.teach("q1", "a1")
-        td.think("q2")
+        td.teach("q2", "a2")
+        td.think("q1")  # should retrieve, not store new
         s = td.stats()
         assert s["total_thinks"] == 1
-        assert s["total_learned"] == 2  # 1 taught + 1 auto-stored
+        assert s["total_learned"] == 2  # 2 taught
         assert s["memory_size"] == 2
 
 
