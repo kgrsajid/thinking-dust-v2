@@ -234,7 +234,23 @@ def main():
 
     vocab = build_default_vocabulary(dim=10_000)
     mhn = ModernHopfieldNetwork(MHNConfig(dim=10_000, min_similarity=0.01))
-    td = GenericThinkingDust(vocab=vocab, mhn=mhn, dim=10_000, pure_mode=pure)
+
+    # Load BEAGLE word vectors if available (enables paraphrase matching)
+    wvm = None
+    wv_paths = [
+        "data/word_vectors_10k.pkl",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "word_vectors_10k.pkl"),
+    ]
+    for wv_path in wv_paths:
+        if os.path.exists(wv_path):
+            from td.perception.word_vectors import WordVectorModel
+            wvm = WordVectorModel(dim=10_000)
+            wvm.load(wv_path)
+            print(f"  {C['green']}✦ Loaded word vectors: {wvm.stats()['vocab_size']} words, "
+                  f"{wvm.stats()['trained_sentences']} sentences trained{C['reset']}")
+            break
+
+    td = GenericThinkingDust(vocab=vocab, mhn=mhn, dim=10_000, pure_mode=pure, word_vectors=wvm)
 
     print(f"  Mode: {C['green'] if pure else C['yellow']}● {'PURE' if pure else 'SEEDED'}{C['reset']}")
     print_memory_state(td)
