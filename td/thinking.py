@@ -871,9 +871,15 @@ class GenericThinkingDust:
         best_sim = 0
         best_meta = {}
         for t in thoughts:
-            if t.retrieved_hdc is not None and t.retrieved_similarity > best_sim:
+            if t.retrieved_hdc is None:
+                continue
+            meta = t.retrieved_metadata
+            # Filter out conversation/innate patterns in reasoning path
+            if meta.get("intent") == "conversation" or meta.get("source") == "innate":
+                continue
+            if t.retrieved_similarity > best_sim:
                 best_sim = t.retrieved_similarity
-                best_meta = t.retrieved_metadata
+                best_meta = meta
         if best_sim > 0.3 and best_meta:
             text = (best_meta.get("description") or
                     best_meta.get("solution_text") or
@@ -904,7 +910,11 @@ class GenericThinkingDust:
                 else:               return 0.25
             elif sol_type == "conversation":
                 return 0.95
-        best_sim = max((t.retrieved_similarity for t in thoughts if t.retrieved_hdc is not None), default=0)
+        # Filter out conversation/innate patterns when computing fallback confidence
+        reasoning_thoughts = [t for t in thoughts if t.retrieved_hdc is not None
+                              and t.retrieved_metadata.get("intent") != "conversation"
+                              and t.retrieved_metadata.get("source") != "innate"]
+        best_sim = max((t.retrieved_similarity for t in reasoning_thoughts), default=0)
         if best_sim > 0.5:
             return min(best_sim * 0.7, 0.70)
         elif best_sim > 0.3:
