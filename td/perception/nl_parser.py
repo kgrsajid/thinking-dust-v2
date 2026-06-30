@@ -44,15 +44,21 @@ class CAReservoir:
     def process(self, token_vectors):
         features = []
         for tv in token_vectors:
-            indices = np.arange(len(tv))
-            sampled = tv[indices % len(tv)] if len(tv) > self.width else tv
+            # Sample to CA width (64 bits) from the token vector
+            if len(tv) > self.width:
+                indices = np.arange(self.width)
+                sampled = tv[indices % len(tv)]
+            else:
+                sampled = tv
             if len(sampled) < self.width:
                 sampled = np.tile(sampled, self.width // len(sampled) + 1)[:self.width]
             state = (sampled > 0).astype(np.uint8)
             for _ in range(self.steps):
                 state = self._step(state)
             feature = np.zeros(len(tv), dtype=np.float32)
-            feature[:len(state)] = state * 2 - 1
+            # FIX: cast to int16 before arithmetic to avoid uint8 overflow
+            # (uint8: 0*2-1 = 255 due to wrap!)
+            feature[:len(state)] = state.astype(np.int16) * 2 - 1
             features.append(feature)
         return features
 
@@ -121,19 +127,20 @@ class GenericNLParser:
             "optimize": self._encode_phrase("optimize maximize minimize best"),
         }
 
-        # Fast lookup stop words
+        # Fast lookup stop words — excludes words that are also relation types
+        # (before, after, different, etc. are constraint signals, not noise)
         self.stop_words = {
             "the", "a", "an", "and", "or", "is", "are", "was", "were", "be", "been",
             "have", "has", "had", "do", "does", "did", "will", "would", "could",
             "should", "may", "might", "must", "can", "shall", "it", "its", "this",
             "that", "these", "those", "there", "their", "they", "them", "of", "to",
             "in", "for", "on", "with", "at", "by", "from", "as", "into", "through",
-            "during", "before", "after", "above", "below", "between", "under",
-            "again", "further", "then", "once", "here", "why", "how", "all", "any",
+            "during", "above", "below", "between", "under",
+            "again", "further", "then", "once", "here", "all", "any",
             "both", "each", "few", "more", "most", "other", "some", "such", "no",
             "nor", "not", "only", "own", "same", "so", "than", "too", "very", "just",
-            "but", "if", "because", "until", "while", "about", "against", "down",
-            "out", "off", "over", "under",
+            "but", "because", "until", "while", "about", "against", "down",
+            "out", "off", "over",
         }
 
     def _tokenize(self, text):
@@ -216,70 +223,69 @@ class GenericNLParser:
         return {"graph": graph, "text": text, "hdc": problem_hdc, "tokens": tokens}
 
     def _discover_entity_spans(self, tokens):
-        """Discover entities with innate stop-word filtering.
+        """Discover entity spans. Single tokens first, merge only with evidence.
 
-        Rules (pure mode, no MHN):
-        1. Skip span if ALL tokens are stop words.
-        2. Skip span if >50% tokens are stop words (for multi-token spans).
-        3. Skip span if HDC similarity to stop_word_prototype > 0.55.
-        4. Accept span if it contains a digit (numbers are always entities).
-        5. Accept multi-token spans with at least one non-stop word.
-        6. Single non-stop tokens are entities.
+        Pure mode (no MHN):
+        1. Every non-stop, non-pure-punctuation token is a single-token entity.
+        2. Adjacent entity tokens MAY be merged if their joint HDC vector
+           has higher MHN similarity than either alone (seeded mode only).
 
-        Rules (seeded mode, MHN available):
-        7. MHN match overrides all filters (learned exceptions).
+        This avoids the mega-phrase problem where "assign 3 different tasks"
+         gets grabbed as one entity instead of ["3", "tasks"].
         """
         spans = []
         covered = set()
 
-        for length in range(min(4, len(tokens)), 0, -1):
-            for start in range(len(tokens) - length + 1):
-                end = start + length
-                if any(i in covered for i in range(start, end)):
-                    continue
+        # Step 1: Mark all non-stop tokens as single-token entities
+        for i, tok in enumerate(tokens):
+            if tok in self.stop_words:
+                continue
+            # Pure punctuation
+            if not any(c.isalnum() for c in tok):
+                continue
+            spans.append({"start": i, "end": i + 1, "sim": 0.0, "tokens": [tok]})
+            covered.add(i)
 
-                span_tokens = tokens[start:end]
-                phrase = " ".join(span_tokens)
-                phrase_hdc = self._encode_phrase(tokens, start, end)
-
-                # Rule 1: All stop words -> skip
-                if all(t in self.stop_words for t in span_tokens):
-                    continue
-
-                # Rule 2: >50% stop words for multi-token spans -> skip
-                if len(span_tokens) > 1:
-                    stop_ratio = sum(1 for t in span_tokens if t in self.stop_words) / len(span_tokens)
-                    if stop_ratio > 0.5:
+        # Step 2: In seeded mode, try merging adjacent entities
+        # Only merge if MHN similarity of the merged form is higher than
+        # the individual forms. This is learned composition, not hardcoded.
+        if len(self.mhn.patterns) > 0:
+            merged = True
+            while merged and len(spans) > 1:
+                merged = False
+                for idx in range(len(spans) - 1):
+                    s1 = spans[idx]
+                    s2 = spans[idx + 1]
+                    # Must be adjacent in token positions
+                    if s1["end"] != s2["start"]:
+                        continue
+                    # Check if any token between them is uncovered (non-entity gap)
+                    gap = s2["start"] - s1["end"]
+                    if gap > 0:
                         continue
 
-                # Rule 3: HDC similarity to stop-word prototype -> skip
-                stop_sim = similarity(phrase_hdc, self.stop_word_prototype)
-                if stop_sim > 0.55:
-                    continue
+                    # Compare MHN similarity
+                    merged_hdc = self._encode_phrase(tokens, s1["start"], s2["end"])
+                    results = self.mhn.retrieve(merged_hdc, top_k=1)
+                    merged_sim = results[0][1] if results else 0.0
 
-                # Rule 4: Contains digit -> always entity
-                has_digit = any(t.isdigit() for t in span_tokens)
+                    s1_hdc = self._encode_phrase(tokens, s1["start"], s1["end"])
+                    s2_hdc = self._encode_phrase(tokens, s2["start"], s2["end"])
+                    r1 = self.mhn.retrieve(s1_hdc, top_k=1)
+                    r2 = self.mhn.retrieve(s2_hdc, top_k=1)
+                    s1_sim = r1[0][1] if r1 else 0.0
+                    s2_sim = r2[0][1] if r2 else 0.0
 
-                # Rule 5: Multi-token with non-stop word -> entity
-                has_content = length > 1 and not all(t in self.stop_words for t in span_tokens)
-
-                # Rule 7: MHN match (learned pattern)
-                mhn_match = False
-                mhn_sim = 0.0
-                results = self.mhn.retrieve(phrase_hdc, top_k=1)
-                if results and results[0][1] > 0.55:
-                    mhn_match = True
-                    mhn_sim = results[0][1]
-
-                if mhn_match or has_digit or has_content:
-                    spans.append({"start": start, "end": end, "sim": mhn_sim if mhn_match else 0.0})
-                    for i in range(start, end):
-                        covered.add(i)
-
-        # Single non-stop tokens
-        for i, tok in enumerate(tokens):
-            if i not in covered and tok not in self.stop_words and not tok.isdigit():
-                spans.append({"start": i, "end": i + 1, "sim": 0.0})
+                    if merged_sim > max(s1_sim, s2_sim) + 0.05:
+                        # Merge
+                        spans[idx] = {
+                            "start": s1["start"], "end": s2["end"],
+                            "sim": merged_sim,
+                            "tokens": tokens[s1["start"]:s2["end"]],
+                        }
+                        del spans[idx + 1]
+                        merged = True
+                        break
 
         spans.sort(key=lambda s: s["start"])
         return spans
