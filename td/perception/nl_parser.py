@@ -103,21 +103,22 @@ class GenericNLParser:
         )
 
         # ─── INNATE: Relation prototypes (14 types) ──────────────────
+        # Encoded as SHORT phrases (same encoding as inter-entity phrases)
         self.relation_prototypes = {
-            "different": self._encode_phrase("cannot be the same must be distinct separate unique"),
-            "before": self._encode_phrase("comes earlier precedes happens first prior to"),
-            "after": self._encode_phrase("comes later follows happens second subsequent to"),
-            "excludes": self._encode_phrase("cannot coexist mutually exclusive not together forbidden"),
-            "limited": self._encode_phrase("has maximum has minimum bounded by restricted limited to"),
-            "grouped": self._encode_phrase("belongs together same category partition grouped with"),
-            "sum_to": self._encode_phrase("adds up to totals equals sum must equal"),
-            "implies": self._encode_phrase("if then means requires leads to implies"),
-            "overlap": self._encode_phrase("cannot overlap no conflict separate time no overlap"),
-            "precedence": self._encode_phrase("must come before chain ordered sequence precedence"),
-            "ratio": self._encode_phrase("proportional ratio times as many as divided by"),
-            "count": self._encode_phrase("how many at least at most exactly count of"),
-            "equivalent": self._encode_phrase("same as equal to equivalent to identical"),
-            "optimize": self._encode_phrase("maximize minimize best optimal optimize"),
+            "different": self._encode_phrase("different distinct separate unique"),
+            "before": self._encode_phrase("before earlier precedes first"),
+            "after": self._encode_phrase("after later follows second"),
+            "excludes": self._encode_phrase("excludes cannot together forbidden"),
+            "limited": self._encode_phrase("limited bounded maximum minimum"),
+            "grouped": self._encode_phrase("grouped together category partition"),
+            "sum_to": self._encode_phrase("sum total adds equals"),
+            "implies": self._encode_phrase("implies if then requires means"),
+            "overlap": self._encode_phrase("overlap conflict cannot same time"),
+            "precedence": self._encode_phrase("precedence must before chain ordered"),
+            "ratio": self._encode_phrase("ratio proportional divided times"),
+            "count": self._encode_phrase("count exactly at least how many"),
+            "equivalent": self._encode_phrase("equivalent same equal identical"),
+            "optimize": self._encode_phrase("optimize maximize minimize best"),
         }
 
         # Fast lookup stop words
@@ -203,7 +204,7 @@ class GenericNLParser:
             for e2 in graph.entities[i + 1:]:
                 rel_type = self._discover_relation_innate(e1, e2, tokens, text)
                 if rel_type:
-                    rel_hdc = bind(e1["hdc"], bind(self.parse(f"{e1['text']} {rel_type} {e2['text']}"), e2["hdc"]))
+                    rel_hdc = self._encode_phrase(f"{e1['text']} {rel_type} {e2['text']}")
                     graph.add_relation(e1["id"], e2["id"], rel_hdc, rel_type)
 
         # Step 3: Discover constraints (MHN-dependent)
@@ -293,23 +294,28 @@ class GenericNLParser:
         return None
 
     def _discover_relation_innate(self, e1, e2, tokens, text):
-        """Discover relation using innate prototypes (works in pure mode)."""
-        context = f"{e1['text']} ... {e2['text']}"
-        context_hdc = self.parse(context)
-        rel_hdc = bind(e1["hdc"], bind(context_hdc, e2["hdc"]))
+        """Discover relation using innate prototypes (works in pure mode).
+
+        FIX: Use SAME encoding scheme as prototypes (_encode_phrase).
+        Old code used bind(e1, bind(context, e2)) which produces a random
+        vector unrelated to the bundled-sentence prototypes.
+        """
+        # Encode the inter-entity phrase the SAME way as prototypes
+        rel_phrase = f"{e1['text']} {e2['text']}"
+        rel_hdc = self._encode_phrase(rel_phrase)
 
         # Innate: compare to 14 relation prototypes
         best_type = None
         best_sim = 0.0
         for rel_type, proto_hdc in self.relation_prototypes.items():
             sim = similarity(rel_hdc, proto_hdc)
-            if sim > best_sim and sim > 0.35:
+            if sim > best_sim and sim > 0.25:  # Lowered from 0.35
                 best_sim = sim
                 best_type = rel_type
 
         # Learned: MHN override if available
         results = self.mhn.retrieve(rel_hdc, top_k=1)
-        if results and results[0][1] > 0.45 and results[0][1] > best_sim:
+        if results and results[0][1] > 0.40 and results[0][1] > best_sim:
             meta = results[0][2]
             return meta.get("relation_type", best_type or "")
 
