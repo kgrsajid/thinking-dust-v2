@@ -92,11 +92,16 @@ if m:
 
 ### Adding new relation properties
 
+Via the teaching interface:
 ```python
-# In your code:
+td.teach_relation("north_of", "transitive")
+td.teach_relation("married_to", "symmetric")
+td.teach_relation("capital_of", "functional", "inverse:has_capital")
+```
+
+Or directly on the KG:
+```python
 td.kg.set_relation_property("north_of", "transitive")
-td.kg.set_relation_property("married_to", "symmetric")
-td.kg.set_relation_property("capital_of", "functional", "inverse:has_capital")
 ```
 
 ### Adding new rule templates

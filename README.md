@@ -58,6 +58,7 @@ is Paris in Europe?
 ## Key Features
 
 - **Derives new facts** via transitive composition (capital_of + in → in)
+- **Functional contradiction** — "Are Berlin and Paris the same?" → NO (capital_of is functional, different countries)
 - **Paraphrase matching** via BEAGLE word vectors (teach "capital of france", ask "france capital")
 - **Constraint solving** via Z3 with 18 mathematical primitives
 - **Honest uncertainty** — says "I don't know" instead of hallucinating

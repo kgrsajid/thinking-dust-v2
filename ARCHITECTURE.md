@@ -129,19 +129,11 @@ These apply to ANY words, not specific facts.
 | inverse | R1(X,Y) → R2(Y,X) | capital_of↔has_capital, parent_of↔child_of |
 | functional | R(X,Y) ∧ R(X,Z) → Y=Z | capital_of, birth_date, etc. |
 
-**Relation property registry (pre-seeded + user-taught):**
-
+**Teaching relation properties:**
 ```python
-DEFAULT_RELATION_PROPERTIES = {
-    "in": ["transitive"],
-    "part_of": ["transitive"],
-    "before": ["transitive"],
-    "after": ["transitive"],
-    "capital_of": ["functional"],
-    "same_as": ["symmetric", "transitive"],
-    "married_to": ["symmetric"],
-    # User can add: kg.set_relation_property("north_of", "transitive")
-}
+td.teach_relation("north_of", "transitive")
+td.teach_relation("married_to", "symmetric")
+td.teach_relation("capital_of", "functional", "inverse:has_capital")
 ```
 
 **Cross-relation composition:**
@@ -149,6 +141,15 @@ DEFAULT_RELATION_PROPERTIES = {
 - And R1(X,Y) ∧ R2(Y,Z) exist
 - Then R2(X,Z) is derivable
 - Example: `capital_of(Paris, France) ∧ in(France, EU) → in(Paris, EU)`
+
+**Functional contradiction:**
+- "Are Berlin and Paris the same?" → NO
+- Proof: `capital_of` is functional, Berlin→Germany, Paris→France, Germany≠France → Berlin≠Paris
+
+**Proof traces show every hop:**
+```
+paris --capital_of--> france , france --in--> eu , eu --part_of--> europe
+```
 
 ---
 
@@ -178,13 +179,10 @@ Ask contradiction:
 
 ## What's NOT Done Yet (Honest)
 
-1. **Output is machine-text** — proof traces show relation symbols, not natural English
-2. **Triple extraction is brittle** — only 6 structural patterns, no BEAGLE fallback yet
-3. **Relation-specific path filtering** — when query says "in", should filter paths to "in" edges
-4. **Contradiction handling for comparisons** — "Are X and Y the same?" needs functional property check
-5. **Relation property teaching UI** — user can't yet teach "north_of is transitive" via the demo
-6. **PathHD-style HDC encoding** — not implemented (BFS is sufficient at current scale)
-7. **No multi-turn context** — "What about London?" doesn't resolve to previous conversation
+1. **Triple extraction is brittle** — only 6 structural patterns, no BEAGLE fallback yet
+2. **Relation-specific path filtering** — when query says "in", prefers paths ending in "in" (implemented, needs broader testing)
+3. **No multi-turn context** — "What about London?" doesn't resolve to previous conversation
+4. **Scale testing** — KG tested with ~10 facts, needs testing at 50-100+
 
 ---
 
