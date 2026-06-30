@@ -1139,6 +1139,32 @@ class GenericThinkingDust:
             "message": "Got it. I'll remember this for next time.",
         }
 
+    def teach_relation(self, relation: str, *properties: str) -> dict:
+        """Teach logical properties of a relation.
+
+        This is the "teaching dust how to think" interface for relation
+        properties. The user tells TD how a relation behaves, and TD
+        applies general logical templates.
+
+        Examples:
+            td.teach_relation("north_of", "transitive")
+            td.teach_relation("married_to", "symmetric")
+            td.teach_relation("capital_of", "functional", "inverse:has_capital")
+
+        Properties:
+            transitive  — R(X,Y) ∧ R(Y,Z) → R(X,Z)
+            symmetric   — R(X,Y) → R(Y,X)
+            inverse:R2  — R1(X,Y) → R2(Y,X)
+            functional  — R(X,Y) ∧ R(X,Z) → Y=Z
+        """
+        self.kg.set_relation_property(relation, *properties)
+        return {
+            "status": "learned",
+            "relation": relation,
+            "properties": list(properties),
+            "message": f"Got it. '{relation}' is now {', '.join(properties)}.",
+        }
+
     def needs_teaching(self, result):
         if self.total_thinks < 3 and len(self.mhn.patterns) < 10:
             return True
@@ -1284,6 +1310,37 @@ class GenericThinkingDust:
         m = re.match(r'is\s+(\w+)\s+part\s+of\s+(?:the\s+)?(\w+)\??', text_lower)
         if m:
             result = self.kg.query(m.group(1), "part_of", m.group(2))
+            if result.answer is not None:
+                return {
+                    "type": "inferred",
+                    "formatted": result.proof_trace,
+                    "confidence": result.confidence,
+                    "method": result.method,
+                }
+
+        # Pattern: are X and Y the same? / is X the same as Y?
+        m = re.match(r'are\s+(\w+)\s+and\s+(\w+)\s+(?:the\s+same|equal|identical)\??', text_lower)
+        if m:
+            result = self.kg.check_same(m.group(1), m.group(2))
+            if result.answer is not None:
+                return {
+                    "type": "inferred",
+                    "formatted": result.proof_trace,
+                    "confidence": result.confidence,
+                    "method": result.method,
+                }
+            return {
+                "type": "unknown",
+                "formatted": f"I don't have enough information to determine "
+                           f"if {m.group(1)} and {m.group(2)} are the same.",
+                "confidence": 0.15,
+                "method": "unknown",
+            }
+
+        # Pattern: is X the same as Y?
+        m = re.match(r'is\s+(\w+)\s+(?:the\s+same\s+as|equal\s+to|identical\s+to)\s+(\w+)\??', text_lower)
+        if m:
+            result = self.kg.check_same(m.group(1), m.group(2))
             if result.answer is not None:
                 return {
                     "type": "inferred",

@@ -294,6 +294,86 @@ class KnowledgeGraph:
             method="unknown",
         )
 
+    def check_same(self, entity1: str, entity2: str) -> InferenceResult:
+        """Check if two entities are the same using functional properties.
+
+        Uses Option B: if both entities have different values for the same
+        functional relation, they are provably different.
+
+        Example:
+            capital_of(Paris, France) and capital_of(Berlin, Germany)
+            capital_of is functional → Paris != Berlin
+        """
+        entity1 = entity1.strip().lower()
+        entity2 = entity2.strip().lower()
+
+        if entity1 == entity2:
+            return InferenceResult(
+                answer=True,
+                proof_trace=f"{entity1} and {entity2} are identical.",
+                confidence=1.0,
+                method="direct",
+            )
+
+        # Check if explicitly stated as same
+        for t in self.triples:
+            if ((t.subject == entity1 and t.object == entity2 and
+                 t.relation in ("same_as", "equals", "identical_to")) or
+                (t.subject == entity2 and t.object == entity1 and
+                 t.relation in ("same_as", "equals", "identical_to"))):
+                return InferenceResult(
+                    answer=True,
+                    proof_trace=f"Explicitly taught: {t.subject} {t.relation} {t.object}",
+                    confidence=0.95,
+                    method="direct",
+                )
+
+        # Check functional relations for distinction
+        for func_rel, props in self.relation_properties.items():
+            if "functional" not in props:
+                continue
+            # Get values for entity1 and entity2 under this functional relation
+            val1 = None
+            val2 = None
+            for t in self.triples:
+                if t.relation == func_rel:
+                    if t.subject == entity1:
+                        val1 = t.object
+                    elif t.subject == entity2:
+                        val2 = t.object
+            # If both have values and they differ → provably different
+            if val1 and val2 and val1 != val2:
+                return InferenceResult(
+                    answer=False,
+                    proof_trace=f"No. {entity1} has {func_rel}={val1}, "
+                               f"but {entity2} has {func_rel}={val2}. "
+                               f"Since {func_rel} is functional, they are different.",
+                    confidence=0.90,
+                    method="contradiction",
+                )
+
+        # Check if they share any relation with different objects
+        # (weaker evidence of difference)
+        rels1 = {(t.relation, t.object) for t in self.triples if t.subject == entity1}
+        rels2 = {(t.relation, t.object) for t in self.triples if t.subject == entity2}
+        if rels1 and rels2:
+            # They both exist in the KG but no functional property distinguishes them
+            return InferenceResult(
+                answer=None,
+                proof_trace=f"I know about both {entity1} and {entity2}, "
+                           f"but I have no evidence that they are the same or different.",
+                confidence=0.0,
+                method="unknown",
+            )
+
+        return InferenceResult(
+            answer=None,
+            proof_trace=f"I don't have enough information to determine "
+                       f"if {entity1} and {entity2} are the same.",
+            confidence=0.0,
+            method="unknown",
+        )
+
     def _is_functional(self, relation: str) -> bool:
         """Check if a relation is functional (one object per subject)."""
         props = self.relation_properties.get(relation, [])
@@ -303,41 +383,45 @@ class KnowledgeGraph:
                          start: str, end: str) -> list[Triple] | None:
         """Find a path that's logically valid for the target relation.
 
-        A path is valid if all relations in the path are the same transitive
-        relation, or if composition rules apply.
+        Priority:
+        1. Path where ALL edges match the target relation (pure transitivity)
+        2. Path where the LAST edge matches the target relation (composition)
+        3. Any path (fallback — the entities are connected somehow)
         """
         target_props = self.relation_properties.get(target_relation, [])
 
-        for path in paths:
-            # Simple case: all relations in path match target (pure transitivity)
-            if "transitive" in target_props:
+        # Priority 1: pure transitivity (all edges = target relation)
+        if "transitive" in target_props:
+            for path in paths:
                 rels = set(t.relation for t in path)
                 if rels == {target_relation}:
                     return path
 
-            # Composition: capital_of + in → in, etc.
-            # For now, accept any path where the last edge matches
+        # Priority 2: last edge matches target relation (composition)
+        for path in paths:
             if path and path[-1].relation == target_relation:
                 return path
 
-        # Fallback: any path at all
+        # Priority 3: any path where target relation appears
+        for path in paths:
+            if any(t.relation == target_relation for t in path):
+                return path
+
+        # Fallback: shortest path (entities are connected)
         return paths[0] if paths else None
 
     def _format_proof_trace(self, path: list[Triple], subject: str,
                             relation: str, obj: str) -> str:
-        """Format a proof trace for human reading."""
+        """Format a proof trace showing every hop with its relation."""
         if not path:
             return f"({subject}, {relation}, {obj})"
 
-        chain = []
+        hops = []
         for t in path:
-            if t.source == "derived":
-                chain.append(f"({t.subject} →{t.relation}→ {t.object})")
-            else:
-                chain.append(f"{t.subject} {t.relation} {t.object}")
+            hops.append(f"{t.subject} --{t.relation}--> {t.object}")
 
-        proof = " → ".join(chain)
-        return f"Yes. {subject} {relation} {obj} because: {proof}"
+        chain = " , ".join(hops)
+        return f"Yes. {subject} {relation} {obj} because: {chain}"
 
     def _get_inverse_relations(self, relation: str) -> list[str]:
         """Get inverse relation names."""
