@@ -177,6 +177,13 @@ def print_solution(result):
     elif sol_type == "learned" and formatted:
         print(f"  {C['green']}→ {formatted}{C['reset']}")
 
+    elif sol_type == "inferred" and formatted:
+        print(f"  {C['cyan']}┌─ Reasoning Trace ──────────────────────────────────────┐{C['reset']}")
+        for line in formatted.split("\n"):
+            print(f"  {C['cyan']}│{C['reset']}  {line}")
+        print(f"  {C['cyan']}└────────────────────────────────────────────────────────┘{C['reset']}")
+        print(f"  {C['gray']}Derived via logical inference (not just memory){C['reset']}")
+
     elif sol_type == "unsat":
         print(f"  {C['red']}→ {formatted}{C['reset']}")
         print(f"  {C['red']}  (Proven impossible by Z3){C['reset']}")
