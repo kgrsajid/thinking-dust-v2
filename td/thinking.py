@@ -1339,8 +1339,14 @@ class GenericThinkingDust:
                 "method": "unknown",
             }
 
-        # Pattern: is X the same as Y?
-        m = re.match(r'is\s+(\w+)\s+(?:the\s+same\s+as|equal\s+to|identical\s+to)\s+(\w+)\??', text_lower)
+        # Pattern: is X the same as Y? (flexible: with/without "the")
+        m = re.match(r'is\s+(\w+)\s+(?:the\s+)?same\s+as\s+(\w+)\??', text_lower)
+        if not m:
+            m = re.match(r'is\s+(\w+)\s+(?:the\s+)?same\s+(\w+)\??', text_lower)
+        if not m:
+            m = re.match(r'(?:are|is)\s+(\w+)\s+and\s+(\w+)\s+(?:the\s+)?same\??', text_lower)
+        if not m:
+            m = re.match(r'(\w+)\s+and\s+(\w+)\s+are\s+(?:the\s+)?same\??', text_lower)
         if m:
             result = self.kg.check_same(m.group(1), m.group(2))
             if result.answer is not None:
