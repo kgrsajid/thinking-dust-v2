@@ -40,3 +40,4 @@ data/concepts.json
 .ipynb_checkpoints/
 data/td_knowledge.db
 data/td_knowledge_mhn.pkl
+data/td_state.pkl
