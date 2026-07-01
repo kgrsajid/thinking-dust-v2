@@ -38,3 +38,4 @@ data/concepts.json
 
 # Jupyter
 .ipynb_checkpoints/
+data/td_state.pkl
