@@ -111,7 +111,6 @@ class GenericNLParser:
         # ─── INNATE: Relation prototypes (14 types) ──────────────────
         # Encoded as SHORT phrases (same encoding as inter-entity phrases)
         self.relation_prototypes = {
-            # Z3 constraint relations
             "different": self._encode_phrase("different distinct separate unique"),
             "before": self._encode_phrase("before earlier precedes first"),
             "after": self._encode_phrase("after later follows second"),
@@ -126,14 +125,6 @@ class GenericNLParser:
             "count": self._encode_phrase("count exactly at least how many"),
             "equivalent": self._encode_phrase("equivalent same equal identical"),
             "optimize": self._encode_phrase("optimize maximize minimize best"),
-            # Spatial/prepositional relations (for "X in Y", "X on Y", etc.)
-            "in": self._encode_phrase("in inside within located contained"),
-            "on": self._encode_phrase("on top above surface mounted"),
-            "at": self._encode_phrase("at located position point place"),
-            "under": self._encode_phrase("under below beneath underneath"),
-            "part_of": self._encode_phrase("part component member belongs subset"),
-            "has": self._encode_phrase("has contains includes holds owns"),
-            "near": self._encode_phrase("near close adjacent beside next"),
         }
 
         # Fast lookup stop words — excludes words that are also relation types

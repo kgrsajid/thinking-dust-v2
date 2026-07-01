@@ -1270,92 +1270,96 @@ class GenericThinkingDust:
     def _query_knowledge_graph(self, text: str) -> dict | None:
         """Query the knowledge graph for inferred answers.
 
-        If the KG has enough facts to answer the query (either directly or
-        via derivation), return the answer with proof trace.
+        GENERIC approach — no relation-specific regex patterns.
+        Works with ANY relation the KG knows about.
+
+        1. Find entities in the query that exist in the KG
+        2. Find relation words in the query that match KG relations
+        3. For each entity pair, check if KG has a path
+        4. If relation word found, filter paths; else return any path
         """
         import re
         text_lower = text.lower().strip()
+        tokens = re.findall(r'[a-z]+', text_lower)
 
-        # Pattern: is X the Y of Z? / is X in Y? / is X part of Y?
-        m = re.match(r'(?:is|what\s+is)\s+(\w+)\s+(?:the\s+)?(\w+)(?:\s+of)\s+(\w+)\??', text_lower)
-        if m:
-            subj, rel_root, obj = m.group(1), m.group(2), m.group(3)
-            # Build relation name
-            if rel_root in ('capital', 'president', 'king', 'queen'):
-                rel = f"{rel_root}_of"
-            else:
-                rel = rel_root
-            result = self.kg.query(subj, rel, obj)
-            if result.answer is not None:
-                return {
-                    "type": "inferred",
-                    "formatted": result.proof_trace,
-                    "confidence": result.confidence,
-                    "method": result.method,
-                }
+        # Collect entities that exist in the KG
+        kg_entities = set()
+        for t in self.kg.triples:
+            kg_entities.add(t.subject)
+            kg_entities.add(t.object)
+        entities_in_query = [t for t in tokens if t in kg_entities]
 
-        # Pattern: is X in Y?
-        m = re.match(r'is\s+(\w+)\s+in\s+(?:the\s+)?(\w+)\??', text_lower)
-        if m:
-            result = self.kg.query(m.group(1), "in", m.group(2))
-            if result.answer is not None:
-                return {
-                    "type": "inferred",
-                    "formatted": result.proof_trace,
-                    "confidence": result.confidence,
-                    "method": result.method,
-                }
+        if len(entities_in_query) < 2:
+            # Try multi-word entities (e.g., "new york")
+            # Check if any KG entity is a substring of the query
+            query_text = " ".join(tokens)
+            for entity in kg_entities:
+                if " " in entity and entity in query_text:
+                    entities_in_query.append(entity)
+                    # Remove constituent tokens already counted
+                    for part in entity.split():
+                        if part in entities_in_query:
+                            entities_in_query.remove(part)
 
-        # Pattern: is X part of Y?
-        m = re.match(r'is\s+(\w+)\s+part\s+of\s+(?:the\s+)?(\w+)\??', text_lower)
-        if m:
-            result = self.kg.query(m.group(1), "part_of", m.group(2))
-            if result.answer is not None:
-                return {
-                    "type": "inferred",
-                    "formatted": result.proof_trace,
-                    "confidence": result.confidence,
-                    "method": result.method,
-                }
+            if len(entities_in_query) < 2:
+                return None
 
-        # Pattern: are X and Y the same? (both word orders)
-        m = re.match(r'are\s+(\w+)\s+and\s+(\w+)\s+(?:the\s+same|equal|identical)\??', text_lower)
-        if not m:
-            m = re.match(r'(?:are\s+)?(\w+)\s+and\s+(\w+)\s+are\s+(?:the\s+same|equal|identical)\??', text_lower)
-        if m:
-            result = self.kg.check_same(m.group(1), m.group(2))
-            if result.answer is not None:
-                return {
-                    "type": "inferred",
-                    "formatted": result.proof_trace,
-                    "confidence": result.confidence,
-                    "method": result.method,
-                }
-            return {
-                "type": "unknown",
-                "formatted": f"I don't have enough information to determine "
-                           f"if {m.group(1)} and {m.group(2)} are the same.",
-                "confidence": 0.15,
-                "method": "unknown",
-            }
+        # Collect relation words in the query that match KG relations
+        kg_relations = set(t.relation for t in self.kg.triples)
+        # Also check relation_properties (for relations taught but no triples yet)
+        kg_relations.update(self.kg.relation_properties.keys())
 
-        # Pattern: is X the same as Y? (flexible: with/without "the")
-        m = re.match(r'is\s+(\w+)\s+(?:the\s+)?same\s+as\s+(\w+)\??', text_lower)
-        if not m:
-            m = re.match(r'is\s+(\w+)\s+(?:the\s+)?same\s+(\w+)\??', text_lower)
-        if not m:
-            m = re.match(r'(?:are|is)\s+(\w+)\s+and\s+(\w+)\s+(?:the\s+)?same\??', text_lower)
-        if not m:
-            m = re.match(r'(\w+)\s+and\s+(\w+)\s+are\s+(?:the\s+)?same\??', text_lower)
-        if m:
-            result = self.kg.check_same(m.group(1), m.group(2))
-            if result.answer is not None:
-                return {
-                    "type": "inferred",
-                    "formatted": result.proof_trace,
-                    "confidence": result.confidence,
-                    "method": result.method,
-                }
+        relation_in_query = None
+        for token in tokens:
+            if token in kg_relations:
+                relation_in_query = token
+                break
+        # Also check compound relations like "part_of" from "part of"
+        # Must match TWO parts to avoid false positives (e.g., "to" in "married_to")
+        for i, token in enumerate(tokens):
+            if relation_in_query:
+                break
+            for rel in kg_relations:
+                parts = rel.split("_")
+                if len(parts) == 2 and i + 1 < len(tokens):
+                    if token == parts[0] and tokens[i + 1] == parts[1]:
+                        relation_in_query = rel
+                        break
+
+        # Check "are X and Y the same?" — special case for functional comparison
+        if "same" in tokens or "equal" in tokens or "identical" in tokens:
+            if len(entities_in_query) >= 2:
+                result = self.kg.check_same(entities_in_query[0], entities_in_query[1])
+                if result.answer is not None:
+                    return {
+                        "type": "inferred",
+                        "formatted": result.proof_trace,
+                        "confidence": result.confidence,
+                        "method": result.method,
+                    }
+
+        # For each entity pair, check for paths in the KG
+        for i, e1 in enumerate(entities_in_query):
+            for e2 in entities_in_query[i + 1:]:
+                # Try both directions
+                for subj, obj in [(e1, e2), (e2, e1)]:
+                    paths = self.kg.bfs_paths(subj, obj, max_hops=4)
+                    if paths:
+                        best_path = self.kg._find_valid_path(
+                            paths, relation_in_query or "", subj, obj
+                        )
+                        if best_path:
+                            # Format: use relation word if found, else generic
+                            rel_word = relation_in_query or "connects to"
+                            trace = self.kg._format_proof_trace(
+                                best_path, subj, rel_word, obj
+                            )
+                            return {
+                                "type": "inferred",
+                                "formatted": trace,
+                                "confidence": 0.80,
+                                "method": "derived",
+                            }
 
         return None
 
