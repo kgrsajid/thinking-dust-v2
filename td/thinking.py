@@ -725,13 +725,11 @@ class GenericThinkingDust:
 
         # Route to constraint solving if:
         # 1. MHN has a template (learned pattern), OR
-        # 2. Parser found constraint-signaling relations (innate: before, after, different, etc.)
-        #    These are NOT relation-specific — they're general Z3 constraint types.
+        # 2. Parser found a relation that matches a Z3 constraint signal
+        #    Uses parser's own prototype dict — no hardcoded list
+        constraint_signals = set(self.parser.relation_prototypes.keys())
         has_constraint_relations = any(
-            r.get("rel_type") in ("before", "after", "different", "distinct",
-                                   "excludes", "limited", "grouped", "sum_to",
-                                   "implies", "overlap", "precedence", "ratio",
-                                   "count", "equivalent", "optimize")
+            r.get("rel_type") in constraint_signals
             for r in graph.relations
         )
 
@@ -1390,10 +1388,14 @@ class GenericThinkingDust:
                             trace = self.kg._format_proof_trace(
                                 best_path, subj, rel_word, obj
                             )
+                            # Confidence decreases with path length
+                            # 1 hop = 0.95 (direct), 2 = 0.85, 3 = 0.75, 4+ = 0.65
+                            hops = len(best_path)
+                            conf = max(0.65, 0.95 - (hops - 1) * 0.10)
                             return {
                                 "type": "inferred",
                                 "formatted": trace,
-                                "confidence": 0.80,
+                                "confidence": conf,
                                 "method": "derived",
                             }
 
