@@ -204,6 +204,49 @@ Ask contradiction:
 
 ---
 
+## Storage Architecture
+
+**SQLite for structured knowledge. Pickle for dense vectors.**
+
+| Data | Storage | File |
+|------|---------|------|
+| Triples (subject, relation, object) | SQLite | `data/td_knowledge.db` |
+| Relation properties | SQLite | `data/td_knowledge.db` |
+| BEAGLE word vectors | Pickle | `data/word_vectors_10k.pkl` |
+| MHN patterns | Pickle | `data/td_knowledge_mhn.pkl` |
+
+### SQLite Schema
+
+```sql
+CREATE TABLE triples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject TEXT NOT NULL,
+    relation TEXT NOT NULL,
+    object TEXT NOT NULL,
+    source TEXT DEFAULT 'user',   -- 'user', 'derived', 'seed'
+    proof TEXT DEFAULT '',        -- derivation chain
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE relation_properties (
+    relation TEXT PRIMARY KEY,
+    properties TEXT NOT NULL      -- 'transitive,functional'
+);
+```
+
+### Querying
+
+```python
+kg.query_sql("SELECT * FROM triples WHERE subject = ?", ("paris",))
+kg.query_sql("SELECT * FROM triples WHERE relation = ?", ("capital_of",))
+```
+
+```bash
+sqlite3 data/td_knowledge.db "SELECT * FROM triples WHERE subject='paris';"
+```
+
+---
+
 ## Literature Foundation
 
 | Component | Paper | Year |
