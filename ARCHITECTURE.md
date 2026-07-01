@@ -116,6 +116,21 @@ teach: "Paris is the capital of France" | "Paris"
 
 These apply to ANY words, not specific facts.
 
+### Teaching Channels
+
+All teaching flows into the same pipeline. The architecture doesn't change — the input channel does.
+
+```
+User types fact          → teach() → triples → KG + BEAGLE update
+Wikidata dump           → bulk load → triples → KG
+Internet search         → fetch → parse → triples → KG (with expiry)
+Image (TD Pro)          → perception → HDC vector → concept → KG
+Audio (TD Pro)          → phonetic → HDC → text → teach() → KG
+CSV/JSON                → table rows → triples → KG
+```
+
+Every channel ends at the same place: `KnowledgeGraph.add_fact()`.
+
 ---
 
 ## Inference Engine (Rule Templates)
@@ -174,6 +189,30 @@ Ask contradiction:
 ```
 
 **These answers were DERIVED via transitive composition, not retrieved from memory.**
+
+---
+
+## The Handoff: TD v2 ↔ TD Pro
+
+```
+User Input
+    ↓
+TD v2 (Fast Path — 10-100ms)
+    ├── Fact retrieval → answer ✅
+    ├── Constraint solving → Z3 solution ✅
+    ├── Logical inference → derived answer ✅
+    └── Novel / Spatial / Complex / Unknown → hand off to TD Pro
+            ↓
+        TD Pro (Slow Path — 1-5 seconds)
+            ├── Liquid-KAN encodes problem dynamics
+            ├── Hypernetwork generates NCA parameters
+            ├── NCA converges to solution attractor
+            └── Solution stored in TD v2's MHN for future fast retrieval
+                    ↓
+                TD v2 answers immediately next time ✅
+```
+
+**The killer insight: TD Pro trains TD v2.** Every novel problem TD Pro solves becomes a pattern TD v2 retrieves instantly. The slow mind teaches the fast mind. Over time, TD v2 handles more problems without invoking TD Pro. This is how human expertise works — struggle once, then it becomes intuition.
 
 ---
 
