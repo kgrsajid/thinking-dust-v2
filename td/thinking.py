@@ -720,10 +720,24 @@ class GenericThinkingDust:
                 )
 
         # ─── Route by discovered structure ──────────────────────────
-        if graph.relations:
-            # Relations between entities → constraint problem → Z3
-            trace.append("Route: relations → constraint solving")
-            return self._handle_constraint(problem_text, problem_hdc, graph, trace, t0)
+        # Check for constraint templates (MHN patterns with Z3 primitives)
+        constraint_template = self._find_constraint_template(graph, problem_hdc)
+
+        # Route to constraint solving if:
+        # 1. MHN has a template (learned pattern), OR
+        # 2. Parser found constraint-signaling relations (innate: before, after, different, etc.)
+        #    These are NOT relation-specific — they're general Z3 constraint types.
+        has_constraint_relations = any(
+            r.get("rel_type") in ("before", "after", "different", "distinct",
+                                   "excludes", "limited", "grouped", "sum_to",
+                                   "implies", "overlap", "precedence", "ratio",
+                                   "count", "equivalent", "optimize")
+            for r in graph.relations
+        )
+
+        if constraint_template or has_constraint_relations:
+            trace.append("Route: constraint template → Z3 solving")
+            return self._handle_constraint(problem_text, problem_hdc, graph, trace, t0, constraint_template)
 
         # No relations. Try MHN retrieval using semantic key.
         query_hdc = self._encode_key(problem_text)
@@ -961,8 +975,28 @@ class GenericThinkingDust:
             confidence=0.90, latency_ms=latency, intent="command", trace=trace,
         )
 
-    def _handle_constraint(self, problem_text, problem_hdc, graph, trace, t0):
-        """Handle constraint problems — Z3 solving."""
+    def _find_constraint_template(self, graph, problem_hdc):
+        """Check if MHN has a constraint template for this problem.
+
+        Returns template dict if found, None otherwise.
+        This replaces the need for parser-discovered relations to trigger
+        constraint solving — the MHN templates are the source of truth.
+        """
+        results = self.mhn.retrieve(problem_hdc, top_k=3)
+        for vec, sim, meta in results:
+            if sim < 0.30:
+                continue
+            template = meta.get("constraint_template")
+            if template and template.get("primitives"):
+                return template
+        return None
+
+    def _handle_constraint(self, problem_text, problem_hdc, graph, trace, t0, template=None):
+        """Handle constraint problems — Z3 solving.
+
+        Uses MHN templates (learned from corpus or taught) for Z3 primitives.
+        No parser prototypes needed — the MHN is the source of truth.
+        """
         # IDP Refinement
         trace.append(f"IDP refinement (max {self.max_idp_iterations} iterations)...")
         evolved_state, thoughts = idp_refine(
@@ -977,21 +1011,23 @@ class GenericThinkingDust:
         avg_iters = sum(t.iteration for t in thoughts) / max(len(thoughts), 1)
         self.avg_iterations = (self.avg_iterations * (self.total_thinks - 1) + avg_iters) / self.total_thinks
 
+        # If no template passed in, try to find one via MHN retrieval
+        if not template:
+            for sp in thoughts:
+                if hasattr(sp, 'retrieved_metadata'):
+                    meta = sp.retrieved_metadata or {}
+                    template = meta.get("constraint_template")
+                    if template:
+                        break
+
         # HDC Decomposition
         trace.append("HDC algebraic decomposition...")
         sub_problems = hdc_decompose(evolved_state, self.sub_problem_prototypes, self.mhn)
         for sp in sub_problems:
             trace.append(f"  [{sp['concept']}] sim={sp['retrieved_sim']:.3f}")
 
-        # Retrieve template
-        template = None
-        for sp in sub_problems:
-            if sp["concept"] == "discover_constraints":
-                meta = sp.get("retrieved_meta", {})
-                template = meta.get("constraint_template")
-                if template:
-                    trace.append(f"  Retrieved template: {template.get('primitives', [])}")
-                break
+        if template:
+            trace.append(f"  Template: {template.get('primitives', [])}")
 
         # Z3 Solve
         trace.append("Generic Z3 solving...")
