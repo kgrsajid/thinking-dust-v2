@@ -163,6 +163,65 @@ print(td.wvm.similarity("capital", "sort"))    # should be <0.05
 print(td.wvm.nearest_neighbors("paris", 5))
 ```
 
+## When to Teach Relation Properties
+
+### You DON'T need to teach these (pre-seeded):
+
+| Relation | Property | Why |
+|----------|----------|-----|
+| `in` | transitive | "Paris in France, France in EU → Paris in EU" |
+| `part_of` | transitive | "Engine part_of Car, Car part_of Fleet → Engine part_of Fleet" |
+| `before` | transitive | "A before B, B before C → A before C" |
+| `after` | transitive | Same as before |
+| `capital_of` | functional | "Paris capital_of France" → can't also be capital of Germany |
+| `same_as` | symmetric, transitive | "A same_as B → B same_as A" |
+| `married_to` | symmetric | "A married_to B → B married_to A" |
+
+### You SHOULD teach these (when using new relations):
+
+| If you teach... | Then teach... | Why |
+|-----------------|---------------|-----|
+| `X is north of Y` | `relation: north_of transitive` | "Kazakhstan north_of Uzbekistan, Uzbekistan north_of Tajikistan → Kazakhstan north_of Tajikistan" |
+| `X depends on Y` | `relation: depends_on transitive` | "A depends_on B, B depends_on C → A depends_on C" |
+| `X is adjacent to Y` | `relation: adjacent_to symmetric` | "A adjacent_to B → B adjacent_to A" |
+| `X is ancestor of Y` | `relation: ancestor_of transitive` | "A ancestor_of B, B ancestor_of C → A ancestor_of C" |
+| `X owns Y` | `relation: owns functional` | "A owns Y" → Y can't be owned by B |
+
+### The system will ASK automatically
+
+When you teach a fact with a new relation, the demo asks:
+
+```
+teach: Kazakhstan is north of Uzbekistan
+→ TD: I don't know how 'north_of' works yet. Is it:
+  [1] Transitive  [2] Symmetric  [3] Functional  [4] Skip
+```
+
+**Rule of thumb:** If the relation describes a chain (north_of, depends_on, ancestor_of, part_of), it's probably transitive. If it describes a mutual relationship (married_to, adjacent_to, sibling_of), it's probably symmetric. If it describes a unique mapping (capital_of, birth_date), it's probably functional.
+
+### For bulk training (large datasets)
+
+When loading facts from a dataset (CSV, Wikidata, etc.), teach relation properties FIRST:
+
+```python
+# Step 1: Teach relation properties
+td.teach_relation("located_in", "transitive")
+td.teach_relation("capital_of", "functional")
+td.teach_relation("borders", "symmetric")
+
+# Step 2: Load facts
+for row in dataset:
+    td.teach(f"{row['subject']} is {row['relation']} {row['object']}", row['subject'])
+```
+
+This ensures the system can derive new facts immediately, not just store them.
+
+### Why can't the system figure it out automatically?
+
+The system can't infer logical properties from facts alone. "north_of" is transitive because of its real-world meaning, not because of any pattern in the data. Teaching the property is teaching the system HOW to think, not just WHAT to think.
+
+---
+
 ## Common Issues
 
 **Z3 not found:** Run `.venv/bin/pip install z3-solver==4.12.1`
