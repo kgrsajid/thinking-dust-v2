@@ -111,6 +111,7 @@ class GenericNLParser:
         # ─── INNATE: Relation prototypes (14 types) ──────────────────
         # Encoded as SHORT phrases (same encoding as inter-entity phrases)
         self.relation_prototypes = {
+            # Z3 constraint relations
             "different": self._encode_phrase("different distinct separate unique"),
             "before": self._encode_phrase("before earlier precedes first"),
             "after": self._encode_phrase("after later follows second"),
@@ -125,6 +126,14 @@ class GenericNLParser:
             "count": self._encode_phrase("count exactly at least how many"),
             "equivalent": self._encode_phrase("equivalent same equal identical"),
             "optimize": self._encode_phrase("optimize maximize minimize best"),
+            # Spatial/prepositional relations (for "X in Y", "X on Y", etc.)
+            "in": self._encode_phrase("in inside within located contained"),
+            "on": self._encode_phrase("on top above surface mounted"),
+            "at": self._encode_phrase("at located position point place"),
+            "under": self._encode_phrase("under below beneath underneath"),
+            "part_of": self._encode_phrase("part component member belongs subset"),
+            "has": self._encode_phrase("has contains includes holds owns"),
+            "near": self._encode_phrase("near close adjacent beside next"),
         }
 
         # Fast lookup stop words — excludes words that are also relation types
@@ -206,9 +215,21 @@ class GenericNLParser:
             eid = graph.add_entity(phrase, phrase_hdc, type_vec)
             span["eid"] = eid
 
+        # Step 1b: Detect "X is the Y of Z" pattern
+        # If three adjacent entities: [X, Y, Z] with "is" and "of" between them,
+        # then Y is part of the relation, not an entity. Remove Y from entities
+        # and add a direct relation X --Y_of--> Z.
+        self._merge_is_y_of_z_pattern(graph, tokens, entity_spans)
+
+        # Track entity pairs that already have relations (from pattern matching)
+        existing_rel_pairs = {(r["src"], r["tgt"]) for r in graph.relations}
+
         # Step 2: Discover relations with innate prototype classification
         for i, e1 in enumerate(graph.entities):
             for e2 in graph.entities[i + 1:]:
+                # Skip if already has a relation from pattern matching
+                if (e1["id"], e2["id"]) in existing_rel_pairs:
+                    continue
                 rel_type = self._discover_relation_innate(e1, e2, tokens, text)
                 if rel_type:
                     rel_hdc = self._encode_phrase(f"{e1['text']} {rel_type} {e2['text']}")
@@ -221,6 +242,67 @@ class GenericNLParser:
             graph.add_constraint(c["type_vec"], c["subjects"], c.get("params"))
 
         return {"graph": graph, "text": text, "hdc": problem_hdc, "tokens": tokens}
+
+    def _merge_is_y_of_z_pattern(self, graph, tokens, entity_spans):
+        """Detect 'X is the Y of Z' pattern and merge Y into the relation.
+
+        Pattern: [entity_X] [is] [the] [entity_Y] [of] [entity_Z]
+        After merge: [entity_X] --Y_of--> [entity_Z] (entity_Y removed)
+
+        This handles "Paris is the capital of France" → (paris, capital_of, france)
+        instead of three disconnected entities.
+        """
+        if len(graph.entities) < 3:
+            return
+
+        # Check each consecutive triple of entities
+        to_remove = []
+        to_add_rels = []
+
+        for i in range(len(graph.entities) - 2):
+            e1 = graph.entities[i]
+            e2 = graph.entities[i + 1]    # middle entity (the relation word)
+            e3 = graph.entities[i + 2]
+
+            # Check if the original text between e1 and e3 contains "is" and "of"
+            # Find positions in original token list
+            try:
+                e1_tok_idx = tokens.index(e1["text"].split()[0])
+                e3_tok_idx = tokens.index(e3["text"].split()[0])
+            except ValueError:
+                continue
+
+            # Get the span between e1 and e3
+            between = tokens[e1_tok_idx:e3_tok_idx + 1]
+            between_text = " ".join(between)
+
+            # Pattern: X is [the] Y of Z
+            # "is" must appear before Y, "of" must appear after Y
+            if "is" in between and "of" in between:
+                y_text = e2["text"]
+                # Verify Y is between "is" and "of" in the token sequence
+                is_idx = between.index("is") if "is" in between else -1
+                of_idx = between.index("of") if "of" in between else -1
+                y_idx = None
+                for j, t in enumerate(between):
+                    if t == y_text.split()[0]:
+                        y_idx = j
+                        break
+
+                if y_idx and is_idx < y_idx < of_idx:
+                    # Valid "X is the Y of Z" pattern
+                    rel_type = f"{y_text}_of"
+                    rel_hdc = self._encode_phrase(f"{e1['text']} {rel_type} {e3['text']}")
+                    to_add_rels.append((e1["id"], e3["id"], rel_hdc, rel_type))
+                    to_remove.append(e2["id"])
+
+        # Remove middle entities (they're relation components, not entities)
+        for eid in to_remove:
+            graph.entities = [e for e in graph.entities if e["id"] != eid]
+
+        # Add relations
+        for src, tgt, hdc, rel_type in to_add_rels:
+            graph.add_relation(src, tgt, hdc, rel_type)
 
     def _discover_entity_spans(self, tokens):
         """Discover entity spans. Single tokens first, merge only with evidence.
@@ -302,24 +384,71 @@ class GenericNLParser:
     def _discover_relation_innate(self, e1, e2, tokens, text):
         """Discover relation using innate prototypes (works in pure mode).
 
-        FIX: Use SAME encoding scheme as prototypes (_encode_phrase).
-        Old code used bind(e1, bind(context, e2)) which produces a random
-        vector unrelated to the bundled-sentence prototypes.
+        Strategy:
+        1. Find the inter-entity span in original tokens
+        2. Extract connective words (prepositions, stop words between entities)
+        3. Compare connective words to spatial prototypes
+        4. If no match, compare full span to all prototypes
         """
-        # Encode the inter-entity phrase the SAME way as prototypes
-        rel_phrase = f"{e1['text']} {e2['text']}"
+        # Find token positions of entities
+        e1_first = e1["text"].split()[0]
+        e2_first = e2["text"].split()[0]
+        try:
+            e1_start = tokens.index(e1_first)
+            e2_start = tokens.index(e2_first)
+        except ValueError:
+            return None
+
+        # Ensure e1 before e2
+        if e1_start > e2_start:
+            e1_start, e2_start = e2_start, e1_start
+            e1, e2 = e2, e1
+
+        e2_end = e2_start + len(e2["text"].split())
+        span = tokens[e1_start:e2_end]
+
+        # Extract connective words (between entity boundaries)
+        e1_end = e1_start + len(e1["text"].split())
+        connectives = tokens[e1_end:e2_start]
+
+        # Strategy 1: Compare connective words to prototypes
+        if connectives:
+            # Filter to prepositions (the actual relation words)
+            # "is", "the", "was" are auxiliaries/determiners, not relations
+            prepositions = [w for w in connectives
+                          if w in self.stop_words and len(w) > 1
+                          and w not in ("is", "are", "was", "were", "the", "a", "an",
+                                       "be", "been", "have", "has", "had", "do", "does",
+                                       "did", "will", "would", "could", "should")]
+
+            if prepositions:
+                conn_text = " ".join(prepositions)
+                conn_hdc = self._encode_phrase(conn_text)
+
+                best_type = None
+                best_sim = 0.0
+                for rel_type, proto_hdc in self.relation_prototypes.items():
+                    sim = similarity(conn_hdc, proto_hdc)
+                    if sim > best_sim and sim > 0.15:
+                        best_sim = sim
+                        best_type = rel_type
+
+                if best_type:
+                    return best_type
+
+        # Strategy 2: Compare full span to prototypes (fallback)
+        rel_phrase = " ".join(span)
         rel_hdc = self._encode_phrase(rel_phrase)
 
-        # Innate: compare to 14 relation prototypes
         best_type = None
         best_sim = 0.0
         for rel_type, proto_hdc in self.relation_prototypes.items():
             sim = similarity(rel_hdc, proto_hdc)
-            if sim > best_sim and sim > 0.25:  # Lowered from 0.35
+            if sim > best_sim and sim > 0.25:
                 best_sim = sim
                 best_type = rel_type
 
-        # Learned: MHN override if available
+        # Strategy 3: MHN override if available
         results = self.mhn.retrieve(rel_hdc, top_k=1)
         if results and results[0][1] > 0.40 and results[0][1] > best_sim:
             meta = results[0][2]
