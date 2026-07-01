@@ -127,6 +127,12 @@ class GenericNLParser:
             "optimize": self._encode_phrase("optimize maximize minimize best"),
         }
 
+        # ─── CONstraint signals (Z3-relevant only) ──────────────────
+        # These are the relation types that should route to Z3 solving.
+        # Learned relations (in, part_of, married_to, etc.) are NOT included —
+        # they route to KG inference instead.
+        self.constraint_signals = set(self.relation_prototypes.keys())
+
         # Fast lookup stop words — excludes words that are also relation types
         # (before, after, different, etc. are constraint signals, not noise)
         self.stop_words = {

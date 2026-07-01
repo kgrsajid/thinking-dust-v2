@@ -730,10 +730,13 @@ class GenericThinkingDust:
         # Route to constraint solving if:
         # 1. MHN has a template (learned pattern), OR
         # 2. Parser found a relation that matches a Z3 constraint signal
-        #    Uses parser's own prototype dict — no hardcoded list
-        constraint_signals = set(self.parser.relation_prototypes.keys())
+        #    Only the innate 14 constraint types route to Z3.
+        #    BUT: if the KG has actual triples with this relation AND it's been
+        #    taught as transitive/symmetric/functional, prefer KG inference.
+        kg_relations_with_facts = set(t.relation for t in self.kg.triples)
         has_constraint_relations = any(
-            r.get("rel_type") in constraint_signals
+            r.get("rel_type") in self.parser.constraint_signals
+            and r.get("rel_type") not in kg_relations_with_facts
             for r in graph.relations
         )
 
@@ -1304,9 +1307,19 @@ class GenericThinkingDust:
         if m:
             triples.append((m.group(1), "before", m.group(2)))
 
+        # Pattern: X before Y → (X, before, Y) — without "is"
+        m = re.search(r'(\w+)\s+before\s+(\w+)', text)
+        if m and not any(r == "before" for _, r, _ in triples):
+            triples.append((m.group(1), "before", m.group(2)))
+
         # Pattern: X is after Y → (X, after, Y)
         m = re.search(r'(\w+)\s+is\s+after\s+(\w+)', text)
         if m:
+            triples.append((m.group(1), "after", m.group(2)))
+
+        # Pattern: X after Y → (X, after, Y) — without "is"
+        m = re.search(r'(\w+)\s+after\s+(\w+)', text)
+        if m and not any(r == "after" for _, r, _ in triples):
             triples.append((m.group(1), "after", m.group(2)))
 
         # Pattern: X means Y → (X, means, Y)
@@ -1329,6 +1342,15 @@ class GenericThinkingDust:
             s, r, o = m.group(1), m.group(2), m.group(3)
             triples.append((s, f"{r}_than", o))
 
+        # Pattern: X is R Y → (X, R, Y) where R is a compound relation (e.g., sibling_of)
+        # "Carol is sibling_of Dave" → (carol, sibling_of, dave)
+        # This is a general fallback for teach() input with explicit relation names.
+        if not triples:
+            m = re.search(r'(\w+)\s+is\s+([a-z]+_[a-z]+)\s+(\w+)', text)
+            if m:
+                s, r, o = m.group(1), m.group(2), m.group(3)
+                triples.append((s, r, o))
+
         return triples
 
     def _query_knowledge_graph(self, text: str) -> dict | None:
@@ -1344,7 +1366,7 @@ class GenericThinkingDust:
         """
         import re
         text_lower = text.lower().strip()
-        tokens = re.findall(r'[a-z]+', text_lower)
+        tokens = re.findall(r'[a-z0-9]+', text_lower)
 
         # Collect entities that exist in the KG
         kg_entities = set()
@@ -1407,7 +1429,7 @@ class GenericThinkingDust:
             for e2 in entities_in_query[i + 1:]:
                 # Try both directions
                 for subj, obj in [(e1, e2), (e2, e1)]:
-                    paths = self.kg.bfs_paths(subj, obj, max_hops=4)
+                    paths = self.kg.bfs_paths(subj, obj, max_hops=6)
                     if paths:
                         best_path = self.kg._find_valid_path(
                             paths, relation_in_query or "", subj, obj
