@@ -350,6 +350,12 @@ class GenericNLParser:
                     s2_sim = r2[0][1] if r2 else 0.0
 
                     if merged_sim > max(s1_sim, s2_sim) + 0.05:
+                        # Don't merge if either token is a relation prototype
+                        # (before, after, different, etc. are relation markers, not entities)
+                        s1_tokens = tokens[s1["start"]:s1["end"]]
+                        s2_tokens = tokens[s2["start"]:s2["end"]]
+                        if any(t in self.relation_prototypes for t in s1_tokens + s2_tokens):
+                            continue
                         # Merge
                         spans[idx] = {
                             "start": s1["start"], "end": s2["end"],
