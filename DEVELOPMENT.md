@@ -92,17 +92,48 @@ if m:
 
 ### Adding new relation properties
 
-Via the teaching interface:
+**Option A: Pre-seeded defaults (already handled)**
+
+Common relations work out of the box:
+- `in`, `part_of`, `before`, `after` → transitive
+- `capital_of` → functional
+- `same_as`, `equals` → symmetric + transitive
+- `married_to`, `sibling_of` → symmetric
+
+No user action needed. TD knows these from `DEFAULT_RELATION_PROPERTIES`.
+
+**Option B: Interactive prompt (demo only)**
+
+When you teach a fact with an unknown relation in `chat_flare.py`:
+```
+teach: Kazakhstan is north of Uzbekistan
+→ TD asks: Is 'north_of' [1] Transitive [2] Symmetric [3] Functional [4] Skip
+→ User picks 1
+→ TD: Got it. 'north_of' is now transitive.
+```
+
+**Option C: Manual via demo command**
+```
+relation: north_of transitive
+relation: married_to symmetric
+relation: capital_of functional inverse:has_capital
+```
+
+**Option D: In code**
 ```python
 td.teach_relation("north_of", "transitive")
 td.teach_relation("married_to", "symmetric")
-td.teach_relation("capital_of", "functional", "inverse:has_capital")
+td.kg.set_relation_property("capital_of", "functional", "inverse:has_capital")
 ```
 
-Or directly on the KG:
-```python
-td.kg.set_relation_property("north_of", "transitive")
-```
+### Available relation properties
+
+| Property | Rule | Example |
+|----------|------|---------|
+| `transitive` | R(X,Y) ∧ R(Y,Z) → R(X,Z) | in, before, north_of |
+| `symmetric` | R(X,Y) → R(Y,X) | same_as, married_to |
+| `functional` | R(X,Y) ∧ R(X,Z) → Y=Z | capital_of, birth_date |
+| `inverse:R2` | R1(X,Y) → R2(Y,X) | capital_of ↔ has_capital |
 
 ### Adding new rule templates
 

@@ -318,8 +318,79 @@ def main():
                 print(f"\n  {C['green']}✓ {r['message']}{C['reset']}")
             else:
                 # Triple-only teach: just extract facts, no answer
-                td.teach(rest, rest)  # store as both question and answer
+                td.teach(rest, rest)
                 print(f"\n  {C['green']}✓ Fact stored.{C['reset']}")
+
+            # Check if any NEW relation was taught that has no properties
+            import re
+            taught_text = rest.lower()
+            new_relations = set()
+            for pattern_name, pattern_re in [
+                ("X is the Y of Z", r'(\w+)\s+is\s+(?:the\s+)?(\w+)\s+of'),
+                ("X is in Y", r'(\w+)\s+is\s+in'),
+                ("X is part of Y", r'(\w+)\s+is\s+part\s+of'),
+                ("X is before Y", r'(\w+)\s+is\s+before'),
+                ("X is after Y", r'(\w+)\s+is\s+after'),
+                ("X means Y", r'(\w+)\s+means'),
+            ]:
+                m = re.search(pattern_re, taught_text)
+                if m:
+                    # Extract relation from the match
+                    if "of" in pattern_name and len(m.groups()) >= 2:
+                        rel = f"{m.group(2)}_of"
+                    elif "part of" in pattern_name:
+                        rel = "part_of"
+                    elif "in" in pattern_name:
+                        rel = "in"
+                    elif "before" in pattern_name:
+                        rel = "before"
+                    elif "after" in pattern_name:
+                        rel = "after"
+                    elif "means" in pattern_name:
+                        rel = "means"
+                    else:
+                        rel = m.group(2) if len(m.groups()) >= 2 else None
+                    if rel and rel not in td.kg.relation_properties:
+                        new_relations.add(rel)
+
+            # Also check for custom patterns like "X is north of Y"
+            custom_m = re.search(r'(\w+)\s+is\s+(\w+)\s+of\s+(\w+)', taught_text)
+            if custom_m:
+                rel = f"{custom_m.group(2)}_of"
+                if rel not in td.kg.relation_properties and rel not in new_relations:
+                    new_relations.add(rel)
+
+            # Ask about unknown relation properties
+            for rel in new_relations:
+                print(f"\n  {C['yellow']}┌─ New Relation Detected ─────────────────────────────┐{C['reset']}")
+                print(f"  {C['yellow']}│{C['reset']}  I don't know how '{rel}' works yet.        {C['yellow']}│{C['reset']}")
+                print(f"  {C['yellow']}│{C['reset']}                                                    {C['yellow']}│{C['reset']}")
+                print(f"  {C['yellow']}│{C['reset']}  [1] Transitive — if A {rel} B and B {rel} C, {C['yellow']}│{C['reset']}")
+                print(f"  {C['yellow']}│{C['reset']}      then A {rel} C                               {C['yellow']}│{C['reset']}")
+                print(f"  {C['yellow']}│{C['reset']}  [2] Symmetric — if A {rel} B, then B {rel} A   {C['yellow']}│{C['reset']}")
+                print(f"  {C['yellow']}│{C['reset']}  [3] Functional — each thing has only one       {C['yellow']}│{C['reset']}")
+                print(f"  {C['yellow']}│{C['reset']}      (e.g., each city has one capital)          {C['yellow']}│{C['reset']}")
+                print(f"  {C['yellow']}│{C['reset']}  [4] Skip — I'll teach it later                   {C['yellow']}│{C['reset']}")
+                print(f"  {C['yellow']}└────────────────────────────────────────────────────┘{C['reset']}")
+
+                while True:
+                    try:
+                        choice = input(f"  {C['cyan']}│ {C['reset']}choice > ").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        choice = "4"
+
+                    prop_map = {"1": "transitive", "2": "symmetric", "3": "functional"}
+                    if choice in prop_map:
+                        td.teach_relation(rel, prop_map[choice])
+                        print(f"  {C['green']}✓ '{rel}' is now {prop_map[choice]}.{C['reset']}")
+                        break
+                    elif choice == "4":
+                        print(f"  {C['gray']}Skipped. You can teach it later:{C['reset']}")
+                        print(f"  {C['gray']}  relation: {rel} transitive{C['reset']}")
+                        break
+                    else:
+                        print(f"  {C['red']}Please enter 1, 2, 3, or 4.{C['reset']}")
+
             print(f"\n  {C['green']}✦ NEW PATTERN STORED ✦{C['reset']}")
             print_memory_state(td)
             print()
