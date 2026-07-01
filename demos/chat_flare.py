@@ -233,6 +233,72 @@ def handle_feedback(td, problem_text, result, user_input):
     return False
 
 
+def _get_state_path():
+    """Get the path for the persistent state file."""
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data", "td_state.pkl"
+    )
+
+
+def _save_state(td):
+    """Save TD's learned state (KG, relation properties, MHN patterns)."""
+    import pickle
+    state_path = _get_state_path()
+
+    # Don't save if nothing was learned
+    if not td.mhn.patterns and not td.kg.triples:
+        return
+
+    state = {
+        "kg_triples": [(t.subject, t.relation, t.object, t.source, t.proof)
+                       for t in td.kg.triples],
+        "relation_properties": td.kg.relation_properties,
+        "total_thinks": td.total_thinks,
+        "total_learned": td.total_learned,
+    }
+
+    os.makedirs(os.path.dirname(state_path), exist_ok=True)
+    with open(state_path, "wb") as f:
+        pickle.dump(state, f)
+
+    total = len(td.mhn.patterns) + len(td.kg.triples)
+    print(f"  {C['green']}✓ Saved {total} memories to {os.path.basename(state_path)}{C['reset']}")
+
+
+def _load_state(td):
+    """Load TD's learned state from file."""
+    import pickle
+    state_path = _get_state_path()
+
+    if not os.path.exists(state_path):
+        return False
+
+    try:
+        with open(state_path, "rb") as f:
+            state = pickle.load(f)
+
+        # Restore KG triples
+        from td.kg import Triple
+        for (s, r, o, source, proof) in state.get("kg_triples", []):
+            td.kg.add_fact(s, r, o, source=source, proof=proof)
+
+        # Restore relation properties
+        for rel, props in state.get("relation_properties", {}).items():
+            td.kg.set_relation_property(rel, *props)
+
+        # Restore stats
+        td.total_thinks = state.get("total_thinks", 0)
+        td.total_learned = state.get("total_learned", 0)
+
+        kg_count = len(td.kg.triples)
+        if kg_count > 0:
+            print(f"  {C['green']}✓ Loaded {kg_count} memories from previous session{C['reset']}")
+        return True
+    except Exception:
+        return False
+
+
 def main():
     pure = "--pure" in sys.argv
     seeded = not pure
@@ -259,6 +325,9 @@ def main():
 
     td = GenericThinkingDust(vocab=vocab, mhn=mhn, dim=10_000, pure_mode=pure, word_vectors=wvm)
 
+    # Load previous session's memories (persistent teaching)
+    _load_state(td)
+
     print(f"  Mode: {C['green'] if pure else C['yellow']}● {'PURE' if pure else 'SEEDED'}{C['reset']}")
     print_memory_state(td)
     print()
@@ -268,6 +337,7 @@ def main():
     print(f"    {C['yellow']}teach: <fact>{C['reset']}                   — teach a fact (triple only)")
     print(f"    {C['yellow']}relation: <name> <property>{C['reset']}     — teach relation logic")
     print(f"    {C['yellow']}stats{C['reset']}                      — show memory state")
+    print(f"    {C['yellow']}save{C['reset']}                      — save memories to disk")
     print(f"    {C['yellow']}trace{C['reset']}                      — toggle reasoning trace")
     print(f"    {C['yellow']}quit{C['reset']}                       — exit")
     print(f"  {C['gray']}{'─' * 60}{C['reset']}")
@@ -284,13 +354,18 @@ def main():
             user_input = input(f"{prompt}").strip()
         except (EOFError, KeyboardInterrupt):
             print(f"\n{C['gray']}bye.{C['reset']}")
+            _save_state(td)
             break
 
         if not user_input:
             continue
         if user_input.lower() in ("quit", "exit", "q"):
             print(f"{C['gray']}bye.{C['reset']}")
+            _save_state(td)
             break
+        if user_input.lower() == "save":
+            _save_state(td)
+            continue
         if user_input.lower() == "stats":
             print_memory_state(td)
             print()
