@@ -288,6 +288,8 @@ def _load_state(td):
 
     if loaded:
         kg_count = len(td.kg.triples)
+        # Sync learned relations to parser so it can detect them in queries
+        td.sync_kg_to_parser()
         print(f"  {C['green']}✓ Loaded {kg_count} facts from previous session{C['reset']}")
         return True
     return False
@@ -429,6 +431,13 @@ def main():
                 if rel not in td.kg.relation_properties and rel not in new_relations:
                     new_relations.add(rel)
 
+            # Check for "X is Y to Z" patterns (e.g., "is married to", "is related to")
+            to_m = re.search(r'(\w+)\s+is\s+(\w+)\s+to\s+(\w+)', taught_text)
+            if to_m:
+                rel = f"{to_m.group(2)}_to"
+                if rel not in td.kg.relation_properties and rel not in new_relations:
+                    new_relations.add(rel)
+
             # Ask about unknown relation properties
             for rel in new_relations:
                 print(f"\n  {C['yellow']}┌─ New Relation Detected ─────────────────────────────┐{C['reset']}")
@@ -500,8 +509,9 @@ def main():
         # Show latency
         print(f"  {C['gray']}({result.latency_ms:.0f}ms · {result.iterations} IDP iterations){C['reset']}")
 
-        # If confidence is low, ask to teach
-        if result.confidence < 0.40 or (result.intent == "question" and not result.solution):
+        # If confidence is low AND no answer found, ask to teach
+        has_answer = result.solution and result.solution.get("formatted") and result.solution.get("type") not in ("unknown", "unsat")
+        if (result.confidence < 0.25) or (not has_answer and result.confidence < 0.40):
             print(f"\n  {C['magenta']}I don't know this yet. Teach me?{C['reset']}")
             print(f"    {C['yellow']}teach: {user_input[:40]} | <answer>{C['reset']}")
         elif result.intent not in ("conversation", "suggestion", "command"):

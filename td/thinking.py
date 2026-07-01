@@ -652,6 +652,10 @@ class GenericThinkingDust:
         from .kg import KnowledgeGraph
         self.kg = KnowledgeGraph()
 
+        # Sync pre-seeded relation properties to parser prototypes
+        # (married_to, capital_of, in, part_of, etc.)
+        self.sync_kg_to_parser()
+
         # Sub-problem prototypes for reasoning decomposition
         self.sub_problem_prototypes = self._build_semantic_prototypes()
 
@@ -1192,12 +1196,23 @@ class GenericThinkingDust:
             functional  — R(X,Y) ∧ R(X,Z) → Y=Z
         """
         self.kg.set_relation_property(relation, *properties)
+        # Sync to parser so it can detect this relation in future queries
+        self.parser.register_relation(relation)
         return {
             "status": "learned",
             "relation": relation,
             "properties": list(properties),
             "message": f"Got it. '{relation}' is now {', '.join(properties)}.",
         }
+
+    def sync_kg_to_parser(self):
+        """Sync all KG relation properties to the parser's prototypes.
+
+        Call this after loading from SQLite so the parser can detect
+        previously learned relations in new queries.
+        """
+        for relation in self.kg.relation_properties:
+            self.parser.register_relation(relation)
 
     def needs_teaching(self, result):
         if self.total_thinks < 3 and len(self.mhn.patterns) < 10:
@@ -1298,6 +1313,21 @@ class GenericThinkingDust:
         m = re.search(r'(\w+)\s+means\s+(\w+)', text)
         if m:
             triples.append((m.group(1), "means", m.group(2)))
+
+        # Pattern: X is Y to Z → (X, Y_to, Z)
+        # "David Beckham is married to Victoria Beckham" → (david, married_to, victoria)
+        m = re.search(r'(\w+)\s+is\s+(\w+)\s+to\s+(\w+)', text)
+        if m:
+            s, r, o = m.group(1), m.group(2), m.group(3)
+            triples.append((s, f"{r}_to", o))
+
+        # Pattern: X is Y Z → (X, Y_Z, Z) for compound relations
+        # "X is north of Y" → (x, north_of, y) — already covered by "is Y of Z"
+        # But also: "X is larger than Y" → (x, larger_than, y)
+        m = re.search(r'(\w+)\s+is\s+(\w+)\s+than\s+(\w+)', text)
+        if m:
+            s, r, o = m.group(1), m.group(2), m.group(3)
+            triples.append((s, f"{r}_than", o))
 
         return triples
 
@@ -1435,7 +1465,8 @@ class GenericThinkingDust:
                 elif sim >= 0.60: return 0.55
                 elif sim >= 0.50: return 0.45
                 elif sim >= 0.40: return 0.35
-                else:               return 0.25
+                elif sim >= 0.30: return 0.30
+                else:               return 0.20
             elif sol_type == "conversation":
                 return 0.95
             elif sol_type == "suggestion":

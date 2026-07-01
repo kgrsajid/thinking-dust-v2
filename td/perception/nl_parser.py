@@ -143,6 +143,28 @@ class GenericNLParser:
             "out", "off", "over",
         }
 
+    def register_relation(self, relation: str, example_phrases: str = None):
+        """Register a learned relation as a prototype for future parsing.
+
+        This is how the parser learns about new relations from the KG.
+        When a user teaches "north_of" → transitive, the KG saves it to SQLite,
+        and this method creates an HDC prototype so the parser can detect it
+        in future queries like "is Kazakhstan north of Uzbekistan?"
+
+        Args:
+            relation: Relation name (e.g., "north_of", "married_to")
+            example_phrases: Optional example phrases. If None, uses the
+                           relation name itself (underscores → spaces).
+        """
+        if relation in self.relation_prototypes:
+            return  # Already known
+
+        # Generate prototype from relation name (e.g., "north_of" → "north of")
+        if example_phrases is None:
+            example_phrases = relation.replace("_", " ")
+
+        self.relation_prototypes[relation] = self._encode_phrase(example_phrases)
+
     def _tokenize(self, text):
         text = text.lower()
         text = re.sub(r"[^\w\s'-]", " ", text)
@@ -211,6 +233,9 @@ class GenericNLParser:
         # then Y is part of the relation, not an entity. Remove Y from entities
         # and add a direct relation X --Y_of--> Z.
         self._merge_is_y_of_z_pattern(graph, tokens, entity_spans)
+
+        # Same for "X is Y to Z" pattern (e.g., "is married to", "is related to")
+        self._merge_is_y_to_z_pattern(graph, tokens, entity_spans)
 
         # Track entity pairs that already have relations (from pattern matching)
         existing_rel_pairs = {(r["src"], r["tgt"]) for r in graph.relations}
@@ -283,6 +308,60 @@ class GenericNLParser:
                 if y_idx and is_idx < y_idx < of_idx:
                     # Valid "X is the Y of Z" pattern
                     rel_type = f"{y_text}_of"
+                    rel_hdc = self._encode_phrase(f"{e1['text']} {rel_type} {e3['text']}")
+                    to_add_rels.append((e1["id"], e3["id"], rel_hdc, rel_type))
+                    to_remove.append(e2["id"])
+
+        # Remove middle entities (they're relation components, not entities)
+        for eid in to_remove:
+            graph.entities = [e for e in graph.entities if e["id"] != eid]
+
+        # Add relations
+        for src, tgt, hdc, rel_type in to_add_rels:
+            graph.add_relation(src, tgt, hdc, rel_type)
+
+    def _merge_is_y_to_z_pattern(self, graph, tokens, entity_spans):
+        """Detect 'X is Y to Z' pattern and merge Y into the relation.
+
+        Pattern: [entity_X] [is] [entity_Y] [to] [entity_Z]
+        After merge: [entity_X] --Y_to--> [entity_Z] (entity_Y removed)
+
+        This handles "David Beckham is married to Victoria Beckham"
+        → (david, married_to, victoria) instead of "married" being an entity.
+        """
+        if len(graph.entities) < 3:
+            return
+
+        to_remove = []
+        to_add_rels = []
+
+        for i in range(len(graph.entities) - 2):
+            e1 = graph.entities[i]
+            e2 = graph.entities[i + 1]    # middle entity (the relation word)
+            e3 = graph.entities[i + 2]
+
+            # Check if "to" appears between e2 and e3 in the original tokens
+            try:
+                e2_tok_idx = tokens.index(e2["text"].split()[0])
+                e3_tok_idx = tokens.index(e3["text"].split()[0])
+            except ValueError:
+                continue
+
+            between = tokens[e2_tok_idx:e3_tok_idx + 1]
+
+            # Pattern: Y [is] to Z — "to" must appear after Y
+            if "to" in between:
+                y_text = e2["text"]
+                to_idx = between.index("to")
+                y_idx = None
+                for j, t in enumerate(between):
+                    if t == y_text.split()[0]:
+                        y_idx = j
+                        break
+
+                if y_idx is not None and y_idx < to_idx:
+                    # Valid "X is Y to Z" pattern
+                    rel_type = f"{y_text}_to"
                     rel_hdc = self._encode_phrase(f"{e1['text']} {rel_type} {e3['text']}")
                     to_add_rels.append((e1["id"], e3["id"], rel_hdc, rel_type))
                     to_remove.append(e2["id"])
@@ -410,16 +489,16 @@ class GenericNLParser:
 
         # Strategy 1: Compare connective words to prototypes
         if connectives:
-            # Filter to prepositions (the actual relation words)
-            # "is", "the", "was" are auxiliaries/determiners, not relations
-            prepositions = [w for w in connectives
-                          if w in self.stop_words and len(w) > 1
-                          and w not in ("is", "are", "was", "were", "the", "a", "an",
-                                       "be", "been", "have", "has", "had", "do", "does",
-                                       "did", "will", "would", "could", "should")]
+            # Filter out pure auxiliaries/determiners, but KEEP content words
+            # (e.g., "married" in "is married to" is a relation word, not noise)
+            auxiliaries = {"is", "are", "was", "were", "the", "a", "an",
+                          "be", "been", "have", "has", "had", "do", "does",
+                          "did", "will", "would", "could", "should"}
+            relation_words = [w for w in connectives
+                            if w not in auxiliaries and len(w) > 1]
 
-            if prepositions:
-                conn_text = " ".join(prepositions)
+            if relation_words:
+                conn_text = " ".join(relation_words)
                 conn_hdc = self._encode_phrase(conn_text)
 
                 best_type = None
@@ -432,6 +511,20 @@ class GenericNLParser:
 
                 if best_type:
                     return best_type
+
+                # No prototype match — synthesize relation type from content words
+                # e.g., "married" → "married_to", "north" → "north_of"
+                # Use the words that aren't pure prepositions
+                content = [w for w in relation_words if w not in self.stop_words]
+                if content:
+                    rel_candidate = "_".join(content)
+                    # Append common suffixes if missing
+                    if not any(rel_candidate.endswith(s) for s in ("_of", "_to", "_in", "_for")):
+                        # Check if a preposition follows the content words
+                        postpositions = [w for w in relation_words if w in self.stop_words]
+                        if postpositions:
+                            rel_candidate = f"{rel_candidate}_{postpositions[-1]}"
+                    return rel_candidate
 
         # Strategy 2: Compare full span to prototypes (fallback)
         rel_phrase = " ".join(span)
