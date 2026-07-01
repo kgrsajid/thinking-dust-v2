@@ -234,69 +234,63 @@ def handle_feedback(td, problem_text, result, user_input):
 
 
 def _get_state_path():
-    """Get the path for the persistent state file."""
+    """Get the path for the SQLite knowledge database."""
     return os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "td_state.pkl"
+        "data", "td_knowledge.db"
     )
 
 
 def _save_state(td):
-    """Save TD's learned state (KG, relation properties, MHN patterns)."""
-    import pickle
+    """Save TD's learned state to SQLite."""
     state_path = _get_state_path()
 
     # Don't save if nothing was learned
     if not td.mhn.patterns and not td.kg.triples:
         return
 
-    state = {
-        "kg_triples": [(t.subject, t.relation, t.object, t.source, t.proof)
-                       for t in td.kg.triples],
-        "relation_properties": td.kg.relation_properties,
-        "total_thinks": td.total_thinks,
-        "total_learned": td.total_learned,
-    }
+    # Save KG (triples + relation properties) to SQLite
+    td.kg.save(state_path)
 
-    os.makedirs(os.path.dirname(state_path), exist_ok=True)
-    with open(state_path, "wb") as f:
-        pickle.dump(state, f)
+    # Save MHN patterns to pickle (dense arrays — SQLite is wrong for this)
+    import pickle
+    mhn_path = state_path.replace(".db", "_mhn.pkl")
+    with open(mhn_path, "wb") as f:
+        pickle.dump({
+            "patterns": td.mhn.patterns,
+            "total_thinks": td.total_thinks,
+            "total_learned": td.total_learned,
+        }, f)
 
     total = len(td.mhn.patterns) + len(td.kg.triples)
-    print(f"  {C['green']}✓ Saved {total} memories to {os.path.basename(state_path)}{C['reset']}")
+    print(f"  {C['green']}✓ Saved {total} memories ({len(td.kg.triples)} facts, {len(td.mhn.patterns)} patterns){C['reset']}")
 
 
 def _load_state(td):
-    """Load TD's learned state from file."""
-    import pickle
+    """Load TD's learned state from SQLite + pickle."""
     state_path = _get_state_path()
 
-    if not os.path.exists(state_path):
-        return False
+    # Load KG from SQLite
+    loaded = td.kg.load(state_path)
 
-    try:
-        with open(state_path, "rb") as f:
-            state = pickle.load(f)
+    # Load MHN patterns from pickle
+    import pickle
+    mhn_path = state_path.replace(".db", "_mhn.pkl")
+    if os.path.exists(mhn_path):
+        try:
+            with open(mhn_path, "rb") as f:
+                data = pickle.load(f)
+            td.mhn.patterns = data.get("patterns", [])
+            td.total_thinks = data.get("total_thinks", 0)
+            td.total_learned = data.get("total_learned", 0)
+        except Exception:
+            pass
 
-        # Restore KG triples
-        from td.kg import Triple
-        for (s, r, o, source, proof) in state.get("kg_triples", []):
-            td.kg.add_fact(s, r, o, source=source, proof=proof)
-
-        # Restore relation properties
-        for rel, props in state.get("relation_properties", {}).items():
-            td.kg.set_relation_property(rel, *props)
-
-        # Restore stats
-        td.total_thinks = state.get("total_thinks", 0)
-        td.total_learned = state.get("total_learned", 0)
-
+    if loaded:
         kg_count = len(td.kg.triples)
-        if kg_count > 0:
-            print(f"  {C['green']}✓ Loaded {kg_count} memories from previous session{C['reset']}")
+        print(f"  {C['green']}✓ Loaded {kg_count} facts from previous session{C['reset']}")
         return True
-    except Exception:
-        return False
+    return False
 
 
 def main():

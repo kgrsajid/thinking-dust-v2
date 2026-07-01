@@ -38,4 +38,5 @@ data/concepts.json
 
 # Jupyter
 .ipynb_checkpoints/
-data/td_state.pkl
+data/td_knowledge.db
+data/td_knowledge_mhn.pkl

@@ -18,6 +18,8 @@ are general; the properties are taught or pre-seeded.
 from __future__ import annotations
 
 import time
+import sqlite3
+import os
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional
@@ -535,6 +537,137 @@ class KnowledgeGraph:
                                         changed = True
 
         return all_derived
+
+    # ─── SQLite Persistence ──────────────────────────────────────────
+
+    def save(self, path: str = None):
+        """Save knowledge graph to SQLite database.
+
+        Stores triples and relation properties in a queryable SQLite file.
+        Dense vectors (BEAGLE, MHN) remain as separate pickle files.
+
+        Args:
+            path: Path to .db file. Defaults to data/td_knowledge.db
+        """
+        if path is None:
+            path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "data", "td_knowledge.db"
+            )
+
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        conn = sqlite3.connect(path)
+        try:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS triples (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    subject TEXT NOT NULL,
+                    relation TEXT NOT NULL,
+                    object TEXT NOT NULL,
+                    source TEXT DEFAULT 'user',
+                    proof TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS relation_properties (
+                    relation TEXT PRIMARY KEY,
+                    properties TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_triples_subject ON triples(subject);
+                CREATE INDEX IF NOT EXISTS idx_triples_relation ON triples(relation);
+                CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
+            """)
+
+            # Clear and re-insert (full sync)
+            conn.execute("DELETE FROM triples")
+            conn.execute("DELETE FROM relation_properties")
+
+            conn.executemany(
+                "INSERT INTO triples (subject, relation, object, source, proof) VALUES (?, ?, ?, ?, ?)",
+                [(t.subject, t.relation, t.object, t.source, t.proof) for t in self.triples]
+            )
+
+            conn.executemany(
+                "INSERT INTO relation_properties (relation, properties) VALUES (?, ?)",
+                [(rel, ",".join(props)) for rel, props in self.relation_properties.items()]
+            )
+
+            conn.commit()
+        finally:
+            conn.close()
+
+    def load(self, path: str = None) -> bool:
+        """Load knowledge graph from SQLite database.
+
+        Args:
+            path: Path to .db file. Defaults to data/td_knowledge.db
+
+        Returns:
+            True if loaded successfully, False if file doesn't exist.
+        """
+        if path is None:
+            path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "data", "td_knowledge.db"
+            )
+
+        if not os.path.exists(path):
+            return False
+
+        conn = sqlite3.connect(path)
+        try:
+            # Load triples
+            rows = conn.execute(
+                "SELECT subject, relation, object, source, proof FROM triples"
+            ).fetchall()
+
+            for subject, relation, obj, source, proof in rows:
+                self.add_fact(subject, relation, obj, source=source, proof=proof)
+
+            # Load relation properties
+            prop_rows = conn.execute(
+                "SELECT relation, properties FROM relation_properties"
+            ).fetchall()
+
+            for relation, props_str in prop_rows:
+                props = props_str.split(",") if props_str else []
+                if props:
+                    self.set_relation_property(relation, *props)
+
+            conn.close()
+
+            loaded_count = len(rows)
+            return loaded_count > 0
+        except Exception:
+            conn.close()
+            return False
+
+    def query_sql(self, sql: str, params: tuple = ()) -> list[dict]:
+        """Run arbitrary SQL query against the triples database.
+
+        Example:
+            kg.query_sql("SELECT * FROM triples WHERE subject = ?", ("paris",))
+            kg.query_sql("SELECT * FROM triples WHERE relation = ?", ("capital_of",))
+
+        This returns results from the persisted DB, not the in-memory graph.
+        Call save() first if you want the latest in-memory facts.
+        """
+        default_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data", "td_knowledge.db"
+        )
+        if not os.path.exists(default_path):
+            return []
+
+        conn = sqlite3.connect(default_path)
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
 
     def stats(self) -> dict:
         user_facts = sum(1 for t in self.triples if t.source == "user")
