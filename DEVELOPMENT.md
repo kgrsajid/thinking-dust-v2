@@ -1316,4 +1316,48 @@ TD v2 (Fast Path — 10-100ms)
 - TD for education: Socratic teaching mode
 - TD for research: scientists teach domain knowledge
 
+### Fuzzy Relation Matching
+
+The `_query_knowledge_graph` method in `td/thinking.py` uses `difflib.SequenceMatcher` for morphology-agnostic relation matching:
+
+```python
+import difflib
+best = max(difflib.SequenceMatcher(None, token, relation_part).ratio() for token in tokens)
+if best >= 0.75:
+    # Match found
+```
+
+**Threshold:** 0.75. Tested with 17 novel relations. Language-agnostic (works for any script).
+
+### Adding Novel Relations
+
+To test a new relation type:
+
+1. Add facts with the new relation to the KG
+2. Set its properties: `kg.set_relation_property("my_relation", "transitive")`
+3. Write tests in `tests/test_novel_relations.py`
+4. Verify the relation is NOT in `DEFAULT_RELATION_PROPERTIES` (to test true generalization)
+
+### Non-Transitive Relation Safety
+
+The `_find_valid_path` method prevents false inferences through non-transitive relations. When adding a new relation, consider:
+
+- **Transitive:** `in`, `part_of`, `before`, `evolved_from`, `predecessor_of`
+- **Non-transitive:** `borders`, `orbits`, `exports`, `born_in`, `directed_by`
+- **Symmetric:** `borders`, `married_to`, `collaborated_with`, `affiliated_with`
+- **Functional:** `capital_of`, `discovered_by`, `invented_by`, `painted_by`, `directed_by`
+
+### Test Suite (293 tests)
+
+| Suite | Tests | Domain |
+|-------|-------|--------|
+| test_thinking.py | 50 | HDC, MHN, CA, Z3, thinking engine |
+| test_generalization.py | 34 | Relation extraction, transitive chains, functional, symmetric |
+| test_realworld.py | 15 | Country capitals, EU, US states, rivers, Olympics |
+| test_temporal.py | 69 | Allen's 13 relations, composition, open-ended intervals |
+| test_temporal_kg.py | 29 | KG temporal query, SQLite persistence |
+| test_realworld_wikipedia.py | 45 | Geography, History, Science, Tech, Sports, Literature, Music |
+| test_novel_relations.py | 51 | 17 unseen relations, cross-domain, persistence |
+| **Total** | **293** | |
+
 *Last updated: 2026-07-02 GMT+5*

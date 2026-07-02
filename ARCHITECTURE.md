@@ -768,6 +768,48 @@ pytest>=7.0
 
 Composition table (13×13 = 169 entries) is encoded in Z3 as a lookup table. The composition of any two Allen relations is deterministically defined per Allen's original paper.
 
+### Fuzzy Relation Matching (difflib — stdlib)
+
+When the parser can't find an exact match between query tokens and KG relation names, a fuzzy fallback using `difflib.SequenceMatcher` (Python stdlib, battle-tested since Python 2.1) computes character-level similarity.
+
+**Why not lemmatization?** Lemmatization is language-dependent (English lemmatizer won't work for Russian, Kazakh, Chinese). `difflib.SequenceMatcher` is language-agnostic — it compares character sequences directly.
+
+**Threshold:** 0.75 (75% similarity). Below this, the match is rejected.
+
+**Examples:**
+- "collaborate" vs "collaborates" → 0.96 ✓
+- "run" vs "runs" → 0.86 ✓
+- "discover" vs "discovered" → 0.89 ✓
+- "collaborate" vs "borders" → 0.44 ✗
+
+**Reference:** Ratcliff/Obershelp pattern matching, 1988. Implemented in Python's `difflib` module since version 2.1.
+
+### Path Validation Rules (Non-Transitive Relations)
+
+`_find_valid_path` enforces strict composability rules:
+
+1. **Pure transitivity:** All edges must match target relation, AND target must be transitive
+2. **Cross-relation composition:** Last edge matches target. Valid if:
+   - Target is transitive (e.g., "in" — capital_of + in → in), OR
+   - All preceding relations are transitive
+3. **Non-transitive relations can NEVER be chained:**
+   - `borders(France,Germany) + borders(Germany,Poland)` → NOT borders(France,Poland)
+   - `orbits(Moon,Earth) + orbits(Earth,Sun)` → NOT orbits(Moon,Sun)
+   - `born_in(Einstein,Ulm) + in(Ulm,Germany)` → NOT born_in(Einstein,Germany)
+
+This prevents the system from making false inferences through non-transitive relations.
+
+### Novel Relations (Unseen, Not Pre-Seeded)
+
+The system handles relations it has NEVER seen before. When a user teaches a new relation (e.g., "borders", "exports", "discovered_by"), the system:
+
+1. Stores the triple in the KG
+2. Asks the user about the relation's properties (transitive, symmetric, functional)
+3. Applies the appropriate inference rules
+4. Persists to SQLite
+
+**Tested novel relations (51 tests):** borders, exports, discovered_by, invented_by, born_in, directed_by, composed_by, painted_by, orbit, evolved_from, governed_by, affiliated_with, collaborated_with, predecessor_of, contains_element, cured_by, funded_by
+
 ---
 
 *Last updated: 2026-07-02 GMT+5 | 572 lines | Thinking Dust v2*
