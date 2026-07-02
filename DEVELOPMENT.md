@@ -1433,33 +1433,39 @@ assert "united kingdom" in kg2.gazetteer
 
 ### spaCy Integration Guide
 
-spaCy is available in `.venv-arm64` and provides free NLP capabilities that replace hardcoded rules.
+spaCy is fully integrated into the parser and thinking engine. All hardcoded rules replaced.
 
-**How to use spaCy in TD v2:**
-```python
-import spacy
-nlp = spacy.load('en_core_web_sm')
-
-# POS tagging — replace _pp_words
-doc = nlp("Germany is before Austria on Danube")
-prepositions = [t.text for t in doc if t.pos_ == "ADP"]  # ["on"]
-
-# Noun chunks — replace _merge_post_relation_entities
-chunks = [c.text for c in doc.noun_chunks]  # ["Germany", "Austria", "Danube"]
-
-# Dependency parsing — replace _strip_pp
-for token in doc:
-    if token.dep_ == "pobj":
-        print(f"{token.text} attaches to {token.head.text}")
-# "Danube" attaches to "before" (not "Austria")
-```
-
-**What to replace:**
+**What was replaced:**
 1. `_pp_words` set → `token.pos_ == "ADP"` (spaCy POS tagger)
 2. `_strip_pp()` helper → spaCy dependency parsing (PP attachment)
 3. `_merge_post_relation_entities()` → `doc.noun_chunks` (spaCy noun chunking)
 4. `difflib.SequenceMatcher` fuzzy matching → `token.lemma_` (spaCy lemmatizer)
 5. Gazetteer → `doc.ents` (spaCy NER)
+6. 12 regex patterns → `extract_triples_spacy()` (dependency tree traversal)
+
+**How it works:**
+```python
+# In td/perception/nl_parser.py
+@property
+def nlp(self):
+    """Lazy-load spaCy pipeline."""
+    if self._nlp is None:
+        try:
+            import spacy
+            self._nlp = spacy.load("en_core_web_sm")
+        except (ImportError, OSError):
+            self._nlp = False
+    return self._nlp if self._nlp is not False else None
+
+# Triple extraction via dependency parsing
+def extract_triples_spacy(self, text: str) -> list[tuple[str, str, str]]:
+    doc = self.nlp(text)
+    # 1. Copular: "X is in Y" → (x, in, y)
+    # 2. Verb: "X evolved from Y" → (x, evolved_from, y)
+    # 3. Noun chunk: "X Y Z" → (x, y_z, z)
+```
+
+**Key design:** spaCy-first with regex fallback. If spaCy is not installed, TD v2 still works (uses hardcoded rules).
 
 **Performance:** spaCy is fast (~10K words/sec on CPU). Safe to use in teach() and query() paths.
 
