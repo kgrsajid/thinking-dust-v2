@@ -128,11 +128,11 @@ class KnowledgeGraph:
     are per-relation (pre-seeded or user-taught).
     """
 
-    def __init__(self, max_hops: int = 6):
+    def __init__(self, max_hops: int = 100):
         self.triples: list[Triple] = []
         self.relation_properties: dict[str, list[str]] = dict(DEFAULT_RELATION_PROPERTIES)
         self._entity_index: dict[str, list[int]] = defaultdict(list)  # entity → triple indices
-        self.max_hops = max_hops  # Maximum BFS depth for path finding
+        self.max_hops = max_hops  # Effectively unlimited (100 hops)
 
         # Inverse relation tracking (for inverse: pairs)
         self._inverse_pairs: dict[str, str] = {}
@@ -381,10 +381,11 @@ class KnowledgeGraph:
                 if best_path:
                     trace = self._format_proof_trace(best_path, subject, relation, obj)
                     elapsed = (time.perf_counter() - t0) * 1000
+                    conf = self._chain_confidence(best_path, relation)
                     return InferenceResult(
                         answer=True,
                         proof_trace=trace,
-                        confidence=0.80,
+                        confidence=conf,
                         method="derived",
                     )
 
@@ -446,10 +447,11 @@ class KnowledgeGraph:
                                 f"{p.subject} --{p.relation}--> {p.object}"
                                 for p in new_path
                             )
+                            conf = self._chain_confidence(new_path, relation)
                             return InferenceResult(
                                 answer=True,
                                 proof_trace=proof,
-                                confidence=max(0.1, 0.90 - hop_count * 0.10),
+                                confidence=conf,
                                 method="derived",
                             )
                         visited.add(t.object)
@@ -637,6 +639,49 @@ class KnowledgeGraph:
                 return path
 
         return None
+
+    def _chain_confidence(self, path: list[Triple], target_relation: str) -> float:
+        """Compute confidence from chain quality, not hop count.
+
+        Based on how many steps use explicit composition rules vs heuristics.
+        Paths with more rules are more trustworthy.
+
+        Scoring:
+        - Each step using an explicit rule: +1.0
+        - Each step using heuristic (transitive fallback): +0.5
+        - Each step with no rule at all: +0.3
+        - Final score = average step quality × 0.9 (cap at 0.9)
+
+        This rewards paths with explicit knowledge and penalizes
+        paths that rely on assumptions.
+        """
+        if not path:
+            return 0.0
+
+        scores = []
+        composed = path[0].relation
+        for i in range(1, len(path)):
+            rel_pair = (composed, path[i].relation)
+            rule = self.composition_rules.get(rel_pair)
+            if rule is not None:
+                # Explicit composition rule
+                scores.append(1.0)
+                composed = rule
+            elif "transitive" in self.relation_properties.get(composed, []):
+                # Transitive fallback
+                scores.append(0.5)
+                composed = path[i].relation
+            else:
+                # No rule, no transitivity — heuristic
+                scores.append(0.3)
+                composed = path[i].relation
+
+        if not scores:
+            # Single-hop path
+            return 0.90
+
+        avg_quality = sum(scores) / len(scores)
+        return round(min(0.90, 0.50 + 0.40 * avg_quality), 2)
 
     def _format_proof_trace(self, path: list[Triple], subject: str,
                             relation: str, obj: str) -> str:

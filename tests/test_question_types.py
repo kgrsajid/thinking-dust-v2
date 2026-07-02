@@ -273,14 +273,16 @@ class TestConfidence:
         assert r.confidence >= 0.7
 
     def test_confidence_5_hop(self, kg):
-        """5-hop: lower than 2-hop"""
+        """5-hop: chain quality matters, not hop count.
+        All 'in' relations use explicit composition rules → high confidence."""
         kg.add_fact("a", "in", "b")
         kg.add_fact("b", "in", "c")
         kg.add_fact("c", "in", "d")
         kg.add_fact("d", "in", "e")
         kg.add_fact("e", "in", "f")
         r = kg.query("a", "in", "f")
-        assert r.confidence < 0.85
+        # All steps use explicit rules (in ∘ in → in) → high confidence
+        assert r.confidence >= 0.80
 
     def test_confidence_unknown(self, kg):
         """Unknown: 0.0 confidence"""
