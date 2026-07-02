@@ -1331,8 +1331,8 @@ class GenericThinkingDust:
 
         # Pattern: X is the Y of Z → (X, Y, Z)
         # "Paris is the capital of France" → (paris, capital, france)
-        # Multi-word: "United Kingdom is the capital of Europe" → (united kingdom, capital, europe)
-        m = re.search(r'(\w+(?:\s+\w+)*)\s+is\s+(?:the\s+)?(\w+)\s+of\s+(?:the\s+)?(\w+)', text)
+        # Multi-word: "Seoul is the capital of South Korea" → (seoul, capital, south korea)
+        m = re.search(r'(\w+(?:\s+\w+)*)\s+is\s+(?:the\s+)?(\w+)\s+of\s+(?:the\s+)?(\w+(?:\s+\w+)*)', text)
         if m:
             s, r, o = m.group(1), m.group(2), m.group(3)
             triples.append((s, f"{r}_of", o))
