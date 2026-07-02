@@ -1297,6 +1297,21 @@ class GenericThinkingDust:
         if m:
             triples.append((m.group(1), "in", m.group(2)))
 
+        # Pattern: X is inside Y → (X, inside, Y)
+        m = re.search(r'(\w+)\s+is\s+inside\s+(?:the\s+)?(\w+)', text)
+        if m:
+            triples.append((m.group(1), "inside", m.group(2)))
+
+        # Pattern: X is within Y → (X, inside, Y) — alias
+        m = re.search(r'(\w+)\s+is\s+within\s+(?:the\s+)?(\w+)', text)
+        if m and not any(r == "inside" for _, r, _ in triples):
+            triples.append((m.group(1), "inside", m.group(2)))
+
+        # Pattern: X contains Y → (X, contains, Y)
+        m = re.search(r'(\w+)\s+contains\s+(?:the\s+)?(\w+)', text)
+        if m:
+            triples.append((m.group(1), "contains", m.group(2)))
+
         # Pattern: X is part of Y → (X, part_of, Y)
         m = re.search(r'(\w+)\s+is\s+part\s+of\s+(?:the\s+)?(\w+)', text)
         if m:
@@ -1350,6 +1365,24 @@ class GenericThinkingDust:
             if m:
                 s, r, o = m.group(1), m.group(2), m.group(3)
                 triples.append((s, r, o))
+
+        # Fallback: X relation Y (no "is" — e.g., "RiverA feeds_into RiverB")
+        # Only match if relation is not a common stop word.
+        if not triples:
+            stop_words = {
+                'the', 'a', 'an', 'and', 'or', 'is', 'are', 'was', 'were',
+                'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did',
+                'will', 'would', 'could', 'should', 'may', 'might', 'must',
+                'can', 'shall', 'it', 'its', 'this', 'that', 'these', 'those',
+                'there', 'their', 'they', 'them', 'of', 'to', 'in', 'for',
+                'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through',
+                'during', 'before', 'after', 'above', 'below', 'between',
+            }
+            m = re.search(r'(\w+)\s+([a-z_]+)\s+(\w+)', text)
+            if m:
+                s, r, o = m.group(1), m.group(2), m.group(3)
+                if r not in stop_words and len(r) > 1:
+                    triples.append((s, r, o))
 
         return triples
 
