@@ -397,12 +397,12 @@ def main():
             taught_text = rest.lower()
             new_relations = set()
             for pattern_name, pattern_re in [
-                ("X is the Y of Z", r'(\w+)\s+is\s+(?:the\s+)?(\w+)\s+of'),
-                ("X is in Y", r'(\w+)\s+is\s+in'),
-                ("X is part of Y", r'(\w+)\s+is\s+part\s+of'),
-                ("X is before Y", r'(\w+)\s+is\s+before'),
-                ("X is after Y", r'(\w+)\s+is\s+after'),
-                ("X means Y", r'(\w+)\s+means'),
+                ("X is the Y of Z", r'(\w+(?:\s+\w+)*)\s+is\s+(?:the\s+)?(\w+)\s+of'),
+                ("X is in Y", r'(\w+(?:\s+\w+)*)\s+is\s+in'),
+                ("X is part of Y", r'(\w+(?:\s+\w+)*)\s+is\s+part\s+of'),
+                ("X is before Y", r'(\w+(?:\s+\w+)*)\s+is\s+before'),
+                ("X is after Y", r'(\w+(?:\s+\w+)*)\s+is\s+after'),
+                ("X means Y", r'(\w+(?:\s+\w+)*)\s+means'),
             ]:
                 m = re.search(pattern_re, taught_text)
                 if m:

@@ -155,6 +155,12 @@ class KnowledgeGraph:
         # Pre-seeded composition rules (from OWL best practices)
         self._init_default_composition_rules()
 
+        # Gazetteer: learned multi-word entity dictionary
+        # Populated from teach() interactions. Used by query parser to
+        # recognize "United Kingdom" as a single entity in queries.
+        # Reference: Named Entity Recognition (Nadeau & Sekine, 2007)
+        self.gazetteer: set[str] = set()
+
     def add_fact(self, subject: str, relation: str, obj: str, source: str = "user",
                  proof: str = "", temporal_start: int = None,
                  temporal_end: int = None) -> Triple:
@@ -191,6 +197,12 @@ class KnowledgeGraph:
         self.triples.append(triple)
         self._entity_index[subject].append(idx)
         self._entity_index[obj].append(idx)
+
+        # Update gazetteer with multi-word entities
+        if " " in subject:
+            self.gazetteer.add(subject)
+        if " " in obj:
+            self.gazetteer.add(obj)
 
         # Update temporal index (only the subject entity owns this interval)
         # Store even if one end is open (None) — used for open-ended comparisons
@@ -1064,7 +1076,13 @@ class KnowledgeGraph:
                     rel2 TEXT NOT NULL,
                     target_relation TEXT,
                     PRIMARY KEY (rel1, rel2)
-                );                CREATE INDEX IF NOT EXISTS idx_triples_subject ON triples(subject);
+                );
+
+                CREATE TABLE IF NOT EXISTS gazetteer (
+                    entity TEXT PRIMARY KEY
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_triples_subject ON triples(subject);
                 CREATE INDEX IF NOT EXISTS idx_triples_relation ON triples(relation);
                 CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
             """)
@@ -1098,6 +1116,12 @@ class KnowledgeGraph:
             conn.executemany(
                 "INSERT INTO composition_rules (rel1, rel2, target_relation) VALUES (?, ?, ?)",
                 [(r1, r2, target) for (r1, r2), target in self.composition_rules.items()]
+            )
+
+            conn.execute("DELETE FROM gazetteer")
+            conn.executemany(
+                "INSERT INTO gazetteer (entity) VALUES (?)",
+                [(e,) for e in self.gazetteer]
             )
 
             conn.commit()
@@ -1153,6 +1177,21 @@ class KnowledgeGraph:
                     self.composition_rules[(rel1, rel2)] = target if target else None
             except sqlite3.OperationalError:
                 pass  # Old DB without composition_rules table
+
+            # Load gazetteer
+            try:
+                gaz_rows = conn.execute("SELECT entity FROM gazetteer").fetchall()
+                for (entity,) in gaz_rows:
+                    self.gazetteer.add(entity)
+            except sqlite3.OperationalError:
+                pass  # Old DB without gazetteer table
+
+            # Also populate gazetteer from multi-word entities in triples
+            for t in self.triples:
+                if " " in t.subject:
+                    self.gazetteer.add(t.subject)
+                if " " in t.object:
+                    self.gazetteer.add(t.object)
 
             conn.close()
 

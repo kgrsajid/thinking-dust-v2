@@ -1281,49 +1281,50 @@ class GenericThinkingDust:
         import re
 
         triples = []
-        # Combine problem + solution for extraction
-        text = f"{problem} {solution}".lower().strip()
+        # Process problem text only (not concatenated with solution)
+        # This avoids greedy regex matching on duplicated text
+        text = problem.lower().strip()
 
         # Pattern: X is the Y of Z → (X, Y, Z)
         # "Paris is the capital of France" → (paris, capital, france)
-        m = re.search(r'(\w+)\s+is\s+(?:the\s+)?(\w+)\s+of\s+(?:the\s+)?(\w+)', text)
+        # Multi-word: "United Kingdom is the capital of Europe" → (united kingdom, capital, europe)
+        m = re.search(r'(\w+(?:\s+\w+)*)\s+is\s+(?:the\s+)?(\w+)\s+of\s+(?:the\s+)?(\w+)', text)
         if m:
             s, r, o = m.group(1), m.group(2), m.group(3)
-            # Normalize relation: "capital" → "capital_of"
             triples.append((s, f"{r}_of", o))
 
         # Pattern: X is in Y → (X, in, Y)
-        m = re.search(r'(\w+)\s+is\s+in\s+(?:the\s+)?(\w+)', text)
+        m = re.search(r'(\w+(?:\s+\w+)*)\s+is\s+in\s+(?:the\s+)?(\w+(?:\s+\w+)*)', text)
         if m:
             triples.append((m.group(1), "in", m.group(2)))
 
         # Pattern: X is inside Y → (X, inside, Y)
-        m = re.search(r'(\w+)\s+is\s+inside\s+(?:the\s+)?(\w+)', text)
+        m = re.search(r'(\w+(?:\s+\w+)*)\s+is\s+inside\s+(?:the\s+)?(\w+)', text)
         if m:
             triples.append((m.group(1), "inside", m.group(2)))
 
         # Pattern: X is within Y → (X, inside, Y) — alias
-        m = re.search(r'(\w+)\s+is\s+within\s+(?:the\s+)?(\w+)', text)
+        m = re.search(r'(\w+(?:\s+\w+)*)\s+is\s+within\s+(?:the\s+)?(\w+)', text)
         if m and not any(r == "inside" for _, r, _ in triples):
             triples.append((m.group(1), "inside", m.group(2)))
 
         # Pattern: X contains Y → (X, contains, Y)
-        m = re.search(r'(\w+)\s+contains\s+(?:the\s+)?(\w+)', text)
+        m = re.search(r'(\w+(?:\s+\w+)*)\s+contains\s+(?:the\s+)?(\w+)', text)
         if m:
             triples.append((m.group(1), "contains", m.group(2)))
 
         # Pattern: X is part of Y → (X, part_of, Y)
-        m = re.search(r'(\w+)\s+is\s+part\s+of\s+(?:the\s+)?(\w+)', text)
+        m = re.search(r'(\w+(?:\s+\w+)*)\s+is\s+part\s+of\s+(?:the\s+)?(\w+(?:\s+\w+)*)', text)
         if m:
             triples.append((m.group(1), "part_of", m.group(2)))
 
         # Pattern: X is before Y → (X, before, Y)
-        m = re.search(r'(\w+)\s+is\s+before\s+(\w+)', text)
+        m = re.search(r'(\w+(?:\s+\w+)*)\s+is\s+before\s+(\w+(?:\s+\w+)*)', text)
         if m:
             triples.append((m.group(1), "before", m.group(2)))
 
         # Pattern: X before Y → (X, before, Y) — without "is"
-        m = re.search(r'(\w+)\s+before\s+(\w+)', text)
+        m = re.search(r'(\w+(?:\s+\w+)*)\s+before\s+(\w+(?:\s+\w+)*)', text)
         if m and not any(r == "before" for _, r, _ in triples):
             triples.append((m.group(1), "before", m.group(2)))
 
@@ -1409,13 +1410,18 @@ class GenericThinkingDust:
         entities_in_query = [t for t in tokens if t in kg_entities]
 
         if len(entities_in_query) < 2:
-            # Try multi-word entities (e.g., "new york")
-            # Check if any KG entity is a substring of the query
+            # Try multi-word entities from gazetteer (learned from teach())
+            # Reference: Nadeau & Sekine (2007) — Named Entity Recognition
             query_text = " ".join(tokens)
+            for entity in self.kg.gazetteer:
+                if entity in query_text:
+                    entities_in_query.append(entity)
+
+            # Also check KG entities (for entities not yet in gazetteer)
             for entity in kg_entities:
                 if " " in entity and entity in query_text:
-                    entities_in_query.append(entity)
-                    # Remove constituent tokens already counted
+                    if entity not in entities_in_query:
+                        entities_in_query.append(entity)
                     for part in entity.split():
                         if part in entities_in_query:
                             entities_in_query.remove(part)

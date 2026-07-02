@@ -246,6 +246,11 @@ class GenericNLParser:
         # General "X is Y Z" where Y is a known relation (e.g., "is before", "is in")
         self._merge_is_y_z_pattern(graph, tokens, entity_spans)
 
+        # Step 1c: Merge compound nouns AFTER pattern matching
+        # "united kingdom is in europe" → pattern extracts (united kingdom, in, europe)
+        # THEN merge "united kingdom" into single entity in the graph
+        self._merge_compound_nouns_in_graph(graph, tokens)
+
         # Track entity pairs that already have relations (from pattern matching)
         existing_rel_pairs = {(r["src"], r["tgt"]) for r in graph.relations}
 
@@ -268,17 +273,90 @@ class GenericNLParser:
 
         return {"graph": graph, "text": text, "hdc": problem_hdc, "tokens": tokens}
 
+    def _merge_compound_nouns_in_graph(self, graph, tokens):
+        """Merge adjacent single-token entities that form compound nouns.
+
+        After pattern matching has extracted relations, scan the graph for
+        adjacent entities that should be merged:
+        - "united" + "kingdom" → "united kingdom"
+        - "north" + "america" → "north america"
+        - "world" + "war" + "2" → "world war 2"
+
+        This runs AFTER pattern matching so relations are already extracted.
+        Merged entities inherit all relations from their parts.
+
+        Reference: Manning & Schütze (1999), Chapter 5: Collocations.
+        """
+        if len(graph.entities) < 2:
+            return
+
+        # Relation words that should NOT be merged into entities
+        relation_words = {
+            "in", "of", "to", "from", "at", "on", "by", "for",
+            "into", "through", "during", "before", "after",
+            "is", "are", "was", "were", "be", "been", "has", "have", "had",
+            "part_of", "capital_of", "born_in", "lives_in", "located_in",
+        }
+
+        # Find adjacent entities in token order
+        merged = True
+        while merged:
+            merged = False
+            for i in range(len(graph.entities) - 1):
+                e1 = graph.entities[i]
+                e2 = graph.entities[i + 1]
+
+                # Get token positions
+                e1_tokens = e1["text"].split()
+                e2_tokens = e2["text"].split()
+
+                # Check if e1's last token and e2's first token are adjacent in source
+                try:
+                    e1_last_idx = tokens.index(e1_tokens[-1])
+                    e2_first_idx = tokens.index(e2_tokens[0])
+                except ValueError:
+                    continue
+
+                # Must be adjacent (no gap)
+                if e2_first_idx != e1_last_idx + 1:
+                    continue
+
+                # Don't merge if either is a relation word
+                if e1["text"] in relation_words or e2["text"] in relation_words:
+                    continue
+
+                # Don't merge if either has a relation (already used in pattern)
+                has_rel = any(
+                    r["src"] == e1["id"] or r["tgt"] == e1["id"] or
+                    r["src"] == e2["id"] or r["tgt"] == e2["id"]
+                    for r in graph.relations
+                )
+                if has_rel:
+                    continue
+
+                # Merge e1 + e2
+                merged_text = e1["text"] + " " + e2["text"]
+                merged_hdc = self._encode_phrase(merged_text)
+                type_vec = self._discover_type(merged_hdc)
+
+                # Update e1 with merged text
+                e1["text"] = merged_text
+                e1["hdc"] = merged_hdc
+                e1["type"] = type_vec
+
+                # Remove e2
+                graph.entities.remove(e2)
+                merged = True
+                break
+
     def _merge_post_relation_entities(self, tokens, spans):
-        """Merge adjacent non-stop tokens after spatial/temporal relation words.
+        """Merge adjacent non-stop tokens into compound nouns.
 
-        When a relation word (in, part_of, before, etc.) is followed by
-        multiple non-stop tokens, they likely form a single entity:
-        - "in central asia" → "central asia"
-        - "born in new york" → "new york"
-        - "part of united states" → "united states"
+        Two patterns:
+        1. AFTER relation words: "in central asia" → "central asia"
+        2. BEFORE stop words: "united kingdom was" → "united kingdom"
 
-        This is a generalized pattern: [relation] [token1] [token2] ...
-        where token1, token2, ... are merged into a single entity.
+        This handles geographic names, organization names, compound nouns.
 
         Reference: Compound noun detection in NLP (Manning & Schütze, 1999)
         """
@@ -289,7 +367,6 @@ class GenericNLParser:
             "part_of", "capital_of", "born_in", "lives_in", "located_in",
         }
 
-        # Find relation tokens and merge following adjacent non-stop tokens
         result_spans = []
         skip_until = -1
 
@@ -297,11 +374,12 @@ class GenericNLParser:
             if span["start"] < skip_until:
                 continue
 
-            # Check if this span's token is a relation word
             tok = tokens[span["start"]]
+
+            # Pattern 1: Merge AFTER relation words
+            # "in central asia" → merge "central" + "asia"
             if tok in relation_words:
                 result_spans.append(span)
-                # Look for adjacent non-stop tokens to merge
                 merge_start = span["end"]
                 merge_end = merge_start
                 for next_span in spans:
@@ -314,7 +392,6 @@ class GenericNLParser:
                     elif next_span["start"] > merge_end:
                         break
 
-                # Merge if we found 2+ adjacent non-stop tokens
                 if merge_end - merge_start >= 2:
                     merged_span = {
                         "start": merge_start,
@@ -325,12 +402,44 @@ class GenericNLParser:
                     result_spans.append(merged_span)
                     skip_until = merge_end
                 else:
-                    # Single token after relation — keep as-is
                     for next_span in spans:
                         if next_span["start"] == merge_start:
                             result_spans.append(next_span)
                             skip_until = merge_start + 1
                             break
+
+            # Pattern 2: Merge BEFORE stop words
+            # "united kingdom was" → merge "united" + "kingdom"
+            # Check if NEXT token is a stop word (is, was, in, etc.)
+            elif any(c.isalnum() for c in tok):
+                # Look ahead: is there a stop word after adjacent non-stop tokens?
+                merge_start = span["start"]
+                merge_end = span["end"]
+                for next_span in spans:
+                    if next_span["start"] == merge_end:
+                        next_tok = tokens[next_span["start"]]
+                        if next_tok in self.stop_words:
+                            # Found stop word — stop merging
+                            break
+                        elif any(c.isalnum() for c in next_tok):
+                            # Adjacent non-stop token — merge
+                            merge_end = next_span["end"]
+                        else:
+                            break
+                    elif next_span["start"] > merge_end:
+                        break
+
+                if merge_end - merge_start >= 2:
+                    merged_span = {
+                        "start": merge_start,
+                        "end": merge_end,
+                        "sim": 0.0,
+                        "tokens": tokens[merge_start:merge_end],
+                    }
+                    result_spans.append(merged_span)
+                    skip_until = merge_end
+                else:
+                    result_spans.append(span)
             else:
                 result_spans.append(span)
 
@@ -460,57 +569,58 @@ class GenericNLParser:
         Handles "Tokyo_2020 is before LA_2028" → (tokyo_2020, before, la_2028)
         and "France is in EU" → (france, in, eu).
 
-        Only merges if Y is in relation_prototypes or constraint_signals.
+        Works with tokens (not just entities) so relation words like "in"
+        don't need to be in the entity list.
         """
-        if len(graph.entities) < 3:
+        if len(graph.entities) < 2:
             return
 
-        to_remove = []
         to_add_rels = []
 
-        for i in range(len(graph.entities) - 2):
-            e1 = graph.entities[i]
-            e2 = graph.entities[i + 1]    # potential relation word
-            e3 = graph.entities[i + 2]
-
-            # Check if e2 is a known relation
-            if e2["text"] not in self.relation_prototypes and \
-               e2["text"] not in self.constraint_signals:
+        # Scan tokens for "is" + relation_word pattern
+        for i, tok in enumerate(tokens):
+            if tok not in ("is", "are", "was", "were"):
                 continue
 
-            # Verify "is" appears before e2 in the original text
-            try:
-                e1_first = e1["text"].split()[0]
-                e3_first = e3["text"].split()[0]
-                e1_tok_idx = tokens.index(e1_first)
-                e3_tok_idx = tokens.index(e3_first)
-            except ValueError:
+            # Look for relation word after "is"
+            if i + 1 >= len(tokens):
+                continue
+            rel_word = tokens[i + 1]
+            if rel_word not in self.relation_prototypes and \
+               rel_word not in self.constraint_signals:
                 continue
 
-            # Include "is" in the between range — expand to start from 0 or e1
-            start = max(0, e1_tok_idx - 1)  # include potential "is" before e1
-            between = tokens[start:e3_tok_idx + 1]
-
-            # "is" must appear between e1 and e2
-            if "is" in between:
-                is_idx = between.index("is")
-                e2_first = e2["text"].split()[0]
+            # Find entity before "is" and entity after relation word
+            # Entity before: closest entity whose last token is before "is"
+            e_before = None
+            for e in graph.entities:
+                e_last = e["text"].split()[-1]
                 try:
-                    e2_idx = between.index(e2_first)
+                    e_idx = tokens.index(e_last)
+                    if e_idx < i:
+                        e_before = e
                 except ValueError:
                     continue
 
-                if is_idx < e2_idx:
-                    # Valid "X is Y Z" pattern with Y as relation
-                    rel_type = e2["text"]
-                    rel_hdc = self._encode_phrase(f"{e1['text']} {rel_type} {e3['text']}")
-                    to_add_rels.append((e1["id"], e3["id"], rel_hdc, rel_type))
-                    to_remove.append(e2["id"])
+            # Entity after: closest entity whose first token is after relation word
+            e_after = None
+            for e in graph.entities:
+                e_first = e["text"].split()[0]
+                try:
+                    e_idx = tokens.index(e_first)
+                    if e_idx > i + 1:
+                        e_after = e
+                        break
+                except ValueError:
+                    continue
 
-        for eid in to_remove:
-            graph.entities = [e for e in graph.entities if e["id"] != eid]
+            if e_before and e_after:
+                rel_type = rel_word
+                rel_hdc = self._encode_phrase(f"{e_before['text']} {rel_type} {e_after['text']}")
+                to_add_rels.append((e_before["id"], e_after["id"], rel_hdc, rel_type))
 
         for src, tgt, hdc, rel_type in to_add_rels:
+            graph.add_relation(src, tgt, hdc, rel_type)
             graph.add_relation(src, tgt, hdc, rel_type)
 
     def _discover_entity_spans(self, tokens):
@@ -538,12 +648,6 @@ class GenericNLParser:
                 continue
             spans.append({"start": i, "end": i + 1, "sim": 0.0, "tokens": [tok]})
             covered.add(i)
-
-        # Step 1b: Merge adjacent non-stop tokens after spatial/temporal relations
-        # "in central asia" → ["in", "central_asia"]
-        # "born in new york" → ["born", "in", "new_york"]
-        # This handles geographic names, organization names, etc.
-        spans = self._merge_post_relation_entities(tokens, spans)
 
         # Step 2: In seeded mode, try merging adjacent entities
         # Only merge if MHN similarity of the merged form is higher than
