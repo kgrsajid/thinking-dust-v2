@@ -181,6 +181,109 @@ Built on verified research from the HDC/VSA literature and symbolic AI:
 
 ---
 
+## How to Use
+
+### Setup
+
+```bash
+cd ~/Documents/Thinking\ Dust/td-v2
+arch -arm64 .venv-arm64/bin/python demos/chat_flare.py
+```
+
+### Commands
+
+| Command | Example | What it does |
+|---------|---------|-------------|
+| `teach: <fact>` | `teach: Paris is the capital of France` | Stores a fact |
+| `teach: <fact> \| <answer>` | `teach: What is the capital of France? \| Paris` | Stores fact with answer |
+| `relation: <name> <property>` | `relation: capital_of functional` | Teaches how a relation behaves |
+| `ask: <question>` | `ask: is Paris in the EU?` | Asks a question |
+| `stats` | | Shows memory state |
+| `save` | | Saves to SQLite |
+| `quit` | | Exit |
+
+### Question Types
+
+TD v2 supports **7 types of questions**:
+
+#### 1. Yes/No — "Is X in Y?"
+```
+teach: Paris is the capital of France
+teach: France is in the EU
+ask: is Paris in the EU?
+→ YES. Paris → France → EU (2-hop derivation)
+```
+
+#### 2. Open Query — "What/Who/Where is X?"
+```
+teach: iPhone is made by Apple
+teach: Apple was founded by Steve Jobs
+ask: who founded the company that makes iPhone?
+→ Steve Jobs (2-hop derivation)
+```
+
+#### 3. Functional Contradiction — "Are X and Y the same?"
+```
+teach: Paris is the capital of France
+teach: Berlin is the capital of Germany
+relation: capital_of functional
+ask: are Paris and Berlin the same?
+→ NO. Paris has capital_of=France, Berlin has capital_of=Germany.
+  Since capital_of is functional, they are different.
+```
+
+#### 4. Temporal — "Was X before Y?"
+```
+teach: Obama was president 2009-2017
+teach: Trump was president 2017-2021
+ask: did Obama's term meet Trump's?
+→ YES. [2009,2017) meets [2017,2021) — Allen's MEETS relation
+```
+
+#### 5. Multi-hop — Up to 20+ hops
+```
+teach: My room is in the apartment
+teach: The apartment is in the building
+teach: The building is on the street
+... (20 facts)
+ask: is my room in the Observable Universe?
+→ YES. 20-hop chain with proof trace
+```
+
+#### 6. Proof Trace — "Why is X in Y?"
+```
+ask: why is DNA part of the organism?
+→ DNA → genes → chromosome → nucleus → cell → organ → organism
+  (6-hop chain with full reasoning trace)
+```
+
+#### 7. Confidence Scoring
+Confidence is based on **chain quality**, not hop count:
+- All explicit rules → 0.95 (highest)
+- Mixed rules + heuristic → 0.50-0.70
+- All heuristic → 0.10 (lowest)
+
+---
+
+## What It Can and Can't Do
+
+### ✅ Can do
+- Answer questions about facts it's been taught
+- Derive new facts through logical inference
+- Explain its reasoning (proof traces)
+- Handle temporal reasoning (before, after, meets, during)
+- Detect contradictions (functional relations)
+- Persist knowledge to SQLite
+
+### ❌ Can't do
+- Answer general knowledge questions (only knows what you teach it)
+- Handle conversational questions ("How are you?")
+- Access real-time information ("What's the weather?")
+- Reason about opinions ("Is Python better than Java?")
+- Handle negative reasoning ("Is Tokyo NOT in Europe?")
+
+---
+
 ## Architecture
 
 ```
