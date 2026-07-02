@@ -414,6 +414,43 @@ class KnowledgeGraph:
                     method="direct",
                 )
 
+            # Multi-hop open query: follow BFS paths to find the answer
+            # "Who founded the company that makes iPhone?" → follow iphone→apple→steve jobs
+            # Find all entities reachable from subject via any relation
+            reachable = []
+            for idx in self._entity_index.get(subject, []):
+                t = self.triples[idx]
+                if t.subject == subject:
+                    reachable.append((t.object, [t]))
+
+            # BFS to find entities reachable via the target relation
+            visited = {subject}
+            queue = [(subject, [])]
+            while queue:
+                current, path = queue.pop(0)
+                if len(path) > 6:
+                    continue
+                for idx in self._entity_index.get(current, []):
+                    t = self.triples[idx]
+                    if t.subject == current and t.object not in visited:
+                        new_path = path + [t]
+                        # Check if the LAST relation in the path matches target
+                        if t.relation == relation:
+                            hop_count = len(new_path)
+                            proof = f"{relation}({subject}) via {hop_count}-hop: "
+                            proof += " , ".join(
+                                f"{p.subject} --{p.relation}--> {p.object}"
+                                for p in new_path
+                            )
+                            return InferenceResult(
+                                answer=True,
+                                proof_trace=proof,
+                                confidence=max(0.5, 0.85 - hop_count * 0.05),
+                                method="derived",
+                            )
+                        visited.add(t.object)
+                        queue.append((t.object, new_path))
+
         return InferenceResult(
             answer=None,
             proof_trace="No matching facts or derivable conclusions.",
