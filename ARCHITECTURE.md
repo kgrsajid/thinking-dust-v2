@@ -994,3 +994,50 @@ confidence = clamp(chain_score, 0.1, 0.95)
 2. **UaG:** Ni, J. et al. (2025). "Towards Trustworthy Knowledge Graph Reasoning: An Uncertainty Aware Perspective." *Proceedings of the AAAI Conference on Artificial Intelligence (AAAI 2025)*. arXiv:2410.08985. https://arxiv.org/abs/2410.08985
 3. **UnKGCP:** Zhu, Y. et al. (2025). "Certainty in Uncertainty: Reasoning over Uncertain Knowledge Graphs with Conformal Prediction." *arXiv preprint arXiv:2510.24754*. https://arxiv.org/abs/2510.24754
 4. **PSL+TEKGE:** Rawat, R. et al. (2026). "Information retrieval framework using knowledge graph embeddings and uncertainty modelling using probabilistic soft logic." *Discover Computing*, Vol. 29. Springer. https://doi.org/10.1007/s10791-025-09859-w
+
+### Future: Confidence Calibration via User Feedback (Conformal Prediction)
+
+**Problem:** The current confidence formula is a conservative heuristic. It doesn't reflect actual reliability.
+
+**Solution:** Use the existing feedback system in `demos/chat_flare.py` to collect calibration data, then apply Conformal Prediction (CP) to calibrate confidence scores.
+
+**Existing feedback system (already built):**
+```
+Was this helpful?
+  [y] Yes  [n] No  [t] Teach me the right answer
+```
+
+**What to store (future):**
+```sql
+CREATE TABLE feedback (
+    query TEXT,
+    answer TEXT,
+    confidence FLOAT,
+    correct BOOLEAN,  -- from [y]/[n] buttons
+    timestamp TIMESTAMP
+);
+```
+
+**Calibration flow:**
+1. User asks question → system answers with raw confidence
+2. User clicks [y] or [n] → stored as (query, answer, confidence, correct)
+3. After 100+ queries → run CP calibration
+4. CP maps: raw_confidence → calibrated_confidence
+5. Example: "My 0.20-confidence answers are correct 85% of the time → calibrate to 0.85"
+
+**Why CP?**
+- Distribution-free (no assumptions about data distribution)
+- Statistically guaranteed coverage (Vovk et al., 2005)
+- Query-adaptive (harder queries get wider intervals)
+- Works with any confidence formula as input
+
+**References:**
+1. Vovk, V., Gammerman, A., & Shafer, G. (2005). "Algorithmic Learning in a Random World." Springer. ISBN: 978-0-387-00152-4.
+2. Angelopoulos, A.N. & Bates, S. (2022). "A Gentle Introduction to Conformal Prediction and Distribution-Free Uncertainty Quantification." arXiv:2107.07511.
+3. Shafer, G. & Vovk, V. (2008). "A Tutorial on Conformal Prediction." Journal of Machine Learning Research, 9, 371-421.
+
+**Implementation plan:**
+- Phase 1: Store feedback in SQLite (add `feedback` table)
+- Phase 2: Collect 100+ queries with feedback
+- Phase 3: Implement CP calibration (Python `mapie` library or custom)
+- Phase 4: Replace raw confidence with calibrated confidence

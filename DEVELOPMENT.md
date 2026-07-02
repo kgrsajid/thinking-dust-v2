@@ -1522,3 +1522,48 @@ When enough queries accumulate, use Conformal Prediction (CP) to calibrate:
 - Ni, J. et al. (2025). "Towards Trustworthy Knowledge Graph Reasoning: An Uncertainty Aware Perspective." AAAI 2025. arXiv:2410.08985.
 - Zhu, Y. et al. (2025). "Certainty in Uncertainty: Reasoning over Uncertain Knowledge Graphs with Conformal Prediction." arXiv:2510.24754.
 - Rawat, R. et al. (2026). "Information retrieval framework using knowledge graph embeddings and uncertainty modelling using probabilistic soft logic." Discover Computing, Vol. 29. Springer.
+
+### Future: Confidence Calibration Plan
+
+**Current state:** Confidence is computed from chain quality (heuristic). Not calibrated.
+
+**Existing infrastructure:** `demos/chat_flare.py` already has a feedback system:
+```
+Was this helpful?
+  [y] Yes  [n] No  [t] Teach me the right answer
+```
+
+**What to implement:**
+
+1. **Store feedback in SQLite:**
+```sql
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query TEXT NOT NULL,
+    answer TEXT,
+    raw_confidence FLOAT,
+    correct BOOLEAN,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+2. **Wire feedback buttons to storage:**
+```python
+# In chat_flare.py, when user clicks [y]:
+kg.save_feedback(query, answer, confidence, correct=True)
+# When user clicks [n]:
+kg.save_feedback(query, answer, confidence, correct=False)
+```
+
+3. **Calibrate with Conformal Prediction:**
+```python
+# After 100+ queries:
+calibrated = kg.calibrate_confidence()
+# Returns: {raw_conf: calibrated_conf, ...}
+# Example: {0.20: 0.85, 0.40: 0.92, 0.95: 0.97}
+```
+
+**References:**
+- Vovk, V., Gammerman, A., & Shafer, G. (2005). "Algorithmic Learning in a Random World." Springer.
+- Angelopoulos, A.N. & Bates, S. (2022). "A Gentle Introduction to Conformal Prediction." arXiv:2107.07511.
+- Shafer, G. & Vovk, V. (2008). "A Tutorial on Conformal Prediction." JMLR, 9, 371-421.
