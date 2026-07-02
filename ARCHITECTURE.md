@@ -990,7 +990,7 @@ confidence = clamp(chain_score, 0.1, 0.95)
 **Key insight:** A 5-hop chain with all explicit rules has the SAME confidence as a 2-hop chain with all explicit rules. Chain quality matters, not length.
 
 **References:**
-1. CPR: arXiv:2605.08077 (2026)
-2. UaG: arXiv:2410.08985, AAAI 2025
-3. UnKGCP: arXiv:2510.24754 (2025)
-4. PSL: Springer, Discover Computing, Vol. 29 (2026)
+1. **CPR:** Wang, Y. et al. (2026). "Conformal Path Reasoning: Trustworthy Knowledge Graph Question Answering with Statistical Coverage Guarantees." *arXiv preprint arXiv:2605.08077*. https://arxiv.org/abs/2605.08077
+2. **UaG:** Ni, J. et al. (2025). "Towards Trustworthy Knowledge Graph Reasoning: An Uncertainty Aware Perspective." *Proceedings of the AAAI Conference on Artificial Intelligence (AAAI 2025)*. arXiv:2410.08985. https://arxiv.org/abs/2410.08985
+3. **UnKGCP:** Zhu, Y. et al. (2025). "Certainty in Uncertainty: Reasoning over Uncertain Knowledge Graphs with Conformal Prediction." *arXiv preprint arXiv:2510.24754*. https://arxiv.org/abs/2510.24754
+4. **PSL+TEKGE:** Rawat, R. et al. (2026). "Information retrieval framework using knowledge graph embeddings and uncertainty modelling using probabilistic soft logic." *Discover Computing*, Vol. 29. Springer. https://doi.org/10.1007/s10791-025-09859-w

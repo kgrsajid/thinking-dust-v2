@@ -1518,7 +1518,7 @@ When enough queries accumulate, use Conformal Prediction (CP) to calibrate:
 3. Use CP to produce prediction intervals with statistical guarantees
 
 **References:**
-- CPR: arXiv:2605.08077 (2026)
-- UaG: arXiv:2410.08985, AAAI 2025
-- UnKGCP: arXiv:2510.24754 (2025)
-- PSL: Springer, Discover Computing, Vol. 29 (2026)
+- Wang, Y. et al. (2026). "Conformal Path Reasoning: Trustworthy Knowledge Graph Question Answering with Statistical Coverage Guarantees." arXiv:2605.08077.
+- Ni, J. et al. (2025). "Towards Trustworthy Knowledge Graph Reasoning: An Uncertainty Aware Perspective." AAAI 2025. arXiv:2410.08985.
+- Zhu, Y. et al. (2025). "Certainty in Uncertainty: Reasoning over Uncertain Knowledge Graphs with Conformal Prediction." arXiv:2510.24754.
+- Rawat, R. et al. (2026). "Information retrieval framework using knowledge graph embeddings and uncertainty modelling using probabilistic soft logic." Discover Computing, Vol. 29. Springer.
