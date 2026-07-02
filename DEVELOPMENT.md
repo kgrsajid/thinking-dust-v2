@@ -1384,3 +1384,20 @@ kg.set_composition_rule("born_in", "in", None)      # explicitly blocked
 - Rot-Pro (NeurIPS, 2021) — transitivity by projection
 - GLIDR (arXiv, 2025) — differentiable ILP for graph-structured rules
 - Logical Rule-Based KGR Survey (MDPI, 2023) — comprehensive survey
+
+### Compound Noun Detection
+
+The parser has a `_merge_post_relation_entities()` method that merges adjacent non-stop tokens after spatial/temporal relation words:
+
+```python
+# In td/perception/nl_parser.py
+# Pattern: [relation] [token1] [token2] → single entity
+# "in central asia" → entity "central asia"
+# "part of united states" → entity "united states"
+```
+
+**When to extend:**
+- Add new relation words to `relation_words` set in `_merge_post_relation_entities()`
+- Test with `test_realworld_wikipedia.py` and `test_battle_wikipedia.py`
+
+**Reference:** Manning & Schütze (1999), "Foundations of Statistical NLP", Chapter 5: Collocations.

@@ -835,3 +835,24 @@ kg.set_composition_rule("born_in", "in", None)      # explicitly blocked
 - GLIDR (arXiv, 2025) — Differentiable ILP for graph-structured rules: https://arxiv.org/html/2508.06716v1
 - Rule Induction over KGs (Stepanova et al., 2018) — Survey of ILP-based rule learning: https://dariastepanova.github.io/files/conferences/RW2018/paper/RW2018paper.pdf
 - Logical Rule-Based KGR Survey (MDPI, 2023): https://www.mdpi.com/2227-7390/11/21/4486
+
+### Compound Noun Detection (_merge_post_relation_entities)
+
+When a spatial/temporal relation word (in, part_of, before, etc.) is followed by multiple non-stop tokens, they likely form a single entity. The parser merges them before entity extraction.
+
+**Pattern:** `[relation] [token1] [token2] ...` → single entity
+
+**Examples:**
+- "in central asia" → entity "central asia"
+- "part of united states" → entity "united states"
+- "born in new york" → entity "new york"
+- "before world war ii" → entity "world war ii"
+
+**How it works:**
+1. After single-token entity extraction, scan for relation words
+2. Merge all adjacent non-stop tokens after the relation into one entity span
+3. Pass merged spans to pattern matching (is Y of Z, is Y to Z, etc.)
+
+**Reference:** Manning, C.D. & Schütze, H. (1999). "Foundations of Statistical Natural Language Processing." MIT Press. Chapter 5: Collocations.
+
+**Fixes:** Kazakhstan bug — "kazakhstan is in central asia" was split into `kazakhstan → central` and `asia → asia`. Now correctly stores `kazakhstan → central asia`.
