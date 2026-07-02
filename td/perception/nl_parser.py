@@ -268,6 +268,74 @@ class GenericNLParser:
 
         return {"graph": graph, "text": text, "hdc": problem_hdc, "tokens": tokens}
 
+    def _merge_post_relation_entities(self, tokens, spans):
+        """Merge adjacent non-stop tokens after spatial/temporal relation words.
+
+        When a relation word (in, part_of, before, etc.) is followed by
+        multiple non-stop tokens, they likely form a single entity:
+        - "in central asia" → "central asia"
+        - "born in new york" → "new york"
+        - "part of united states" → "united states"
+
+        This is a generalized pattern: [relation] [token1] [token2] ...
+        where token1, token2, ... are merged into a single entity.
+
+        Reference: Compound noun detection in NLP (Manning & Schütze, 1999)
+        """
+        # Spatial/temporal relation words that precede multi-word entities
+        relation_words = {
+            "in", "of", "to", "from", "at", "on", "by", "for",
+            "into", "through", "during", "before", "after",
+            "part_of", "capital_of", "born_in", "lives_in", "located_in",
+        }
+
+        # Find relation tokens and merge following adjacent non-stop tokens
+        result_spans = []
+        skip_until = -1
+
+        for span in spans:
+            if span["start"] < skip_until:
+                continue
+
+            # Check if this span's token is a relation word
+            tok = tokens[span["start"]]
+            if tok in relation_words:
+                result_spans.append(span)
+                # Look for adjacent non-stop tokens to merge
+                merge_start = span["end"]
+                merge_end = merge_start
+                for next_span in spans:
+                    if next_span["start"] == merge_end:
+                        next_tok = tokens[next_span["start"]]
+                        if next_tok not in self.stop_words and any(c.isalnum() for c in next_tok):
+                            merge_end = next_span["end"]
+                        else:
+                            break
+                    elif next_span["start"] > merge_end:
+                        break
+
+                # Merge if we found 2+ adjacent non-stop tokens
+                if merge_end - merge_start >= 2:
+                    merged_span = {
+                        "start": merge_start,
+                        "end": merge_end,
+                        "sim": 0.0,
+                        "tokens": tokens[merge_start:merge_end],
+                    }
+                    result_spans.append(merged_span)
+                    skip_until = merge_end
+                else:
+                    # Single token after relation — keep as-is
+                    for next_span in spans:
+                        if next_span["start"] == merge_start:
+                            result_spans.append(next_span)
+                            skip_until = merge_start + 1
+                            break
+            else:
+                result_spans.append(span)
+
+        return result_spans
+
     def _merge_is_y_of_z_pattern(self, graph, tokens, entity_spans):
         """Detect 'X is the Y of Z' pattern and merge Y into the relation.
 
@@ -452,6 +520,8 @@ class GenericNLParser:
         1. Every non-stop, non-pure-punctuation token is a single-token entity.
         2. Adjacent entity tokens MAY be merged if their joint HDC vector
            has higher MHN similarity than either alone (seeded mode only).
+        3. Adjacent non-stop tokens after spatial/temporal relation words
+           are merged (e.g., "in central asia" → "central asia").
 
         This avoids the mega-phrase problem where "assign 3 different tasks"
          gets grabbed as one entity instead of ["3", "tasks"].
@@ -468,6 +538,12 @@ class GenericNLParser:
                 continue
             spans.append({"start": i, "end": i + 1, "sim": 0.0, "tokens": [tok]})
             covered.add(i)
+
+        # Step 1b: Merge adjacent non-stop tokens after spatial/temporal relations
+        # "in central asia" → ["in", "central_asia"]
+        # "born in new york" → ["born", "in", "new_york"]
+        # This handles geographic names, organization names, etc.
+        spans = self._merge_post_relation_entities(tokens, spans)
 
         # Step 2: In seeded mode, try merging adjacent entities
         # Only merge if MHN similarity of the merged form is higher than
