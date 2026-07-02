@@ -1273,6 +1273,10 @@ class GenericThinkingDust:
         Uses structural patterns (not hardcoded facts). These are general
         English constructions that work with ANY entities.
 
+        Handles prepositional phrase attachment (Manning & Schütze, 1999):
+        "Germany is before Austria on Danube" → (germany, before, austria)
+        "on Danube" is context, not part of the entity.
+
         Examples:
             "Paris is the capital of France" → (paris, capital_of, france)
             "France is in the EU" → (france, in, eu)
@@ -1281,9 +1285,21 @@ class GenericThinkingDust:
         import re
 
         triples = []
-        # Process problem text only (not concatenated with solution)
-        # This avoids greedy regex matching on duplicated text
         text = problem.lower().strip()
+
+        # Helper: strip trailing prepositional phrases from entities
+        # "austria on danube" → "austria"
+        # "united kingdom in europe" → "united kingdom"
+        # Reference: Prepositional phrase attachment (Manning & Schütze, 1999)
+        _pp_words = {"on", "in", "at", "from", "to", "by", "for", "with", "into",
+                     "through", "during", "before", "after", "about", "near", "over"}
+        def _strip_pp(entity: str) -> str:
+            words = entity.split()
+            # Strip trailing preposition + its object
+            # "austria on danube" → ["austria", "on", "danube"] → "austria"
+            while len(words) >= 3 and words[-2] in _pp_words:
+                words = words[:-2]
+            return " ".join(words)
 
         # Pattern: X is the Y of Z → (X, Y, Z)
         # "Paris is the capital of France" → (paris, capital, france)
@@ -1296,7 +1312,7 @@ class GenericThinkingDust:
         # Pattern: X is in Y → (X, in, Y)
         m = re.search(r'(\w+(?:\s+\w+)*)\s+is\s+in\s+(?:the\s+)?(\w+(?:\s+\w+)*)', text)
         if m:
-            triples.append((m.group(1), "in", m.group(2)))
+            triples.append((_strip_pp(m.group(1)), "in", _strip_pp(m.group(2))))
 
         # Pattern: X is inside Y → (X, inside, Y)
         m = re.search(r'(\w+(?:\s+\w+)*)\s+is\s+inside\s+(?:the\s+)?(\w+)', text)
@@ -1321,12 +1337,12 @@ class GenericThinkingDust:
         # Pattern: X is before Y → (X, before, Y)
         m = re.search(r'(\w+(?:\s+\w+)*)\s+is\s+before\s+(\w+(?:\s+\w+)*)', text)
         if m:
-            triples.append((m.group(1), "before", m.group(2)))
+            triples.append((_strip_pp(m.group(1)), "before", _strip_pp(m.group(2))))
 
         # Pattern: X before Y → (X, before, Y) — without "is"
         m = re.search(r'(\w+(?:\s+\w+)*)\s+before\s+(\w+(?:\s+\w+)*)', text)
         if m and not any(r == "before" for _, r, _ in triples):
-            triples.append((m.group(1), "before", m.group(2)))
+            triples.append((_strip_pp(m.group(1)), "before", _strip_pp(m.group(2))))
 
         # Pattern: X is after Y → (X, after, Y)
         m = re.search(r'(\w+)\s+is\s+after\s+(\w+)', text)
