@@ -1399,7 +1399,7 @@ class GenericThinkingDust:
         """
         import re
         text_lower = text.lower().strip()
-        tokens = re.findall(r'[a-z0-9]+', text_lower)
+        tokens = re.findall(r'\w+', text_lower)  # \w includes underscores
 
         # Collect entities that exist in the KG
         kg_entities = set()
@@ -1498,7 +1498,21 @@ class GenericThinkingDust:
                     best_meta.get("solution_text") or
                     best_meta.get("problem", ""))
             if text and text != "I don't know this one yet.":
-                return {"type": "learned", "formatted": text, "similarity": best_sim}
+                # Entity validation for medium-similarity cases to prevent hallucinations.
+                # High similarity (>=0.7) = near-perfect match, trust it.
+                # Low similarity (<=0.3) = already filtered by sim threshold.
+                # Medium similarity (0.3-0.7) = validate entity overlap.
+                if best_sim >= 0.7:
+                    return {"type": "learned", "formatted": text, "similarity": best_sim}
+
+                # Validate: ALL query entities must appear in the answer.
+                # Prevents "is Norway part of Europe" → "EU is part of Europe" hallucination.
+                # Norway is in the query but not in the answer → reject.
+                query_entities = {e['text'].lower() for e in graph.entities}
+                retrieved_words = set(text.lower().split())
+                matched = query_entities & retrieved_words
+                if matched == query_entities:
+                    return {"type": "learned", "formatted": text, "similarity": best_sim}
         return None
 
     def _compute_confidence(self, solution, thoughts, sub_problems):

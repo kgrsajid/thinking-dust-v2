@@ -243,6 +243,9 @@ class GenericNLParser:
         # Same for "X is Y to Z" pattern (e.g., "is married to", "is related to")
         self._merge_is_y_to_z_pattern(graph, tokens, entity_spans)
 
+        # General "X is Y Z" where Y is a known relation (e.g., "is before", "is in")
+        self._merge_is_y_z_pattern(graph, tokens, entity_spans)
+
         # Track entity pairs that already have relations (from pattern matching)
         existing_rel_pairs = {(r["src"], r["tgt"]) for r in graph.relations}
 
@@ -377,6 +380,68 @@ class GenericNLParser:
             graph.entities = [e for e in graph.entities if e["id"] != eid]
 
         # Add relations
+        for src, tgt, hdc, rel_type in to_add_rels:
+            graph.add_relation(src, tgt, hdc, rel_type)
+
+    def _merge_is_y_z_pattern(self, graph, tokens, entity_spans):
+        """Detect 'X is Y Z' where Y is a known relation word.
+
+        Pattern: [entity_X] [is] [relation_word] [entity_Z]
+        After merge: [entity_X] --Y--> [entity_Z] (Y removed from entities)
+
+        Handles "Tokyo_2020 is before LA_2028" → (tokyo_2020, before, la_2028)
+        and "France is in EU" → (france, in, eu).
+
+        Only merges if Y is in relation_prototypes or constraint_signals.
+        """
+        if len(graph.entities) < 3:
+            return
+
+        to_remove = []
+        to_add_rels = []
+
+        for i in range(len(graph.entities) - 2):
+            e1 = graph.entities[i]
+            e2 = graph.entities[i + 1]    # potential relation word
+            e3 = graph.entities[i + 2]
+
+            # Check if e2 is a known relation
+            if e2["text"] not in self.relation_prototypes and \
+               e2["text"] not in self.constraint_signals:
+                continue
+
+            # Verify "is" appears before e2 in the original text
+            try:
+                e1_first = e1["text"].split()[0]
+                e3_first = e3["text"].split()[0]
+                e1_tok_idx = tokens.index(e1_first)
+                e3_tok_idx = tokens.index(e3_first)
+            except ValueError:
+                continue
+
+            # Include "is" in the between range — expand to start from 0 or e1
+            start = max(0, e1_tok_idx - 1)  # include potential "is" before e1
+            between = tokens[start:e3_tok_idx + 1]
+
+            # "is" must appear between e1 and e2
+            if "is" in between:
+                is_idx = between.index("is")
+                e2_first = e2["text"].split()[0]
+                try:
+                    e2_idx = between.index(e2_first)
+                except ValueError:
+                    continue
+
+                if is_idx < e2_idx:
+                    # Valid "X is Y Z" pattern with Y as relation
+                    rel_type = e2["text"]
+                    rel_hdc = self._encode_phrase(f"{e1['text']} {rel_type} {e3['text']}")
+                    to_add_rels.append((e1["id"], e3["id"], rel_hdc, rel_type))
+                    to_remove.append(e2["id"])
+
+        for eid in to_remove:
+            graph.entities = [e for e in graph.entities if e["id"] != eid]
+
         for src, tgt, hdc, rel_type in to_add_rels:
             graph.add_relation(src, tgt, hdc, rel_type)
 
