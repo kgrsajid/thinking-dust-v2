@@ -1465,7 +1465,7 @@ def extract_triples_spacy(self, text: str) -> list[tuple[str, str, str]]:
     # 3. Noun chunk: "X Y Z" → (x, y_z, z)
 ```
 
-**Key design:** spaCy-first with regex fallback. If spaCy is not installed, TD v2 still works (uses hardcoded rules).
+**Key design:** spaCy is the primary extraction engine. Regex patterns exist only as a last resort when spaCy is not installed. The system always tries spaCy first — it's not optional, it's the default.
 
 **Performance:** spaCy is fast (~10K words/sec on CPU). Safe to use in teach() and query() paths.
 

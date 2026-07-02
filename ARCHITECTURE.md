@@ -929,6 +929,6 @@ for token in doc:
 4. `_extract_triples()` — spaCy-first, regex fallback
 5. `teach_relation()` — lemmatizes relation names for consistency
 
-**Fallback behavior:** If spaCy is not installed (e.g., x86_64 venv), TD v2 still works using hardcoded regex patterns. The system is designed to degrade gracefully — spaCy improves accuracy but is not required.
+**Fallback behavior:** spaCy is the primary extraction engine. Regex patterns exist only as a last resort when spaCy is not installed (e.g., architecture mismatch). The system always tries spaCy first — it's not optional, it's the default.
 
 **Reference:** Honnibal, M. & Montani, I. (2017). "spaCy 2: Natural language understanding with Bloom embeddings, convolutional neural networks and incremental parsing." To appear.
