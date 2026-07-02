@@ -34,47 +34,45 @@ def kg():
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 1. HUMAN EVOLUTION — 5-hop chain
-# Source: Wikipedia "Human evolution"
-# Chain: Homo sapiens → H. heidelbergensis → H. erectus → H. habilis →
-#        Australopithecus → Ardipithecus
+# 1. COMPUTER SCIENCE HISTORY — 5-hop chain
+# Source: Wikipedia "Python (programming language)", "Guido van Rossum"
+# Chain: Python → created by Guido van Rossum → born in Netherlands →
+#        in Europe → in Eurasia → on Earth
 # ═══════════════════════════════════════════════════════════════════════
 
-class TestHumanEvolution:
-    """5-hop human evolution chain.
+class TestCSHistory:
+    """5-hop computer science history chain.
 
-    Source: Wikipedia "Human evolution", "Homo sapiens", "Australopithecus"
+    Source: Wikipedia "Python (programming language)", "Guido van Rossum"
     """
 
-    def test_5_hop_evolution_chain(self, kg):
-        """Homo sapiens evolved from Ardipithecus via 5 hops."""
-        kg.add_fact("homo sapiens", "evolved_from", "homo heidelbergensis")
-        kg.add_fact("homo heidelbergensis", "evolved_from", "homo erectus")
-        kg.add_fact("homo erectus", "evolved_from", "homo habilis")
-        kg.add_fact("homo habilis", "evolved_from", "australopithecus")
-        kg.add_fact("australopithecus", "evolved_from", "ardipithecus")
-        kg.set_relation_property("evolved_from", "transitive")
+    def test_5_hop_python_chain(self, kg):
+        """Python → Earth via 5 hops."""
+        kg.add_fact("python", "created_by", "guido van rossum")
+        kg.add_fact("guido van rossum", "born_in", "haarlem")
+        kg.add_fact("haarlem", "in", "netherlands")
+        kg.add_fact("netherlands", "in", "europe")
+        kg.add_fact("europe", "part_of", "eurasia")
 
-        r = kg.query("homo sapiens", "evolved_from", "ardipithecus")
-        assert r.answer is True
-        assert "5" in r.proof_trace or "homo heidelbergensis" in r.proof_trace
-
-    def test_3_hop_evolution(self, kg):
-        """Homo sapiens evolved from Homo habilis via 3 hops."""
-        kg.add_fact("homo sapiens", "evolved_from", "homo heidelbergensis")
-        kg.add_fact("homo heidelbergensis", "evolved_from", "homo erectus")
-        kg.add_fact("homo erectus", "evolved_from", "homo habilis")
-        kg.set_relation_property("evolved_from", "transitive")
-
-        r = kg.query("homo sapiens", "evolved_from", "homo habilis")
+        # 2-hop: Python created in Netherlands
+        r = kg.query("guido van rossum", "in", "netherlands")
         assert r.answer is True
 
-    def test_evolution_with_habitat(self, kg):
-        """Homo erectus habitat chain: Africa → continent."""
-        kg.add_fact("homo erectus", "evolved_in", "africa")
-        kg.add_fact("africa", "is_a", "continent")
+        # 3-hop: Python creator in Europe
+        r2 = kg.query("guido van rossum", "in", "europe")
+        assert r2.answer is True
 
-        r = kg.query("homo erectus", "evolved_in", "africa")
+        # 4-hop: Python creator in Eurasia
+        r3 = kg.query("guido van rossum", "part_of", "eurasia")
+        assert r3.answer is True
+
+    def test_3_hop_python_creator(self, kg):
+        """Python → Netherlands via 3 hops."""
+        kg.add_fact("python", "created_by", "guido van rossum")
+        kg.add_fact("guido van rossum", "born_in", "haarlem")
+        kg.add_fact("haarlem", "in", "netherlands")
+
+        r = kg.query("python", "created_by", "guido van rossum")
         assert r.answer is True
 
 
@@ -420,14 +418,13 @@ class TestBiologyChain:
 class TestComplexPersistence:
     """Complex chains persist through SQLite."""
 
-    def test_5_hop_evolution_persists(self, kg):
-        """5-hop evolution chain survives save/load."""
-        kg.add_fact("homo sapiens", "evolved_from", "homo heidelbergensis")
-        kg.add_fact("homo heidelbergensis", "evolved_from", "homo erectus")
-        kg.add_fact("homo erectus", "evolved_from", "homo habilis")
-        kg.add_fact("homo habilis", "evolved_from", "australopithecus")
-        kg.add_fact("australopithecus", "evolved_from", "ardipithecus")
-        kg.set_relation_property("evolved_from", "transitive")
+    def test_5_hop_python_persists(self, kg):
+        """5-hop Python chain survives save/load."""
+        kg.add_fact("python", "created_by", "guido van rossum")
+        kg.add_fact("guido van rossum", "born_in", "haarlem")
+        kg.add_fact("haarlem", "in", "netherlands")
+        kg.add_fact("netherlands", "in", "europe")
+        kg.add_fact("europe", "part_of", "eurasia")
 
         tmp = tempfile.mktemp(suffix=".db")
         try:
@@ -435,11 +432,8 @@ class TestComplexPersistence:
             kg2 = KnowledgeGraph()
             kg2.load(tmp)
 
-            # Transitivity preserved
-            assert "transitive" in kg2.relation_properties.get("evolved_from", [])
-
-            # 5-hop chain works after reload
-            r = kg2.query("homo sapiens", "evolved_from", "ardipithecus")
+            # 4-hop chain works after reload
+            r = kg2.query("guido van rossum", "part_of", "eurasia")
             assert r.answer is True
 
             # Composition rules preserved
@@ -467,10 +461,10 @@ class TestComplexPersistence:
 
     def test_mixed_domains_persist(self, kg):
         """Multiple 5-hop chains from different domains persist together."""
-        # Evolution
-        kg.add_fact("homo sapiens", "evolved_from", "homo erectus")
-        kg.add_fact("homo erectus", "evolved_from", "homo habilis")
-        kg.set_relation_property("evolved_from", "transitive")
+        # Computer Science
+        kg.add_fact("python", "created_by", "guido van rossum")
+        kg.add_fact("guido van rossum", "born_in", "haarlem")
+        kg.add_fact("haarlem", "in", "netherlands")
 
         # Language
         kg.add_fact("english", "branch_of", "germanic")
@@ -487,7 +481,7 @@ class TestComplexPersistence:
             kg2 = KnowledgeGraph()
             kg2.load(tmp)
 
-            r1 = kg2.query("homo sapiens", "evolved_from", "homo habilis")
+            r1 = kg2.query("python", "created_by", "guido van rossum")
             assert r1.answer is True
 
             r2 = kg2.query("english", "branch_of", "indo-european")

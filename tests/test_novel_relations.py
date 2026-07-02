@@ -456,43 +456,43 @@ class TestOrbit:
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestEvolvedFrom:
-    """Evolution — novel relation, transitive.
+    """Music genre evolution — novel relation, transitive.
 
-    Source: Wikipedia "Human evolution"
+    Source: Wikipedia "Rock music", "Blues"
     """
 
     def test_evolved_direct(self, kg):
-        """Direct evolution facts."""
-        kg.add_fact("homo sapiens", "evolved_from", "homo erectus")
-        kg.add_fact("homo erectus", "evolved_from", "homo habilis")
-        kg.add_fact("homo habilis", "evolved_from", "australopithecus")
+        """Direct genre evolution facts."""
+        kg.add_fact("rock", "evolved_from", "blues")
+        kg.add_fact("blues", "evolved_from", "spirituals")
+        kg.add_fact("jazz", "evolved_from", "blues")
 
-        r = kg.query("homo sapiens", "evolved_from", "homo erectus")
+        r = kg.query("rock", "evolved_from", "blues")
         assert r.answer is True
 
     def test_evolved_transitive(self, kg):
-        """Evolved_from is transitive.
+        """Evolved_from is transitive — music genres.
 
-        Source: Wikipedia "Human evolution"
+        Source: Wikipedia "Rock music"
         """
-        kg.add_fact("homo sapiens", "evolved_from", "homo erectus")
-        kg.add_fact("homo erectus", "evolved_from", "homo habilis")
-        kg.add_fact("homo habilis", "evolved_from", "australopithecus")
+        kg.add_fact("rock", "evolved_from", "blues")
+        kg.add_fact("blues", "evolved_from", "spirituals")
+        kg.add_fact("spirituals", "evolved_from", "african music")
         kg.set_relation_property("evolved_from", "transitive")
 
-        # 3-hop: Homo sapiens evolved from Australopithecus
-        r = kg.query("homo sapiens", "evolved_from", "australopithecus")
+        # 3-hop: Rock evolved from African music
+        r = kg.query("rock", "evolved_from", "african music")
         assert r.answer is True
 
     def test_evolved_chain_4_hop(self, kg):
-        """4-hop evolution chain."""
-        kg.add_fact("homo sapiens", "evolved_from", "homo heidelbergensis")
-        kg.add_fact("homo heidelbergensis", "evolved_from", "homo erectus")
-        kg.add_fact("homo erectus", "evolved_from", "homo habilis")
-        kg.add_fact("homo habilis", "evolved_from", "australopithecus")
+        """4-hop music genre chain."""
+        kg.add_fact("hip hop", "evolved_from", "funk")
+        kg.add_fact("funk", "evolved_from", "soul")
+        kg.add_fact("soul", "evolved_from", "rhythm and blues")
+        kg.add_fact("rhythm and blues", "evolved_from", "blues")
         kg.set_relation_property("evolved_from", "transitive")
 
-        r = kg.query("homo sapiens", "evolved_from", "australopithecus")
+        r = kg.query("hip hop", "evolved_from", "blues")
         assert r.answer is True
 
 
@@ -748,16 +748,16 @@ class TestCrossDomainNovel:
         r2 = kg.query("france", "exports", "wine")
         assert r2.answer is True
 
-    def test_organism_evolved_habitat(self, kg):
-        """Species → evolved_from + habitat chain.
+    def test_genre_evolved_influenced(self, kg):
+        """Music genre → evolved_from + influenced chain.
 
-        Source: Wikipedia "Human"
+        Source: Wikipedia "Rock music"
         """
-        kg.add_fact("homo sapiens", "evolved_from", "homo erectus")
-        kg.add_fact("homo sapiens", "habitat", "global")
-        kg.add_fact("homo erectus", "habitat", "africa")
+        kg.add_fact("rock", "evolved_from", "blues")
+        kg.add_fact("rock", "influenced", "punk")
+        kg.add_fact("blues", "originated_from", "mississippi")
 
-        r = kg.query("homo sapiens", "evolved_from", "homo erectus")
+        r = kg.query("rock", "evolved_from", "blues")
         assert r.answer is True
 
 

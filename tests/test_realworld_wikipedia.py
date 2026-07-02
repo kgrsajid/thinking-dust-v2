@@ -342,22 +342,22 @@ class TestScience:
     def test_biology_taxonomy(self, kg):
         """Biological taxonomy: species → genus → family → order.
 
-        Source: Wikipedia "Human"
-        - Human is species_of Homo
-        - Homo is genus_of Hominidae
-        - Hominidae is family_of Primates
-        - Primates is order_of Mammalia
+        Source: Wikipedia "Domestic cat"
+        - Cat is species_of Felis
+        - Felis is genus_of Felidae
+        - Felidae is family_of Carnivora
+        - Carnivora is order_of Mammalia
         """
-        kg.add_fact("human", "species_of", "homo")
-        kg.add_fact("homo", "genus_of", "hominidae")
-        kg.add_fact("hominidae", "family_of", "primates")
-        kg.add_fact("primates", "order_of", "mammalia")
+        kg.add_fact("domestic cat", "species_of", "felis")
+        kg.add_fact("felis", "genus_of", "felidae")
+        kg.add_fact("felidae", "family_of", "carnivora")
+        kg.add_fact("carnivora", "order_of", "mammalia")
 
-        # 4-hop: Human is part of Mammalia
-        r = kg.query("human", "order_of", "mammalia")
+        # 4-hop: Cat is part of Mammalia
+        r = kg.query("domestic cat", "order_of", "mammalia")
         # This requires cross-relation composition, may not work yet
         # Test direct fact
-        r2 = kg.query("human", "species_of", "homo")
+        r2 = kg.query("domestic cat", "species_of", "felis")
         assert r2.answer is True
 
 
