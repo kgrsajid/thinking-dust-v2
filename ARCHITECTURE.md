@@ -932,3 +932,30 @@ for token in doc:
 **Fallback behavior:** spaCy is the primary extraction engine. Regex patterns exist only as a last resort when spaCy is not installed (e.g., architecture mismatch). The system always tries spaCy first — it's not optional, it's the default.
 
 **Reference:** Honnibal, M. & Montani, I. (2017). "spaCy 2: Natural language understanding with Bloom embeddings, convolutional neural networks and incremental parsing." To appear.
+
+### Multi-Hop Open Queries
+
+Open queries ("What/Who/Where is X?") now support multi-hop reasoning via BFS path traversal.
+
+**How it works:**
+1. User asks: "Who founded the company that makes iPhone?"
+2. System extracts: subject="iphone", relation="founded_by"
+3. BFS follows: iphone → apple → steve jobs
+4. At hop 2, finds "founded_by" relation → returns "steve jobs"
+
+**Hop limits:** max_hops=6 (supports up to 6-hop chains)
+
+**Confidence:** Decreases with hop count:
+- 1-hop: 0.85
+- 2-hop: 0.75
+- 3-hop: 0.70
+- 4-hop: 0.65
+- 5-hop: 0.60
+- 6-hop: 0.55
+
+**Question types supported:**
+1. Yes/No — "Is X in Y?" (any hop count)
+2. Open Query — "What/Who/Where is X?" (any hop count)
+3. Functional Contradiction — "Are X and Y the same?"
+4. Temporal — "Was X before/meets/during Y?"
+5. Proof Trace — Full reasoning chain at each hop

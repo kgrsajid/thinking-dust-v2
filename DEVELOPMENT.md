@@ -1470,3 +1470,22 @@ def extract_triples_spacy(self, text: str) -> list[tuple[str, str, str]]:
 **Performance:** spaCy is fast (~10K words/sec on CPU). Safe to use in teach() and query() paths.
 
 **Reference:** Honnibal & Montani (2017), "spaCy 2: Natural language understanding with Bloom embeddings."
+
+### Multi-Hop Open Queries
+
+Open queries follow BFS paths to find answers at any hop count:
+
+```python
+# 1-hop: direct fact
+kg.query("iphone", "made_by")  # → "apple"
+
+# 2-hop: follow path
+kg.query("iphone", "founded_by")  # → "steve jobs" (via apple)
+
+# 5-hop: full chain
+kg.query("iphone", "in")  # → "north america" (via apple→jobs→sf→usa)
+```
+
+**max_hops:** Default 6. Supports up to 6-hop chains.
+
+**Confidence formula:** `max(0.5, 0.85 - hop_count * 0.05)`

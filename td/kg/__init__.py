@@ -287,7 +287,7 @@ class KnowledgeGraph:
                 results.append((t.relation, t.subject, "incoming"))
         return results
 
-    def bfs_paths(self, start: str, end: str, max_hops: int = 4) -> list[list[Triple]]:
+    def bfs_paths(self, start: str, end: str, max_hops: int = 6) -> list[list[Triple]]:
         """Find all paths between two entities using BFS.
 
         Returns list of paths, where each path is a list of triples.
@@ -370,7 +370,7 @@ class KnowledgeGraph:
 
         # Mode 2: BFS path finding (no Z3 needed for simple transitivity)
         if obj:
-            paths = self.bfs_paths(subject, obj, max_hops=4)
+            paths = self.bfs_paths(subject, obj, max_hops=6)
             if paths:
                 # Check if any path is valid under the relation's properties
                 best_path = self._find_valid_path(paths, relation, subject, obj)
