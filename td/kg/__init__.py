@@ -169,6 +169,9 @@ class KnowledgeGraph:
         """Find all paths between two entities using BFS.
 
         Returns list of paths, where each path is a list of triples.
+        Only traverses backwards (object → subject) for SYMMETRIC relations.
+        For asymmetric relations (in, part_of, before, etc.), only traverses
+        forward (subject → object).
         """
         start = start.strip().lower()
         end = end.strip().lower()
@@ -177,7 +180,6 @@ class KnowledgeGraph:
             return []
 
         paths = []
-        # BFS queue: (current_entity, path_so_far, visited_entities)
         queue = [(start, [], {start})]
 
         while queue:
@@ -186,11 +188,10 @@ class KnowledgeGraph:
             if len(path) > max_hops:
                 continue
 
-            # Get all triples involving current entity
             for idx in self._entity_index.get(current, []):
                 t = self.triples[idx]
 
-                # Forward: current is subject
+                # Forward: current is subject (always valid)
                 if t.subject == current:
                     neighbor = t.object
                     if neighbor == end:
@@ -198,13 +199,15 @@ class KnowledgeGraph:
                     elif neighbor not in visited and len(path) < max_hops:
                         queue.append((neighbor, path + [t], visited | {neighbor}))
 
-                # Backward: current is object (traverse inverse)
+                # Backward: current is object — ONLY for symmetric relations
                 if t.object == current:
-                    neighbor = t.subject
-                    if neighbor == end:
-                        paths.append(path + [t])
-                    elif neighbor not in visited and len(path) < max_hops:
-                        queue.append((neighbor, path + [t], visited | {neighbor}))
+                    is_symmetric = "symmetric" in self.relation_properties.get(t.relation, set())
+                    if is_symmetric:
+                        neighbor = t.subject
+                        if neighbor == end:
+                            paths.append(path + [t])
+                        elif neighbor not in visited and len(path) < max_hops:
+                            queue.append((neighbor, path + [t], visited | {neighbor}))
 
         return paths
 

@@ -1460,8 +1460,14 @@ class GenericThinkingDust:
         # For each entity pair, check for paths in the KG
         for i, e1 in enumerate(entities_in_query):
             for e2 in entities_in_query[i + 1:]:
-                # Try both directions
-                for subj, obj in [(e1, e2), (e2, e1)]:
+                # For non-symmetric relations, only try query direction (e1 → e2)
+                # For symmetric relations, try both directions
+                is_symmetric = "symmetric" in self.kg.relation_properties.get(
+                    relation_in_query or "", set()
+                )
+                directions = [(e1, e2)] if not is_symmetric else [(e1, e2), (e2, e1)]
+
+                for subj, obj in directions:
                     paths = self.kg.bfs_paths(subj, obj, max_hops=6)
                     if paths:
                         best_path = self.kg._find_valid_path(
