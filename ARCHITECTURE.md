@@ -813,3 +813,25 @@ The system handles relations it has NEVER seen before. When a user teaches a new
 ---
 
 *Last updated: 2026-07-02 GMT+5 | 572 lines | Thinking Dust v2*
+
+### Composition Rules (OWL Property Chain)
+
+Cross-relation composition is controlled by explicit rules, not heuristics. This prevents false inferences like `born_in(X,Y) ∧ in(Y,Z) → born_in(X,Z)`.
+
+**Implementation:** `composition_rules: dict[tuple[str, str], str | None]`
+
+**Usage:**
+```python
+kg.set_composition_rule("capital_of", "in", "in")   # capital_of(X,Y) ∧ in(Y,Z) → in(X,Z)
+kg.set_composition_rule("born_in", "in", None)      # explicitly blocked
+```
+
+**Pre-seeded rules:** `in ∘ in → in`, `part_of ∘ part_of → part_of`, `before ∘ before → before`
+
+**References:**
+- OWL 2 Web Ontology Language — PropertyChain axiom (W3C, 2009): https://www.w3.org/TR/owl2-syntax/#Property_Chains
+- HolmE (Zheng et al., 2024) — KGE closed under composition, Springer: https://link.springer.com/article/10.1007/s10618-024-01050-x
+- Rot-Pro (NeurIPS, 2021) — Transitivity by projection in KGE: https://proceedings.neurips.cc/paper_files/paper/2021/file/cf2f3fe19ffba462831d7f037a07fc83-Paper.pdf
+- GLIDR (arXiv, 2025) — Differentiable ILP for graph-structured rules: https://arxiv.org/html/2508.06716v1
+- Rule Induction over KGs (Stepanova et al., 2018) — Survey of ILP-based rule learning: https://dariastepanova.github.io/files/conferences/RW2018/paper/RW2018paper.pdf
+- Logical Rule-Based KGR Survey (MDPI, 2023): https://www.mdpi.com/2227-7390/11/21/4486

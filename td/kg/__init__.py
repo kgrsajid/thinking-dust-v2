@@ -137,12 +137,23 @@ class KnowledgeGraph:
         self._inverse_pairs: dict[str, str] = {}
 
         # Temporal index: entity → (temporal_start, temporal_end)
-        # Only the SUBJECT of a temporal fact owns the interval.
-        # "WWII before CW @ [1939,1945)" → only WWII gets [1939,1945)
-        # "Cold War after WWII @ [1947,1991)" → only Cold War gets [1947,1991)
-        # This way find_temporal_relation(ww2, cw) compares [1939,1945) vs [1947,1991) → BEFORE.
-        # Open-ended intervals (end=None) are stored and used for open-ended comparisons.
         self._temporal_index: dict[str, tuple[int | None, int | None]] = {}
+
+        # Composition rules: (rel1, rel2) → target_relation
+        # OWL Property Chain style: explicit declaration of which relations compose.
+        # If (rel1, rel2) → target, then rel1(X,Y) ∧ rel2(Y,Z) → target(X,Z)
+        # If (rel1, rel2) → None, composition is explicitly INVALID.
+        # If (rel1, rel2) not in dict, fall back to transitivity heuristics.
+        #
+        # References:
+        #   - OWL 2 Web Ontology Language (W3C, 2009) — PropertyChain axiom
+        #   - HolmE (Zheng et al., 2024) — KGE closed under composition
+        #   - Rot-Pro (NeurIPS, 2021) — transitivity by projection
+        #   - GLIDR (arXiv, 2025) — differentiable ILP for graph-structured rules
+        self.composition_rules: dict[tuple[str, str], str | None] = {}
+
+        # Pre-seeded composition rules (from OWL best practices)
+        self._init_default_composition_rules()
 
     def add_fact(self, subject: str, relation: str, obj: str, source: str = "user",
                  proof: str = "", temporal_start: int = None,
@@ -187,6 +198,48 @@ class KnowledgeGraph:
             self._temporal_index[subject] = (temporal_start, temporal_end)
 
         return triple
+
+    def _init_default_composition_rules(self):
+        """Initialize default composition rules from OWL best practices.
+
+        These are the "obvious" compositions that hold in most domains:
+        - in ∘ in → in (transitive spatial containment)
+        - part_of ∘ part_of → part_of (transitive part-whole)
+        - before ∘ before → before (transitive temporal)
+        - after ∘ after → after (transitive temporal)
+
+        Domain-specific compositions (capital_of ∘ in → in) are NOT pre-seeded.
+        Users teach them explicitly via set_composition_rule().
+
+        Reference: OWL 2 Web Ontology Language (W3C, 2009) — PropertyChain
+        """
+        # Same-relation transitive compositions
+        for rel in ("in", "part_of", "before", "after", "contains",
+                     "subset_of", "ancestor_of", "descendant_of"):
+            self.composition_rules[(rel, rel)] = rel
+
+    def set_composition_rule(self, rel1: str, rel2: str, target: str | None):
+        """Declare a composition rule: rel1(X,Y) ∧ rel2(Y,Z) → target(X,Z).
+
+        Args:
+            rel1: First relation in the chain
+            rel2: Second relation in the chain
+            target: Resulting relation, or None to explicitly block composition
+
+        Examples:
+            kg.set_composition_rule("capital_of", "in", "in")
+            # capital_of(Paris,France) ∧ in(France,EU) → in(Paris,EU)
+
+            kg.set_composition_rule("born_in", "in", None)
+            # born_in(Einstein,Ulm) ∧ in(Ulm,Germany) → INVALID
+
+        Reference: OWL 2 PropertyChain axiom (W3C, 2009)
+        """
+        rel1 = rel1.strip().lower()
+        rel2 = rel2.strip().lower()
+        if target is not None:
+            target = target.strip().lower()
+        self.composition_rules[(rel1, rel2)] = target
 
     def set_relation_property(self, relation: str, *properties: str):
         """Set properties for a relation (user-taught).
@@ -445,12 +498,19 @@ class KnowledgeGraph:
                          start: str, end: str) -> list[Triple] | None:
         """Find a path that's logically valid for the target relation.
 
-        Rules:
-        - Pure transitivity: all edges = target, target is transitive
-        - Cross-relation: last edge = target, AND (target is transitive
-          OR all preceding are transitive)
-        - Non-transitive relations (borders, orbits) can't be the target
-          of a multi-hop chain unless explicitly marked transitive
+        Uses OWL Property Chain style composition_rules as primary authority.
+        Falls back to transitivity heuristics only when no explicit rule exists.
+
+        Priority:
+        1. Pure transitivity: all edges = target, target is transitive
+        2. Explicit composition rule: (rel1, rel2) → target in composition_rules
+        3. 1-hop direct fact: always valid
+        4. Heuristic fallback: target transitive OR all preceding transitive
+
+        References:
+            - OWL 2 PropertyChain axiom (W3C, 2009)
+            - HolmE (Zheng et al., 2024) — KGE closed under composition
+            - GLIDR (arXiv, 2025) — differentiable ILP for graph-structured rules
         """
         target_props = self.relation_properties.get(target_relation, [])
         target_is_transitive = "transitive" in target_props
@@ -462,25 +522,59 @@ class KnowledgeGraph:
                 if rels == {target_relation}:
                     return path
 
-        # Priority 2: cross-relation composition
-        # Last edge matches target. Valid if:
-        # - 1-hop (direct fact) → always valid
-        # - Multi-hop: target is transitive OR all preceding are transitive
+        # Priority 2: explicit composition rules (OWL Property Chain)
         for path in paths:
-            if path and path[-1].relation == target_relation:
-                if len(path) == 1:
-                    # 1-hop: direct fact — always valid
+            if not path:
+                continue
+
+            # 1-hop: direct fact — always valid
+            if len(path) == 1:
+                if path[0].relation == target_relation:
                     return path
-                # Multi-hop: need transitivity
+                continue
+
+            # Multi-hop: compute composed relation from the chain
+            # spoken_in ∘ in → spoken_in (from composition_rules)
+            composed = path[0].relation
+            chain_valid = True
+            for i in range(1, len(path)):
+                rel_pair = (composed, path[i].relation)
+                if rel_pair in self.composition_rules:
+                    result = self.composition_rules[rel_pair]
+                    if result is None:
+                        chain_valid = False
+                        break
+                    composed = result
+                else:
+                    # No explicit rule — fall back to heuristic
+                    prec_transitive = "transitive" in self.relation_properties.get(
+                        composed, [])
+                    tgt_transitive = "transitive" in self.relation_properties.get(
+                        target_relation, [])
+                    if not prec_transitive and not tgt_transitive:
+                        chain_valid = False
+                        break
+                    # If target is transitive, the chain composes to target
+                    if tgt_transitive:
+                        composed = target_relation
+
+            if chain_valid and composed == target_relation:
+                return path
+
+        # Priority 2.5: last edge matches target, all preceding transitive
+        # This handles cases like in(X,G) ∘ is_a(G,N) → is_a(X,N)
+        # where "in" is transitive and the last edge is the target
+        for path in paths:
+            if len(path) >= 2 and path[-1].relation == target_relation:
                 preceding = path[:-1]
                 all_prec_transitive = all(
                     "transitive" in self.relation_properties.get(t.relation, [])
                     for t in preceding
                 )
-                if target_is_transitive or all_prec_transitive:
+                if all_prec_transitive or target_is_transitive:
                     return path
 
-        # Priority 3: ALL relations in path are transitive
+        # Priority 3: ALL relations in path are transitive (heuristic fallback)
         for path in paths:
             all_transitive = all(
                 "transitive" in self.relation_properties.get(t.relation, [])
@@ -964,7 +1058,13 @@ class KnowledgeGraph:
                     properties TEXT NOT NULL
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_triples_subject ON triples(subject);
+
+                CREATE TABLE IF NOT EXISTS composition_rules (
+                    rel1 TEXT NOT NULL,
+                    rel2 TEXT NOT NULL,
+                    target_relation TEXT,
+                    PRIMARY KEY (rel1, rel2)
+                );                CREATE INDEX IF NOT EXISTS idx_triples_subject ON triples(subject);
                 CREATE INDEX IF NOT EXISTS idx_triples_relation ON triples(relation);
                 CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
             """)
@@ -992,6 +1092,12 @@ class KnowledgeGraph:
             conn.executemany(
                 "INSERT INTO relation_properties (relation, properties) VALUES (?, ?)",
                 [(rel, ",".join(props)) for rel, props in self.relation_properties.items()]
+            )
+
+            conn.execute("DELETE FROM composition_rules")
+            conn.executemany(
+                "INSERT INTO composition_rules (rel1, rel2, target_relation) VALUES (?, ?, ?)",
+                [(r1, r2, target) for (r1, r2), target in self.composition_rules.items()]
             )
 
             conn.commit()
@@ -1037,6 +1143,16 @@ class KnowledgeGraph:
                 props = props_str.split(",") if props_str else []
                 if props:
                     self.set_relation_property(relation, *props)
+
+            # Load composition rules
+            try:
+                comp_rows = conn.execute(
+                    "SELECT rel1, rel2, target_relation FROM composition_rules"
+                ).fetchall()
+                for rel1, rel2, target in comp_rows:
+                    self.composition_rules[(rel1, rel2)] = target if target else None
+            except sqlite3.OperationalError:
+                pass  # Old DB without composition_rules table
 
             conn.close()
 

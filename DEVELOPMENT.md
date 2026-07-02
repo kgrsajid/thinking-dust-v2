@@ -1361,3 +1361,26 @@ The `_find_valid_path` method prevents false inferences through non-transitive r
 | **Total** | **293** | |
 
 *Last updated: 2026-07-02 GMT+5*
+
+### Composition Rules
+
+The `_find_valid_path` method uses OWL Property Chain style composition rules:
+
+```python
+# Set composition rules
+kg.set_composition_rule("capital_of", "in", "in")   # valid composition
+kg.set_composition_rule("born_in", "in", None)      # explicitly blocked
+```
+
+**How it works:**
+1. For a multi-hop path, compute the composed relation from the chain
+2. Check `composition_rules[(composed, next_rel)]` for each step
+3. If the final composed relation matches the target, accept the path
+4. If no explicit rule exists, fall back to transitivity heuristics
+
+**Research foundation:**
+- OWL 2 PropertyChain (W3C, 2009) — explicit composition declarations
+- HolmE (Zheng et al., 2024) — KGE closed under composition
+- Rot-Pro (NeurIPS, 2021) — transitivity by projection
+- GLIDR (arXiv, 2025) — differentiable ILP for graph-structured rules
+- Logical Rule-Based KGR Survey (MDPI, 2023) — comprehensive survey
