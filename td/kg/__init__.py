@@ -128,10 +128,11 @@ class KnowledgeGraph:
     are per-relation (pre-seeded or user-taught).
     """
 
-    def __init__(self):
+    def __init__(self, max_hops: int = 6):
         self.triples: list[Triple] = []
         self.relation_properties: dict[str, list[str]] = dict(DEFAULT_RELATION_PROPERTIES)
         self._entity_index: dict[str, list[int]] = defaultdict(list)  # entity → triple indices
+        self.max_hops = max_hops  # Maximum BFS depth for path finding
 
         # Inverse relation tracking (for inverse: pairs)
         self._inverse_pairs: dict[str, str] = {}
@@ -287,7 +288,7 @@ class KnowledgeGraph:
                 results.append((t.relation, t.subject, "incoming"))
         return results
 
-    def bfs_paths(self, start: str, end: str, max_hops: int = 6) -> list[list[Triple]]:
+    def bfs_paths(self, start: str, end: str, max_hops: int = None) -> list[list[Triple]]:
         """Find all paths between two entities using BFS.
 
         Returns list of paths, where each path is a list of triples.
@@ -297,6 +298,9 @@ class KnowledgeGraph:
         """
         start = start.strip().lower()
         end = end.strip().lower()
+
+        if max_hops is None:
+            max_hops = self.max_hops
 
         if start == end:
             return []
@@ -370,7 +374,7 @@ class KnowledgeGraph:
 
         # Mode 2: BFS path finding (no Z3 needed for simple transitivity)
         if obj:
-            paths = self.bfs_paths(subject, obj, max_hops=6)
+            paths = self.bfs_paths(subject, obj)
             if paths:
                 # Check if any path is valid under the relation's properties
                 best_path = self._find_valid_path(paths, relation, subject, obj)
@@ -445,7 +449,7 @@ class KnowledgeGraph:
                             return InferenceResult(
                                 answer=True,
                                 proof_trace=proof,
-                                confidence=max(0.5, 0.85 - hop_count * 0.05),
+                                confidence=max(0.1, 0.90 - hop_count * 0.10),
                                 method="derived",
                             )
                         visited.add(t.object)
