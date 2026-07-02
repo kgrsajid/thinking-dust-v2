@@ -25,6 +25,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 from collections import defaultdict
 
+# Temporal reasoning — Allen's interval algebra (lazy import to avoid circular deps)
+# Allen, J.F. (1983). "Maintaining Knowledge about Temporal Intervals." CACM, 26(11).
+# Used locally in temporal reasoning methods only.
+
 
 # ─── Z3 Import (lazy) ────────────────────────────────────────────────
 
@@ -76,15 +80,35 @@ DEFAULT_RELATION_PROPERTIES = {
 
 @dataclass
 class Triple:
-    """A knowledge graph triple."""
+    """A knowledge graph triple.
+
+    Can optionally carry temporal interval data (start, end) for temporal reasoning
+    via Allen's interval algebra. When temporal fields are None, the triple is
+    treated as timeless (existing behavior).
+    """
     subject: str
     relation: str
     object: str
-    source: str = "user"  # "user", "derived", "seed"
-    proof: str = ""       # derivation chain for derived facts
+    source: str = "user"           # "user", "derived", "seed"
+    proof: str = ""                # derivation chain for derived facts
+    temporal_start: Optional[int] = None  # Year/start of interval (None = open start)
+    temporal_end: Optional[int] = None    # Year/end of interval (None = open end)
 
     def __repr__(self):
-        return f"({self.subject}, {self.relation}, {self.object})"
+        base = f"({self.subject}, {self.relation}, {self.object})"
+        if self.temporal_start is not None or self.temporal_end is not None:
+            s = self.temporal_start if self.temporal_start is not None else "-∞"
+            e = self.temporal_end if self.temporal_end is not None else "∞"
+            base += f" @[{s}, {e})"
+        return base
+
+    def has_temporal(self) -> bool:
+        """True if this triple has temporal data."""
+        return self.temporal_start is not None or self.temporal_end is not None
+
+    def is_interval(self) -> bool:
+        """True if this triple has a complete (valid) temporal interval."""
+        return self.temporal_start is not None and self.temporal_end is not None
 
 
 @dataclass
@@ -112,23 +136,56 @@ class KnowledgeGraph:
         # Inverse relation tracking (for inverse: pairs)
         self._inverse_pairs: dict[str, str] = {}
 
-    def add_fact(self, subject: str, relation: str, obj: str, source: str = "user", proof: str = "") -> Triple:
-        """Add a triple to the knowledge graph."""
+        # Temporal index: entity → (temporal_start, temporal_end)
+        # Only the SUBJECT of a temporal fact owns the interval.
+        # "WWII before CW @ [1939,1945)" → only WWII gets [1939,1945)
+        # "Cold War after WWII @ [1947,1991)" → only Cold War gets [1947,1991)
+        # This way find_temporal_relation(ww2, cw) compares [1939,1945) vs [1947,1991) → BEFORE.
+        # Open-ended intervals (end=None) are stored and used for open-ended comparisons.
+        self._temporal_index: dict[str, tuple[int | None, int | None]] = {}
+
+    def add_fact(self, subject: str, relation: str, obj: str, source: str = "user",
+                 proof: str = "", temporal_start: int = None,
+                 temporal_end: int = None) -> Triple:
+        """Add a triple to the knowledge graph.
+
+        Args:
+            subject, relation, obj: The fact triple
+            source: "user", "derived", or "seed"
+            proof: derivation chain for derived facts
+            temporal_start: Start year of the interval (None = open/unbounded)
+            temporal_end: End year of the interval (None = open/unbounded)
+        """
         # Normalize
         subject = subject.strip().lower()
         relation = relation.strip().lower()
         obj = obj.strip().lower()
 
-        # Check for duplicate
+        # Check for duplicate (ignoring temporal fields for deduplication)
         for t in self.triples:
             if t.subject == subject and t.relation == relation and t.object == obj:
+                # Update temporal fields if provided
+                if temporal_start is not None:
+                    t.temporal_start = temporal_start
+                if temporal_end is not None:
+                    t.temporal_end = temporal_end
+                # Update temporal index (only subject owns its interval)
+                if t.temporal_start is not None:
+                    self._temporal_index[subject] = (t.temporal_start, t.temporal_end)
                 return t  # Already exists
 
-        triple = Triple(subject, relation, obj, source, proof)
+        triple = Triple(subject, relation, obj, source, proof,
+                        temporal_start=temporal_start, temporal_end=temporal_end)
         idx = len(self.triples)
         self.triples.append(triple)
         self._entity_index[subject].append(idx)
         self._entity_index[obj].append(idx)
+
+        # Update temporal index (only the subject entity owns this interval)
+        # Store even if one end is open (None) — used for open-ended comparisons
+        if temporal_start is not None:
+            self._temporal_index[subject] = (temporal_start, temporal_end)
+
         return triple
 
     def set_relation_property(self, relation: str, *properties: str):
@@ -541,6 +598,314 @@ class KnowledgeGraph:
 
         return all_derived
 
+    # ─── Temporal Reasoning (Allen's Interval Algebra) ─────────────────
+    #
+    # Allen, J.F. (1983). "Maintaining Knowledge about Temporal Intervals."
+    # Communications of the ACM, 26(11), 832-843.
+    #
+    # This section adds temporal reasoning using Allen's 13 interval relations:
+    # before, after, meets, met_by, overlaps, overlapped_by, starts, started_by,
+    # during, contains, finishes, finished_by, equals.
+    #
+    # Temporal triples carry (temporal_start, temporal_end) fields.
+    # When both entities have intervals, we can apply Allen's algebra.
+
+    def _get_temporal_intervals(self, entity: str, other: str = None) -> list[tuple[AllenRelation, TemporalInterval]]:
+        """Get all (relation, interval) pairs for an entity.
+
+        Returns list of (AllenRelation, TemporalInterval) for the entity's triples
+        that have temporal data. Tries to match the relation to AllenRelation names.
+
+        If 'other' is specified, only returns intervals from triples directly
+        connecting 'entity' and 'other'. This prevents comparing unrelated
+        temporal facts (e.g., Obama's presidency interval vs Trump's presidency
+        interval, not Obama's "before trump" interval vs Trump's "president_of usa"
+        interval).
+
+        If the relation name is a direct Allen relation name (before, after, etc.),
+        uses that. Otherwise falls back to checking the relation properties.
+        """
+        from ..temporal import AllenRelation as AR, TemporalInterval as TI
+
+        results = []
+        for t in self.triples:
+            if not t.has_temporal():
+                continue
+
+            # If 'other' is specified, only consider triples directly connecting entity ↔ other
+            if other is not None:
+                if not ((t.subject == entity and t.object == other) or
+                        (t.object == entity and t.subject == other)):
+                    continue
+
+            # Determine the Allen relation for this triple's relation
+            allen_rel = self._map_to_allen_relation(t.relation)
+            if allen_rel is None:
+                continue
+
+            if t.subject == entity:
+                interval = TI(start=t.temporal_start, end=t.temporal_end)
+                results.append((allen_rel, interval))
+            elif t.object == entity:
+                inv_rel = allen_rel.inverse
+                interval = TI(start=t.temporal_start, end=t.temporal_end)
+                results.append((inv_rel, interval))
+
+        return results
+
+    def _map_to_allen_relation(self, relation: str) -> Optional[AllenRelation]:
+        """Map a KG relation string to an AllenRelation enum.
+
+        Returns None if the relation doesn't correspond to a known Allen relation.
+        Handles both direct matches (e.g., "before" → AllenRelation.BEFORE) and
+        inverse mappings (e.g., "has_capital" → None for now, handled separately).
+        """
+        from ..temporal import AllenRelation as AR
+
+        direct_map = {
+            "before": AR.BEFORE,
+            "after": AR.AFTER,
+            "meets": AR.MEETS,
+            "met_by": AR.MET_BY,
+            "overlaps": AR.OVERLAPS,
+            "overlapped_by": AR.OVERLAPPED_BY,
+            "starts": AR.STARTS,
+            "started_by": AR.STARTED_BY,
+            "during": AR.DURING,
+            "contains": AR.CONTAINS,
+            "finishes": AR.FINISHES,
+            "finished_by": AR.FINISHED_BY,
+            "equals": AR.EQUALS,
+        }
+        return direct_map.get(relation.lower())
+
+    def find_temporal_relation(self, entity1: str, entity2: str) -> Optional[tuple]:
+        """Find the Allen relation between two entities using stored temporal intervals.
+
+        Looks for triples involving entity1 and entity2 that have temporal data.
+        If both entities have intervals, computes the Allen relation between them.
+
+        Uses the _temporal_index for clean O(1) lookup. Both entities should
+        have intervals stored from temporal facts (e.g., WWII gets [1939,1945) from
+        "WWII before CW @ [1939,1945)", and CW gets [1947,1991) from
+        "CW after WWII @ [1947,1991)").
+
+        Compares all pairs of intervals between entity1 and entity2.
+        Returns the first valid Allen relation found.
+
+        Returns:
+            (AllenRelation, confidence) or None if not enough temporal data
+        """
+        from ..temporal import AllenRelation as AR, TemporalInterval as TI
+        from ..temporal import check_allen_relation
+
+        entity1 = entity1.strip().lower()
+        entity2 = entity2.strip().lower()
+
+        # O(1) lookup via temporal index (each entity has at most one interval)
+        if entity1 not in self._temporal_index or entity2 not in self._temporal_index:
+            return None
+
+        (s1, e1) = self._temporal_index[entity1]
+        (s2, e2) = self._temporal_index[entity2]
+
+        iv1 = TI(start=s1, end=e1)
+        iv2 = TI(start=s2, end=e2)
+
+        # Don't require is_valid() — open-ended intervals are valid for comparison
+        # check_allen_relation handles None endpoints correctly
+
+        allen_rel = check_allen_relation(iv1, iv2)
+        if allen_rel:
+            return (allen_rel, 0.90)
+
+        return None
+
+    def query_temporal(self, entity1: str, entity2: str,
+                       temporal_relation: str) -> InferenceResult:
+        """Query if two entities have a specific Allen temporal relation.
+
+        Args:
+            entity1: First entity
+            entity2: Second entity
+            temporal_relation: One of Allen's 13 relations (before, after, etc.)
+
+        Returns:
+            InferenceResult with answer (True/False/None), proof trace, confidence
+        """
+        from ..temporal import AllenRelation as AR, compose
+
+        entity1 = entity1.strip().lower()
+        entity2 = entity2.strip().lower()
+        temporal_relation = temporal_relation.strip().lower()
+
+        # Map string to AllenRelation
+        target_rel_map = {
+            "before": AR.BEFORE, "after": AR.AFTER,
+            "meets": AR.MEETS, "met_by": AR.MET_BY,
+            "overlaps": AR.OVERLAPS, "overlapped_by": AR.OVERLAPPED_BY,
+            "starts": AR.STARTS, "started_by": AR.STARTED_BY,
+            "during": AR.DURING, "contains": AR.CONTAINS,
+            "finishes": AR.FINISHES, "finished_by": AR.FINISHED_BY,
+            "equals": AR.EQUALS,
+        }
+        if temporal_relation not in target_rel_map:
+            return InferenceResult(
+                answer=None,
+                proof_trace=f"Unknown temporal relation: '{temporal_relation}'. "
+                           f"Valid: {list(target_rel_map.keys())}",
+                confidence=0.0,
+                method="unknown",
+            )
+        target = target_rel_map[temporal_relation]
+
+        # Try direct temporal lookup
+        result = self.find_temporal_relation(entity1, entity2)
+        if result:
+            found_rel, conf = result
+            if found_rel == target:
+                return InferenceResult(
+                    answer=True,
+                    proof_trace=f"Direct temporal: {entity1} {found_rel.value} {entity2} "
+                               f"(from stored intervals)",
+                    confidence=conf,
+                    method="direct",
+                )
+            elif found_rel == target.inverse:
+                return InferenceResult(
+                    answer=False,
+                    proof_trace=f"Temporal mismatch: {entity1} is actually "
+                               f"{found_rel.value} {entity2} (the inverse of {target.value})",
+                    confidence=conf,
+                    method="direct",
+                )
+            else:
+                return InferenceResult(
+                    answer=False,
+                    proof_trace=f"Temporal mismatch: {entity1} {found_rel.value} {entity2}, "
+                               f"not {target.value}",
+                    confidence=conf,
+                    method="direct",
+                )
+
+        # Try path-based temporal reasoning
+        # Find a chain: entity1 --R1--> X --R2--> entity2
+        # where compose(R1, R2) contains target
+        paths = self.bfs_paths(entity1, entity2, max_hops=4)
+        if paths:
+            # Try to derive temporal via Allen's composition
+            for path in paths:
+                if len(path) >= 2:
+                    # Try composition of first and last edges
+                    r1_map = self._map_to_allen_relation(path[0].relation)
+                    r2_map = self._map_to_allen_relation(path[-1].relation)
+                    if r1_map and r2_map:
+                        composed = compose(r1_map, r2_map)
+                        if target in composed:
+                            trace = f"Yes (via composition): "
+                            hops = [f"{t.subject} --{t.relation}--> {t.object}" for t in path]
+                            trace += " , ".join(hops)
+                            trace += f" → {entity1} {target.value} {entity2}"
+                            return InferenceResult(
+                                answer=True,
+                                proof_trace=trace,
+                                confidence=0.75,
+                                method="derived",
+                            )
+
+        return InferenceResult(
+            answer=None,
+            proof_trace=f"No temporal data connecting {entity1} and {entity2}",
+            confidence=0.0,
+            method="unknown",
+        )
+
+    def derive_temporal_transitive(self) -> list[Triple]:
+        """Derive new temporal facts using Allen's composition table.
+
+        For each pair of temporal triples (X, R1, Y) and (Y, R2, Z) where
+        both Y-intervals exist, compute compose(R1, R2) and add any
+        deterministic (single-result) compositions as derived facts.
+
+        Allen (1983), Table 1: the composition of two relations gives the
+        possible relations between the first and third entities.
+        """
+        from ..temporal import AllenRelation as AR, TemporalInterval as TI
+        from ..temporal import check_allen_relation, compose
+
+        derived = []
+        temporal_triples = [t for t in self.triples if t.has_temporal()]
+
+        # Build temporal index: entity → list of (triple, allen_rel, interval)
+        temporal_index: dict[str, list[tuple[Triple, AR, TI]]] = {}
+        for t in temporal_triples:
+            if not t.is_interval():
+                continue
+            interval = TI(start=t.temporal_start, end=t.temporal_end)
+            for entity in (t.subject, t.object):
+                if entity not in temporal_index:
+                    temporal_index[entity] = []
+                if entity == t.subject:
+                    rel = self._map_to_allen_relation(t.relation)
+                    if rel:
+                        temporal_index[entity].append((t, rel, interval))
+                else:
+                    rel = self._map_to_allen_relation(t.relation)
+                    if rel:
+                        temporal_index[entity].append((t, rel.inverse, interval))
+
+        # For each path of length 2: X --R1--> Y --R2--> Z
+        # Check temporal composition
+        processed = set()
+        for y_entity, y_triples in temporal_index.items():
+            for t1, r1, interval1 in y_triples:
+                x_entity = t1.subject if t1.object == y_entity else t1.object
+                if x_entity == y_entity:
+                    continue
+
+                for t2, r2, interval2 in temporal_index.get(y_entity, []):
+                    z_entity = t2.subject if t2.object == y_entity else t2.object
+                    if z_entity in (x_entity, y_entity):
+                        continue
+
+                    # Compute Allen composition
+                    composed = compose(r1, r2)
+                    if len(composed) == 1:
+                        # Deterministic: exactly one relation
+                        only_rel = next(iter(composed))
+                        # Check if this relation holds between X and Z intervals
+                        # Build intervals for X and Z
+                        x_interval = None
+                        z_interval = None
+                        for t, rel, iv in temporal_index.get(x_entity, []):
+                            if t.subject == x_entity or t.object == x_entity:
+                                x_interval = iv
+                                break
+                        for t, rel, iv in temporal_index.get(z_entity, []):
+                            if t.subject == z_entity or t.object == z_entity:
+                                z_interval = iv
+                                break
+
+                        # If we have intervals, verify the derived relation
+                        if x_interval and z_interval and x_interval.is_valid() and z_interval.is_valid():
+                            actual = check_allen_relation(x_interval, z_interval)
+                            if actual == only_rel:
+                                key = (x_entity, only_rel.value, z_entity)
+                                if key not in processed:
+                                    processed.add(key)
+                                    proof = (f"temporal derivation: {x_entity} {r1.value} {y_entity} "
+                                            f"∧ {y_entity} {r2.value} {z_entity} "
+                                            f"→ {x_entity} {only_rel.value} {z_entity} "
+                                            f"(Allen's composition: {r1.value} ∘ {r2.value} = {only_rel.value})")
+                                    triple = self.add_fact(
+                                        x_entity, only_rel.value, z_entity,
+                                        source="derived", proof=proof
+                                    )
+                                    if triple.source == "derived":
+                                        derived.append(triple)
+
+        return derived
+
     # ─── SQLite Persistence ──────────────────────────────────────────
 
     def save(self, path: str = None):
@@ -570,6 +935,8 @@ class KnowledgeGraph:
                     object TEXT NOT NULL,
                     source TEXT DEFAULT 'user',
                     proof TEXT DEFAULT '',
+                    temporal_start INTEGER,
+                    temporal_end INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -588,8 +955,9 @@ class KnowledgeGraph:
             conn.execute("DELETE FROM relation_properties")
 
             conn.executemany(
-                "INSERT INTO triples (subject, relation, object, source, proof) VALUES (?, ?, ?, ?, ?)",
-                [(t.subject, t.relation, t.object, t.source, t.proof) for t in self.triples]
+                "INSERT INTO triples (subject, relation, object, source, proof, temporal_start, temporal_end) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(t.subject, t.relation, t.object, t.source, t.proof,
+                  t.temporal_start, t.temporal_end) for t in self.triples]
             )
 
             conn.executemany(
@@ -621,13 +989,15 @@ class KnowledgeGraph:
 
         conn = sqlite3.connect(path)
         try:
-            # Load triples
+            # Load triples (including temporal fields)
             rows = conn.execute(
-                "SELECT subject, relation, object, source, proof FROM triples"
+                "SELECT subject, relation, object, source, proof, temporal_start, temporal_end FROM triples"
             ).fetchall()
 
-            for subject, relation, obj, source, proof in rows:
-                self.add_fact(subject, relation, obj, source=source, proof=proof)
+            for row in rows:
+                subject, relation, obj, source, proof, t_start, t_end = row
+                self.add_fact(subject, relation, obj, source=source, proof=proof,
+                             temporal_start=t_start, temporal_end=t_end)
 
             # Load relation properties
             prop_rows = conn.execute(
