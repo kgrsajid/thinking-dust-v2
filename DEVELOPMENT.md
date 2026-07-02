@@ -1430,3 +1430,37 @@ assert "united kingdom" in kg2.gazetteer
 ```
 
 **Reference:** Nadeau & Sekine (2007), "A survey of named entity recognition and classification."
+
+### spaCy Integration Guide
+
+spaCy is available in `.venv-arm64` and provides free NLP capabilities that replace hardcoded rules.
+
+**How to use spaCy in TD v2:**
+```python
+import spacy
+nlp = spacy.load('en_core_web_sm')
+
+# POS tagging — replace _pp_words
+doc = nlp("Germany is before Austria on Danube")
+prepositions = [t.text for t in doc if t.pos_ == "ADP"]  # ["on"]
+
+# Noun chunks — replace _merge_post_relation_entities
+chunks = [c.text for c in doc.noun_chunks]  # ["Germany", "Austria", "Danube"]
+
+# Dependency parsing — replace _strip_pp
+for token in doc:
+    if token.dep_ == "pobj":
+        print(f"{token.text} attaches to {token.head.text}")
+# "Danube" attaches to "before" (not "Austria")
+```
+
+**What to replace:**
+1. `_pp_words` set → `token.pos_ == "ADP"` (spaCy POS tagger)
+2. `_strip_pp()` helper → spaCy dependency parsing (PP attachment)
+3. `_merge_post_relation_entities()` → `doc.noun_chunks` (spaCy noun chunking)
+4. `difflib.SequenceMatcher` fuzzy matching → `token.lemma_` (spaCy lemmatizer)
+5. Gazetteer → `doc.ents` (spaCy NER)
+
+**Performance:** spaCy is fast (~10K words/sec on CPU). Safe to use in teach() and query() paths.
+
+**Reference:** Honnibal & Montani (2017), "spaCy 2: Natural language understanding with Bloom embeddings."

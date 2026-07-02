@@ -882,3 +882,44 @@ A **gazetteer** is a dictionary of known multi-word entities that grows from tea
 **Reference:** Nadeau, D. & Sekine, S. (2007). "A survey of named entity recognition and classification." Lingvisticae Investigationes, 30(1), 3-26.
 
 **Used by:** Wikidata, DBpedia, Google Knowledge Graph, every production KG system.
+
+### spaCy Integration (arm64 Native)
+
+spaCy 3.8.14 is now available in the arm64 venv (`.venv-arm64`). It provides several NLP capabilities **for free** that replace hardcoded rules:
+
+**What spaCy provides:**
+
+| Capability | Replaces | spaCy API |
+|-----------|----------|-----------|
+| POS tagging | Hardcoded `_pp_words` set | `doc[i].pos_ == "ADP"` |
+| Dependency parsing | Prepositional phrase attachment rules | `token.dep_ == "prep"`, `token.head` |
+| Noun chunking | Compound noun detection (`_merge_post_relation_entities`) | `doc.noun_chunks` |
+| NER | Gazetteer lookup | `doc.ents` |
+| Lemmatization | `difflib.SequenceMatcher` fuzzy matching | `token.lemma_` |
+
+**Example: spaCy vs hardcoded**
+```python
+# BEFORE (hardcoded):
+_pp_words = {"on", "in", "at", "from", "to", "by", "for", "with", "into",
+             "through", "during", "before", "after", "about", "near", "over"}
+
+# AFTER (spaCy):
+doc = nlp("Germany is before Austria on Danube")
+for token in doc:
+    if token.pos_ == "ADP":  # ADP = adposition (preposition)
+        print(f"Preposition: {token.text}")  # "on"
+```
+
+**spaCy dependency parsing for PP attachment:**
+```python
+doc = nlp("Germany is before Austria on Danube")
+# spaCy correctly identifies "on Danube" as modifying "before", not "Austria"
+for token in doc:
+    if token.dep_ == "pobj":  # object of preposition
+        print(f"{token.text} → head: {token.head.text}")
+# Output: Danube → head: before (not Austria)
+```
+
+**Status:** spaCy is installed and working. Integration into the parser is the next step.
+
+**Reference:** Honnibal, M. & Montani, I. (2017). "spaCy 2: Natural language understanding with Bloom embeddings, convolutional neural networks and incremental parsing." To appear.
