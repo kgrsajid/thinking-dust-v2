@@ -265,12 +265,12 @@ class TestConfidence:
         assert r.confidence >= 0.9
 
     def test_confidence_2_hop(self, kg):
-        """2-hop: lower than 1-hop"""
+        """2-hop: both steps use explicit rules → high confidence."""
         kg.add_fact("paris", "capital_of", "france")
         kg.add_fact("france", "in", "eu")
         r = kg.query("paris", "in", "eu")
-        assert r.confidence < 0.95
-        assert r.confidence >= 0.7
+        # capital_of ∘ in → in uses explicit composition rule → 1.0 × 1.0 = 1.0 → 0.95
+        assert r.confidence >= 0.90
 
     def test_confidence_5_hop(self, kg):
         """5-hop: chain quality matters, not hop count.

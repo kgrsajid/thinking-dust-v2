@@ -1489,3 +1489,36 @@ kg.query("iphone", "in")  # → "north america" (via apple→jobs→sf→usa)
 **max_hops:** Default 6. Supports up to 6-hop chains.
 
 **Confidence formula:** `max(0.5, 0.85 - hop_count * 0.05)`
+
+### Confidence Scoring
+
+Confidence is computed from chain quality and error propagation, not hop count.
+
+**Formula:**
+```python
+def _chain_confidence(self, path, target_relation):
+    chain_score = 1.0
+    for each step in path:
+        if explicit_rule: step_score = 1.0
+        elif transitive_fallback: step_score = 0.7
+        else: step_score = 0.4
+        chain_score *= step_score  # error propagation
+    return clamp(chain_score, 0.1, 0.95)
+```
+
+**Why not hop count?**
+- Research shows path quality matters, not length (CPR, arXiv 2026)
+- Error accumulates multiplicatively, not additively (UaG, AAAI 2025)
+- A 5-hop chain with all explicit rules has the same confidence as a 2-hop chain
+
+**How to add calibration data (future):**
+When enough queries accumulate, use Conformal Prediction (CP) to calibrate:
+1. Collect query → answer → correctness triples
+2. Compute nonconformity scores
+3. Use CP to produce prediction intervals with statistical guarantees
+
+**References:**
+- CPR: arXiv:2605.08077 (2026)
+- UaG: arXiv:2410.08985, AAAI 2025
+- UnKGCP: arXiv:2510.24754 (2025)
+- PSL: Springer, Discover Computing, Vol. 29 (2026)

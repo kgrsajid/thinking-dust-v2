@@ -959,3 +959,38 @@ Open queries ("What/Who/Where is X?") now support multi-hop reasoning via BFS pa
 3. Functional Contradiction — "Are X and Y the same?"
 4. Temporal — "Was X before/meets/during Y?"
 5. Proof Trace — Full reasoning chain at each hop
+
+### Confidence Scoring (Chain Quality + Error Propagation)
+
+Confidence is computed from **chain quality** and **error propagation**, not hop count. This is based on recent research in trustworthy KG reasoning:
+
+**Research foundation:**
+- **CPR** (arXiv 2026): "Conformal Path Reasoning" — confidence from path quality, not path length. Uses learned scoring networks for discriminative path scores.
+- **UaG** (AAAI 2025): "Uncertainty Aware Knowledge-Graph Reasoning" — multi-step error accumulates. Each hop multiplies uncertainty.
+- **UnKGCP** (arXiv 2025): "Certainty in Uncertainty" — prediction intervals should be query-adaptive. Harder queries get wider intervals.
+- **PSL** (Springer 2026): "Probabilistic Soft Logic" — soft truth values, not binary. A fact can be 0.7 true.
+
+**How TD v2 computes confidence:**
+```
+chain_score = product of step_scores
+where step_score =
+    1.0 if explicit composition rule exists (e.g., in ∘ in → in)
+    0.7 if transitive fallback used
+    0.4 if heuristic (no rule, no transitivity)
+
+confidence = clamp(chain_score, 0.1, 0.95)
+```
+
+**Examples:**
+- 2-hop, all rules: `1.0 × 1.0 = 1.0` → 0.95
+- 5-hop, all rules: `1.0^5 = 1.0` → 0.95
+- 5-hop, all heuristic: `0.4^5 = 0.01` → 0.1 (floor)
+- Mixed: `1.0 × 0.7 × 1.0 × 0.4 × 1.0 = 0.28`
+
+**Key insight:** A 5-hop chain with all explicit rules has the SAME confidence as a 2-hop chain with all explicit rules. Chain quality matters, not length.
+
+**References:**
+1. CPR: arXiv:2605.08077 (2026)
+2. UaG: arXiv:2410.08985, AAAI 2025
+3. UnKGCP: arXiv:2510.24754 (2025)
+4. PSL: Springer, Discover Computing, Vol. 29 (2026)

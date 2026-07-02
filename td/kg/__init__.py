@@ -641,47 +641,52 @@ class KnowledgeGraph:
         return None
 
     def _chain_confidence(self, path: list[Triple], target_relation: str) -> float:
-        """Compute confidence from chain quality, not hop count.
+        """Compute confidence from chain quality and error propagation.
 
-        Based on how many steps use explicit composition rules vs heuristics.
-        Paths with more rules are more trustworthy.
+        Based on research:
+        - CPR (arXiv 2026): Path quality scoring, not path length
+        - UaG (AAAI 2025): Multi-step error accumulation
+        - UnKGCP (arXiv 2025): Query-adaptive confidence intervals
 
-        Scoring:
-        - Each step using an explicit rule: +1.0
-        - Each step using heuristic (transitive fallback): +0.5
-        - Each step with no rule at all: +0.3
-        - Final score = average step quality × 0.9 (cap at 0.9)
+        Scoring (no ML, no calibration data):
+        - Each step: explicit rule = 1.0, transitive fallback = 0.7, heuristic = 0.4
+        - Error propagation: confidence = product of step scores
+        - This models how uncertainty accumulates through the chain
 
-        This rewards paths with explicit knowledge and penalizes
-        paths that rely on assumptions.
+        Example:
+            5-hop chain with all explicit rules: 1.0^5 = 1.0 → capped at 0.95
+            5-hop chain with all heuristics: 0.4^5 = 0.01 → floor 0.1
+            Mixed chain: 1.0 × 0.7 × 1.0 × 0.4 × 1.0 = 0.28
         """
         if not path:
             return 0.0
 
-        scores = []
+        # Single-hop direct fact
+        if len(path) == 1:
+            return 0.95
+
+        # Multi-hop: compute product of step scores (error propagation)
         composed = path[0].relation
+        chain_score = 1.0
         for i in range(1, len(path)):
             rel_pair = (composed, path[i].relation)
             rule = self.composition_rules.get(rel_pair)
             if rule is not None:
-                # Explicit composition rule
-                scores.append(1.0)
+                # Explicit composition rule — high confidence
+                step_score = 1.0
                 composed = rule
             elif "transitive" in self.relation_properties.get(composed, []):
-                # Transitive fallback
-                scores.append(0.5)
+                # Transitive fallback — moderate confidence
+                step_score = 0.7
                 composed = path[i].relation
             else:
-                # No rule, no transitivity — heuristic
-                scores.append(0.3)
+                # No rule, no transitivity — low confidence
+                step_score = 0.4
                 composed = path[i].relation
+            chain_score *= step_score
 
-        if not scores:
-            # Single-hop path
-            return 0.90
-
-        avg_quality = sum(scores) / len(scores)
-        return round(min(0.90, 0.50 + 0.40 * avg_quality), 2)
+        # Clamp to [0.1, 0.95]
+        return round(max(0.1, min(0.95, chain_score)), 2)
 
     def _format_proof_trace(self, path: list[Triple], subject: str,
                             relation: str, obj: str) -> str:
