@@ -950,6 +950,16 @@ class KnowledgeGraph:
                 CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
             """)
 
+            # Migration: add temporal columns if they don't exist (for old DBs)
+            try:
+                conn.execute("ALTER TABLE triples ADD COLUMN temporal_start INTEGER")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                conn.execute("ALTER TABLE triples ADD COLUMN temporal_end INTEGER")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
             # Clear and re-insert (full sync)
             conn.execute("DELETE FROM triples")
             conn.execute("DELETE FROM relation_properties")
