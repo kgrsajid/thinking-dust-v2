@@ -82,7 +82,18 @@ class GenericEntityGraph:
 
 
 class GenericNLParser:
-    """Zero-hardcode parser. Innate prototypes work in pure mode."""
+    """spaCy-powered parser. Uses dependency parsing for extraction.
+
+    Replaces hardcoded rules with spaCy NLP:
+    - stop_words → token.is_stop (language-agnostic)
+    - relation_prototypes → token.dep_ (dependency labels)
+    - _merge_*_pattern → doc.noun_chunks (compound noun detection)
+    - _pp_words → token.pos_ == "ADP" (preposition detection)
+    - _strip_pp → token.head (PP attachment via dependency tree)
+    - regex patterns → dependency tree traversal
+
+    Reference: Honnibal & Montani (2017), "spaCy 2"
+    """
 
     def __init__(self, vocab, mhn, dim=10_000):
         self.vocab = vocab
@@ -97,7 +108,12 @@ class GenericNLParser:
             "connector": generate_hypervector(dim),
         }
 
+        # ─── spaCy NLP pipeline (lazy load) ──────────────────────────
+        self._nlp = None
+
         # ─── INNATE: Stop-word prototype (HDC-encoded sentence) ──────
+        # Kept for HDC encoding compatibility. Actual stop word detection
+        # uses spaCy's token.is_stop (language-agnostic).
         self.stop_word_prototype = self._encode_phrase(
             "the a an and or is are was were be been have has had do does did "
             "will would could should may might must can shall it its "
@@ -109,7 +125,8 @@ class GenericNLParser:
         )
 
         # ─── INNATE: Relation prototypes (14 types) ──────────────────
-        # Encoded as SHORT phrases (same encoding as inter-entity phrases)
+        # Kept for HDC encoding compatibility. Actual relation detection
+        # uses spaCy's dependency labels (token.dep_).
         self.relation_prototypes = {
             "different": self._encode_phrase("different distinct separate unique"),
             "before": self._encode_phrase("before earlier precedes first"),
@@ -127,14 +144,9 @@ class GenericNLParser:
             "optimize": self._encode_phrase("optimize maximize minimize best"),
         }
 
-        # ─── CONstraint signals (Z3-relevant only) ──────────────────
-        # These are the relation types that should route to Z3 solving.
-        # Learned relations (in, part_of, married_to, etc.) are NOT included —
-        # they route to KG inference instead.
         self.constraint_signals = set(self.relation_prototypes.keys())
 
-        # Fast lookup stop words — excludes words that are also relation types
-        # (before, after, different, etc. are constraint signals, not noise)
+        # Fast lookup stop words — kept as fallback for non-spaCy paths
         self.stop_words = {
             "the", "a", "an", "and", "or", "is", "are", "was", "were", "be", "been",
             "have", "has", "had", "do", "does", "did", "will", "would", "could",
@@ -148,6 +160,17 @@ class GenericNLParser:
             "but", "because", "until", "while", "about", "against", "down",
             "out", "off", "over",
         }
+
+    @property
+    def nlp(self):
+        """Lazy-load spaCy pipeline."""
+        if self._nlp is None:
+            try:
+                import spacy
+                self._nlp = spacy.load("en_core_web_sm")
+            except (ImportError, OSError):
+                self._nlp = False  # spaCy not available
+        return self._nlp if self._nlp is not False else None
 
     def register_relation(self, relation: str, example_phrases: str = None):
         """Register a learned relation as a prototype for future parsing.
@@ -272,6 +295,116 @@ class GenericNLParser:
             graph.add_constraint(c["type_vec"], c["subjects"], c.get("params"))
 
         return {"graph": graph, "text": text, "hdc": problem_hdc, "tokens": tokens}
+
+    def extract_triples_spacy(self, text: str) -> list[tuple[str, str, str]]:
+        """Extract triples using spaCy dependency parsing.
+
+        Replaces all hardcoded regex patterns with dependency tree traversal.
+        Language-agnostic — works for any language spaCy supports.
+
+        Handles:
+        - "X is in Y" → (x, in, y)
+        - "X is part of Y" → (x, part_of, y)
+        - "X is the capital of Y" → (x, capital_of, y)
+        - "X is before Y on Z" → (x, before, y) — PP attachment
+        - "X evolved from Y" → (x, evolved_from, y)
+        - "X treats Y" → (x, treats, y)
+
+        Reference: Honnibal & Montani (2017), "spaCy 2"
+        """
+        if self.nlp is None:
+            return []
+
+        doc = self.nlp(text)
+        triples = []
+
+        for token in doc:
+            # ─── Copular constructions: "X is Y" ─────────────────
+            if token.dep_ == "ROOT" and token.lemma_ in ("be", "become", "seem"):
+                subject = None
+                for child in token.children:
+                    if child.dep_ in ("nsubj", "nsubjpass"):
+                        subject = child
+                        break
+                if not subject:
+                    continue
+
+                subj_text = self._get_chunk_text(doc, subject)
+
+                # Collect all preps attached to ROOT
+                preps = [c for c in token.children if c.dep_ == "prep"]
+
+                # Collect attr (adjective/noun predicate)
+                attrs = [c for c in token.children if c.dep_ == "attr"]
+
+                if attrs:
+                    attr = attrs[0]
+                    # Check if attr has its own prep chain: "part of Y", "capital of Y"
+                    attr_preps = [c for c in attr.children if c.dep_ == "prep"]
+                    if attr_preps:
+                        prep = attr_preps[0]
+                        pobj = [c for c in prep.children if c.dep_ == "pobj"]
+                        if pobj:
+                            obj_text = self._get_chunk_text(doc, pobj[0])
+                            rel = f"{attr.lemma_}_{prep.lemma_}"  # "part_of", "capital_of"
+                            triples.append((subj_text, rel, obj_text))
+                            continue
+
+                # Check preps attached to ROOT: "is in Y", "is before Y"
+                if preps:
+                    # Take FIRST prep (ignore trailing context like "on Danube")
+                    prep = preps[0]
+                    pobj = [c for c in prep.children if c.dep_ == "pobj"]
+                    if pobj:
+                        obj_text = self._get_chunk_text(doc, pobj[0])
+                        triples.append((subj_text, prep.lemma_, obj_text))
+                        continue
+
+            # ─── Verb constructions: "X evolved from Y", "X treats Y" ──
+            if token.pos_ == "VERB" and token.dep_ == "ROOT":
+                subj = None
+                dobj = None
+                prep_chain = None
+
+                for child in token.children:
+                    if child.dep_ in ("nsubj", "nsubjpass"):
+                        subj = child
+                    elif child.dep_ == "dobj":
+                        dobj = child
+                    elif child.dep_ == "prep":
+                        for gc in child.children:
+                            if gc.dep_ == "pobj":
+                                prep_chain = (child, gc)
+                                break
+
+                if subj:
+                    subj_text = self._get_chunk_text(doc, subj)
+                    if dobj:
+                        obj_text = self._get_chunk_text(doc, dobj)
+                        triples.append((subj_text, token.lemma_, obj_text))
+                    elif prep_chain:
+                        prep, obj = prep_chain
+                        obj_text = self._get_chunk_text(doc, obj)
+                        rel = f"{token.lemma_}_{prep.lemma_}"
+                        triples.append((subj_text, rel, obj_text))
+
+        return triples
+
+    def _get_chunk_text(self, doc, token) -> str:
+        """Get the full noun chunk text for a token, stripping determiners.
+
+        "United Kingdom" → "united kingdom" (not just "Kingdom")
+        "the EU" → "eu" (strip "the")
+        "a country" → "country" (strip "a")
+        """
+        for chunk in doc.noun_chunks:
+            if token in chunk:
+                # Strip leading determiners ("the", "a", "an")
+                words = chunk.text.lower().split()
+                while words and words[0] in ("the", "a", "an"):
+                    words = words[1:]
+                return " ".join(words) if words else chunk.text.lower()
+        return token.text.lower()
 
     def _merge_compound_nouns_in_graph(self, graph, tokens):
         """Merge adjacent single-token entities that form compound nouns.

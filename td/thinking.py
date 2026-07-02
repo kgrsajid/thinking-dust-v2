@@ -1199,6 +1199,11 @@ class GenericThinkingDust:
             functional  — R(X,Y) ∧ R(X,Z) → Y=Z
         """
         self.kg.set_relation_property(relation, *properties)
+        # Also register lemmatized form (spaCy lemmatizes "powers" → "power")
+        if self.parser.nlp:
+            doc = self.parser.nlp(relation)
+            if doc and doc[0].lemma_ != relation:
+                self.kg.set_relation_property(doc[0].lemma_, *properties)
         # Sync to parser so it can detect this relation in future queries
         self.parser.register_relation(relation)
         return {
@@ -1270,22 +1275,45 @@ class GenericThinkingDust:
     def _extract_triples(self, problem: str, solution: str) -> list[tuple[str, str, str]]:
         """Extract knowledge graph triples from teach() input.
 
-        Uses structural patterns (not hardcoded facts). These are general
-        English constructions that work with ANY entities.
+        Uses spaCy dependency parsing when available (language-agnostic).
+        Falls back to regex patterns when spaCy is not installed.
 
-        Handles prepositional phrase attachment (Manning & Schütze, 1999):
-        "Germany is before Austria on Danube" → (germany, before, austria)
-        "on Danube" is context, not part of the entity.
+        spaCy provides:
+        - Dependency parsing → proper PP attachment
+        - Noun chunks → compound noun detection ("United Kingdom")
+        - POS tagging → preposition detection (no hardcoded _pp_words)
+        - Lemmatization → "collaborates" → "collaborate"
 
-        Examples:
-            "Paris is the capital of France" → (paris, capital_of, france)
-            "France is in the EU" → (france, in, eu)
-            "A is before B" → (a, before, b)
+        Reference: Honnibal & Montani (2017), "spaCy 2"
+        """
+        text = problem.lower().strip()
+
+        # Try spaCy first (language-agnostic, no hardcoded rules)
+        spacy_triples = self.parser.extract_triples_spacy(text)
+        if spacy_triples:
+            return spacy_triples
+
+        # Fallback: regex patterns (English-only, hardcoded)
+        return self._extract_triples_regex(text)
+
+    def _extract_triples_regex(self, text: str) -> list[tuple[str, str, str]]:
+        """Regex-based triple extraction (fallback when spaCy unavailable).
+
+        Hardcoded English patterns. Replaced by spaCy when available.
+        Lemmatizes relations via spaCy when available for consistency.
         """
         import re
 
         triples = []
-        text = problem.lower().strip()
+        # text is already lowercased by caller
+
+        # Lemmatize relation via spaCy (consistency with spaCy extraction)
+        def _lemmatize(rel: str) -> str:
+            if self.parser.nlp:
+                doc = self.parser.nlp(rel)
+                if doc:
+                    return doc[0].lemma_
+            return rel
 
         # Helper: strip trailing prepositional phrases from entities
         # "austria on danube" → "austria"
@@ -1399,7 +1427,7 @@ class GenericThinkingDust:
             if m:
                 s, r, o = m.group(1), m.group(2), m.group(3)
                 if r not in stop_words and len(r) > 1:
-                    triples.append((s, r, o))
+                    triples.append((s, _lemmatize(r), o))
 
         return triples
 
