@@ -1401,3 +1401,32 @@ The parser has a `_merge_post_relation_entities()` method that merges adjacent n
 - Test with `test_realworld_wikipedia.py` and `test_battle_wikipedia.py`
 
 **Reference:** Manning & Schütze (1999), "Foundations of Statistical NLP", Chapter 5: Collocations.
+
+### Gazetteer (Multi-Word Entity Recognition)
+
+The `KnowledgeGraph.gazetteer` is a `set[str]` of known multi-word entities. It's populated automatically from teach() interactions and persisted in SQLite.
+
+```python
+# Automatic: when you teach "United Kingdom is in Europe",
+# the gazetteer learns "united kingdom"
+kg.add_fact("united kingdom", "in", "europe")
+# kg.gazetteer == {"united kingdom"}
+
+# Used by _query_knowledge_graph for entity extraction in queries
+# "is United Kingdom in Eurasia?" → gazetteer lookup → "united kingdom"
+```
+
+**How to test:**
+```python
+kg = KnowledgeGraph()
+kg.add_fact("united kingdom", "in", "europe")
+assert "united kingdom" in kg.gazetteer
+
+# Save/load preserves gazetteer
+kg.save(tmp_path)
+kg2 = KnowledgeGraph()
+kg2.load(tmp_path)
+assert "united kingdom" in kg2.gazetteer
+```
+
+**Reference:** Nadeau & Sekine (2007), "A survey of named entity recognition and classification."

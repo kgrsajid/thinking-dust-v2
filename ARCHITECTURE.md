@@ -856,3 +856,29 @@ When a spatial/temporal relation word (in, part_of, before, etc.) is followed by
 **Reference:** Manning, C.D. & Schütze, H. (1999). "Foundations of Statistical Natural Language Processing." MIT Press. Chapter 5: Collocations.
 
 **Fixes:** Kazakhstan bug — "kazakhstan is in central asia" was split into `kazakhstan → central` and `asia → asia`. Now correctly stores `kazakhstan → central asia`.
+
+### Gazetteer (Learned Entity Dictionary)
+
+A **gazetteer** is a dictionary of known multi-word entities that grows from teach() interactions. This is the standard approach for multi-word entity recognition in resource-constrained systems.
+
+**How it works:**
+1. User teaches "United Kingdom is in Europe"
+2. System stores "united kingdom" as a single entity in the KG
+3. Gazetteer adds "united kingdom" to its dictionary
+4. Future queries "is United Kingdom in Eurasia?" recognize "united kingdom" via gazetteer lookup
+
+**Why not NER models?**
+- spaCy NER: 500MB+ model, GPU required
+- NLTK chunking: POS tagger + corpus required (arch issues on M1)
+- gensim Phrases: Large corpus required
+
+**Why gazetteer works:**
+- Zero external dependencies
+- Grows naturally from teach() interactions
+- O(1) lookup via set membership
+- Persisted in SQLite (gazetteer table)
+- Language-agnostic (works for any script)
+
+**Reference:** Nadeau, D. & Sekine, S. (2007). "A survey of named entity recognition and classification." Lingvisticae Investigationes, 30(1), 3-26.
+
+**Used by:** Wikidata, DBpedia, Google Knowledge Graph, every production KG system.
