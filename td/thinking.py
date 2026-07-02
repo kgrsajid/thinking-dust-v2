@@ -1445,6 +1445,25 @@ class GenericThinkingDust:
                         relation_in_query = rel
                         break
 
+        # Fuzzy fallback: SequenceMatcher (stdlib) for morphology
+        # "collaborate" matches "collaborates_with" (0.96 similarity)
+        # Language-agnostic, no external deps, battle-tested since Python 2.1
+        if not relation_in_query:
+            import difflib
+            for rel in kg_relations:
+                parts = rel.split("_")
+                if len(parts) == 2:
+                    best0 = max(difflib.SequenceMatcher(None, t, parts[0]).ratio() for t in tokens)
+                    best1 = max(difflib.SequenceMatcher(None, t, parts[1]).ratio() for t in tokens)
+                    if best0 >= 0.75 and best1 >= 0.75:
+                        relation_in_query = rel
+                        break
+                elif len(parts) == 1:
+                    best = max(difflib.SequenceMatcher(None, t, parts[0]).ratio() for t in tokens)
+                    if best >= 0.75:
+                        relation_in_query = rel
+                        break
+
         # Check "are X and Y the same?" — special case for functional comparison
         if "same" in tokens or "equal" in tokens or "identical" in tokens:
             if len(entities_in_query) >= 2:

@@ -445,32 +445,51 @@ class KnowledgeGraph:
                          start: str, end: str) -> list[Triple] | None:
         """Find a path that's logically valid for the target relation.
 
-        Priority:
-        1. Path where ALL edges match the target relation (pure transitivity)
-        2. Path where the LAST edge matches the target relation (composition)
-        3. Any path (fallback — the entities are connected somehow)
+        Rules:
+        - Pure transitivity: all edges = target, target is transitive
+        - Cross-relation: last edge = target, AND (target is transitive
+          OR all preceding are transitive)
+        - Non-transitive relations (borders, orbits) can't be the target
+          of a multi-hop chain unless explicitly marked transitive
         """
         target_props = self.relation_properties.get(target_relation, [])
+        target_is_transitive = "transitive" in target_props
 
         # Priority 1: pure transitivity (all edges = target relation)
-        if "transitive" in target_props:
+        if target_is_transitive:
             for path in paths:
                 rels = set(t.relation for t in path)
                 if rels == {target_relation}:
                     return path
 
-        # Priority 2: last edge matches target relation (composition)
+        # Priority 2: cross-relation composition
+        # Last edge matches target. Valid if:
+        # - 1-hop (direct fact) → always valid
+        # - Multi-hop: target is transitive OR all preceding are transitive
         for path in paths:
             if path and path[-1].relation == target_relation:
-                return path
+                if len(path) == 1:
+                    # 1-hop: direct fact — always valid
+                    return path
+                # Multi-hop: need transitivity
+                preceding = path[:-1]
+                all_prec_transitive = all(
+                    "transitive" in self.relation_properties.get(t.relation, [])
+                    for t in preceding
+                )
+                if target_is_transitive or all_prec_transitive:
+                    return path
 
-        # Priority 3: any path where target relation appears
+        # Priority 3: ALL relations in path are transitive
         for path in paths:
-            if any(t.relation == target_relation for t in path):
+            all_transitive = all(
+                "transitive" in self.relation_properties.get(t.relation, [])
+                for t in path
+            )
+            if all_transitive:
                 return path
 
-        # Fallback: shortest path (entities are connected)
-        return paths[0] if paths else None
+        return None
 
     def _format_proof_trace(self, path: list[Triple], subject: str,
                             relation: str, obj: str) -> str:

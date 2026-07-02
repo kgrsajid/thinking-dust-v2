@@ -402,17 +402,24 @@ class TestTechnology:
         Source: Wikipedia "Smartphone"
         - iPhone runs iOS
         - iOS is made by Apple
-        - Samsung Galaxy runs Android
-        - Android is made by Google
+        - Note: "runs" and "made_by" are not transitive, so
+          "iphone made_by apple" is NOT derivable via chain.
         """
         kg.add_fact("iphone", "runs", "ios")
         kg.add_fact("ios", "made_by", "apple")
         kg.add_fact("samsung galaxy", "runs", "android")
         kg.add_fact("android", "made_by", "google")
 
-        # iPhone → iOS → Apple (2-hop)
-        r = kg.query("iphone", "made_by", "apple")
+        # Direct facts work
+        r = kg.query("iphone", "runs", "ios")
         assert r.answer is True
+
+        r2 = kg.query("ios", "made_by", "apple")
+        assert r2.answer is True
+
+        # Cross-relation chain NOT valid (runs is not transitive)
+        r3 = kg.query("iphone", "made_by", "apple")
+        assert r3.answer is None
 
     def test_functional_company_contradiction(self, kg):
         """Functional: same value = same entity, different values = different.
@@ -569,16 +576,24 @@ class TestMusic:
         - John Lennon was member_of The Beatles
         - Paul McCartney was member_of The Beatles
         - The Beatles made Abbey Road
-        - Abbey Road is genre rock
+        - Note: member_of is not transitive, so "john lennon made abbey road"
+          is NOT derivable via chain.
         """
         kg.add_fact("john lennon", "member_of", "the beatles")
         kg.add_fact("paul mccartney", "member_of", "the beatles")
         kg.add_fact("the beatles", "made", "abbey road")
         kg.add_fact("abbey road", "genre", "rock")
 
-        # John Lennon made Abbey Road (2-hop)
-        r = kg.query("john lennon", "made", "abbey road")
+        # Direct facts work
+        r = kg.query("john lennon", "member_of", "the beatles")
         assert r.answer is True
+
+        r2 = kg.query("the beatles", "made", "abbey road")
+        assert r2.answer is True
+
+        # Cross-relation chain NOT valid (member_of is not transitive)
+        r3 = kg.query("john lennon", "made", "abbey road")
+        assert r3.answer is None
 
     def test_genre_hierarchy(self, kg):
         """Music genre hierarchy.
