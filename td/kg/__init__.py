@@ -1007,7 +1007,7 @@ class KnowledgeGraph:
         # Try path-based temporal reasoning
         # Find a chain: entity1 --R1--> X --R2--> entity2
         # where compose(R1, R2) contains target
-        paths = self.bfs_paths(entity1, entity2, max_hops=4)
+        paths = self.bfs_paths(entity1, entity2)
         if paths:
             # Try to derive temporal via Allen's composition
             for path in paths:

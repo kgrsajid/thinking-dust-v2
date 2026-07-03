@@ -91,7 +91,7 @@ User: "is Paris in the EU?"
   ↓
 Parser: entities = [paris, eu], relations = []
   ↓
-KG: BFS paths(paris → eu, max_hops=100, directionality=True)
+KG: BFS paths(paris → eu, directionality=True)
   ↓ Path found: paris --capital_of--> france --in--> eu
 KG: Validate path — does the queried relation match the last edge?
   ↓ "in" matches the last edge (france --in--> eu) ✓
@@ -105,8 +105,6 @@ Asymmetric relations (e.g., `capital_of`, `in`, `parent_of`) have directionality
 - For **asymmetric relations**: only traverse in the stored direction
 - For **symmetric relations**: traverse in both directions
 - For **inverse relations**: traverse across the inverse when registered
-
-**Hop limit:** The KG defaults to `max_hops=100`, which is effectively unlimited for practical use. BFS uses an efficient queue-based implementation with early termination when the shortest path is found.
 
 ### Paraphrase Matching via BEAGLE
 

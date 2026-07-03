@@ -1537,7 +1537,7 @@ class GenericThinkingDust:
                 directions = [(e1, e2)] if not is_symmetric else [(e1, e2), (e2, e1)]
 
                 for subj, obj in directions:
-                    paths = self.kg.bfs_paths(subj, obj, max_hops=6)
+                    paths = self.kg.bfs_paths(subj, obj)
                     if paths:
                         best_path = self.kg._find_valid_path(
                             paths, relation_in_query or "", subj, obj

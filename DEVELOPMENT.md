@@ -1105,7 +1105,7 @@ TD v2 has **99 tests** across three test files:
 | Test Class | Tests | What's Verified |
 |-----------|-------|----------------|
 | `TestNovelRelations` | 6 | Relations never seen during training: north_of, south_of, borders, depends_on, ancestor_of, contains |
-| `TestTransitiveChains` | 8 | 2-hop through 100-hop transitive chains (tested to 6) |
+| `TestTransitiveChains` | 8 | 2-hop through 6-hop transitive chains |
 | `TestFunctionalContradiction` | 5 | Uniqueness constraints: capital_of, birth_date, has_capital |
 | `TestSymmetricInference` | 5 | Symmetric relations: married_to, sibling_of, adjacent_to, borders |
 | `TestInverseRelations` | 5 | Inverse pairs: capital_of↔has_capital, parent_of↔child_of, owns↔owned_by |
@@ -1486,9 +1486,9 @@ kg.query("iphone", "founded_by")  # → "steve jobs" (via apple)
 kg.query("iphone", "in")  # → "north america" (via apple→jobs→sf→usa)
 ```
 
-**max_hops:** Default 100 (effectively unlimited). BFS terminates early when the shortest path is found.
+**max_hops:** Configurable. BFS terminates early when the shortest path is found.
 
-**Confidence:** Computed from chain quality, not hop count. See "Confidence Scoring" below.
+**Confidence:** Computed from chain quality, not hop count. See "Confidence Scoring" section below.
 
 ### Confidence Scoring
 
