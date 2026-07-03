@@ -91,7 +91,7 @@ User: "is Paris in the EU?"
   ↓
 Parser: entities = [paris, eu], relations = []
   ↓
-KG: BFS paths(paris → eu, max_hops=6, directionality=True)
+KG: BFS paths(paris → eu, max_hops=100, directionality=True)
   ↓ Path found: paris --capital_of--> france --in--> eu
 KG: Validate path — does the queried relation match the last edge?
   ↓ "in" matches the last edge (france --in--> eu) ✓
@@ -105,6 +105,8 @@ Asymmetric relations (e.g., `capital_of`, `in`, `parent_of`) have directionality
 - For **asymmetric relations**: only traverse in the stored direction
 - For **symmetric relations**: traverse in both directions
 - For **inverse relations**: traverse across the inverse when registered
+
+**Hop limit:** The KG defaults to `max_hops=100`, which is effectively unlimited for practical use. BFS uses an efficient queue-based implementation with early termination when the shortest path is found.
 
 ### Paraphrase Matching via BEAGLE
 
@@ -238,7 +240,7 @@ Pre-seeded defaults (work out of the box):
 
 As of the current test suite (99 tests passing):
 
-### Transitive Chains (2–6 hops)
+### Transitive Chains (2–100 hops)
 
 ```
 Teach: Paris capital_of France
@@ -682,7 +684,7 @@ pytest>=7.0
 - Query answering: <50 ms on MacBook CPU (M-series or Intel)
 - Teaching a fact: <20 ms
 - BEAGLE training on 10K sentences: ~1.4 seconds
-- BFS up to 6 hops: <5 ms
+- BFS up to 100 hops: <10 ms
 
 ---
 
@@ -692,7 +694,7 @@ pytest>=7.0
 
 - [ ] Fix triple extraction for passive voice ("A is owned by B" → (B, owns, A))
 - [ ] Connect BEAGLE paraphrase matching to KG query path validation
-- [ ] Write integration tests for 6-hop transitive chains
+- [ ] Write integration tests for 100-hop transitive chains
 - [ ] Document all 14 relation prototypes in the parser
 
 ### P1 — Next Week (Feature complete)
@@ -943,15 +945,9 @@ Open queries ("What/Who/Where is X?") now support multi-hop reasoning via BFS pa
 3. BFS follows: iphone → apple → steve jobs
 4. At hop 2, finds "founded_by" relation → returns "steve jobs"
 
-**Hop limits:** max_hops=6 (supports up to 6-hop chains)
+**Hop limits:** max_hops=100 (effectively unlimited). BFS terminates early when the shortest path is found.
 
-**Confidence:** Decreases with hop count:
-- 1-hop: 0.85
-- 2-hop: 0.75
-- 3-hop: 0.70
-- 4-hop: 0.65
-- 5-hop: 0.60
-- 6-hop: 0.55
+**Confidence:** Decreases with chain quality, not hop count. A 5-hop chain with all explicit rules has the same confidence as a 2-hop chain with all explicit rules. See "Confidence Scoring" section below.
 
 **Question types supported:**
 1. Yes/No — "Is X in Y?" (any hop count)

@@ -114,7 +114,7 @@ relation: capital_of functional inverse:has_capital
 |------------|--------|---------|
 | 2-hop transitive inference | ✅ Working | Paris→France→EU |
 | 3-hop transitive inference | ✅ Working | Paris→France→EU→Europe |
-| 6-hop transitive inference | ✅ Working | Tested up to 6 hops |
+| 6-hop transitive inference | ✅ Working | Tested up to 6 hops (KG supports 100) |
 | Functional contradiction | ✅ Working | Berlin ≠ Paris |
 | Symmetric inference | ✅ Working | married_to, same_as |
 | Inverse relations | ✅ Working | capital_of ↔ has_capital |
@@ -240,7 +240,7 @@ ask: did Obama's term meet Trump's?
 → YES. [2009,2017) meets [2017,2021) — Allen's MEETS relation
 ```
 
-#### 5. Multi-hop — Up to 20+ hops
+#### 5. Multi-hop — Up to 100 hops (effectively unlimited)
 ```
 teach: My room is in the apartment
 teach: The apartment is in the building
@@ -254,7 +254,7 @@ ask: is my room in the Observable Universe?
 ```
 ask: why is DNA part of the organism?
 → DNA → genes → chromosome → nucleus → cell → organ → organism
-  (6-hop chain with full reasoning trace)
+  (6-hop chain with full reasoning trace — KG supports up to 100 hops)
 ```
 
 #### 7. Confidence Scoring
@@ -306,7 +306,7 @@ Answer + proof trace returned (<50ms)
 
 | Phase | Timeline | What's Coming |
 |-------|---------|---------------|
-| **v2.1** | This week | BEAGLE→KG integration, passive voice fixes, 6-hop validation |
+| **v2.1** | This week | BEAGLE→KG integration, passive voice fixes, 100-hop validation |
 | **v2.5** | Month 2 | Clause segmentation, anaphora resolution, temporal reasoning |
 | **v3.0** | Month 3 | Multilingual (UD), automatic rule discovery via ILP, graph kernels |
 | **Pro** | Month 3–6 | TD Pro integration: Liquid-KAN + Hypernetwork + NCA for novel problems |
