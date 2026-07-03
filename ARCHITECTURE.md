@@ -238,7 +238,7 @@ Pre-seeded defaults (work out of the box):
 
 As of the current test suite (99 tests passing):
 
-### Transitive Chains (2–100 hops)
+### Transitive Chains (2–6 hops)
 
 ```
 Teach: Paris capital_of France
@@ -682,7 +682,7 @@ pytest>=7.0
 - Query answering: <50 ms on MacBook CPU (M-series or Intel)
 - Teaching a fact: <20 ms
 - BEAGLE training on 10K sentences: ~1.4 seconds
-- BFS up to 100 hops: <10 ms
+- BFS up to 6 hops: <5 ms
 
 ---
 
@@ -942,8 +942,6 @@ Open queries ("What/Who/Where is X?") now support multi-hop reasoning via BFS pa
 2. System extracts: subject="iphone", relation="founded_by"
 3. BFS follows: iphone → apple → steve jobs
 4. At hop 2, finds "founded_by" relation → returns "steve jobs"
-
-**Hop limits:** max_hops=100 (effectively unlimited). BFS terminates early when the shortest path is found.
 
 **Confidence:** Decreases with chain quality, not hop count. A 5-hop chain with all explicit rules has the same confidence as a 2-hop chain with all explicit rules. See "Confidence Scoring" section below.
 
