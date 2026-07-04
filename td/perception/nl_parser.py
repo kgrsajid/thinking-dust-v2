@@ -329,7 +329,8 @@ class GenericNLParser:
                 if not subject:
                     continue
 
-                subj_text = self._get_chunk_text(doc, subject)
+                # Get all coordinated subjects: "Alice and Bob" → ["alice", "bob"]
+                subj_texts = self._get_coordinated_subjects(doc, subject)
 
                 # Collect all preps attached to ROOT
                 preps = [c for c in token.children if c.dep_ == "prep"]
@@ -346,20 +347,32 @@ class GenericNLParser:
                         pobj = [c for c in prep.children if c.dep_ == "pobj"]
                         if pobj:
                             obj_text = self._get_chunk_text(doc, pobj[0])
-                            # Use token text (not lemma) to preserve relation name
-                            # "sibling" → "sibling_of" (not "sible_of")
                             rel = f"{attr.text.lower()}_{prep.lemma_}"
-                            triples.append((subj_text, rel, obj_text))
+                            for subj_text in subj_texts:
+                                triples.append((subj_text, rel, obj_text))
+                            continue
+
+                    # Check for xcomp: "are central to computer science"
+                    # acomp=central, xcomp=computer (with aux=to, dobj=science)
+                    xcomps = [c for c in token.children if c.dep_ == "xcomp"]
+                    if xcomps:
+                        xcomp = xcomps[0]
+                        xcomp_dobj = [c for c in xcomp.children if c.dep_ == "dobj"]
+                        if xcomp_dobj:
+                            obj_text = self._get_chunk_text(doc, xcomp_dobj[0])
+                            rel = f"{attr.text.lower()}_{xcomp.text.lower()}"
+                            for subj_text in subj_texts:
+                                triples.append((subj_text, rel, obj_text))
                             continue
 
                 # Check preps attached to ROOT: "is in Y", "is before Y"
                 if preps:
-                    # Take FIRST prep (ignore trailing context like "on Danube")
                     prep = preps[0]
                     pobj = [c for c in prep.children if c.dep_ == "pobj"]
                     if pobj:
                         obj_text = self._get_chunk_text(doc, pobj[0])
-                        triples.append((subj_text, prep.lemma_, obj_text))
+                        for subj_text in subj_texts:
+                            triples.append((subj_text, prep.lemma_, obj_text))
                         continue
 
             # ─── Verb constructions: "X evolved from Y", "X treats Y" ──
@@ -380,18 +393,17 @@ class GenericNLParser:
                                 break
 
                 if subj:
-                    subj_text = self._get_chunk_text(doc, subj)
+                    subj_texts = self._get_coordinated_subjects(doc, subj)
                     if dobj:
                         obj_text = self._get_chunk_text(doc, dobj)
-                        triples.append((subj_text, token.text.lower(), obj_text))
+                        for subj_text in subj_texts:
+                            triples.append((subj_text, token.text.lower(), obj_text))
                     elif prep_chain:
                         prep, obj = prep_chain
                         obj_text = self._get_chunk_text(doc, obj)
-                        # Use token text (not lemma) to preserve relation name
-                        # "sibling" → "sibling_of" (not "sible_of")
-                        # "evolved" → "evolved_from" (not "evolve_from")
                         rel = f"{token.text.lower()}_{prep.lemma_}"
-                        triples.append((subj_text, rel, obj_text))
+                        for subj_text in subj_texts:
+                            triples.append((subj_text, rel, obj_text))
 
             # ─── Noun-based constructions (no copula) ──────────────
             # "Paris capital of France" → (paris, capital_of, france)
@@ -456,6 +468,60 @@ class GenericNLParser:
                     words = words[1:]
                 return " ".join(words) if words else chunk.text.lower()
         return token.text.lower()
+
+    def _get_coordinated_subjects(self, doc, subject_token) -> list[str]:
+        """Extract all coordinated subjects from a subject token.
+
+        Handles:
+        - "Alice and Bob went to Paris" → ["alice", "bob"]
+        - "Algorithms and data structures are central to CS" → ["algorithms", "data structures"]
+        - "France, Germany and Italy are in Europe" → ["france", "germany", "italy"]
+
+        Walks conj (coordinated) and nmod (noun modifier) chains recursively.
+        Also handles nested coordination: A, B and C → [A, B, C].
+
+        For coordinated tokens within a single noun chunk (e.g., "Algorithms
+        and data structures"), uses individual token text instead of the full
+        chunk to preserve entity boundaries.
+
+        Reference: Manning & Schütze (1999), Chapter 5: Collocations.
+        """
+        def _token_text(token):
+            """Get text for a single coordinated token, preserving compounds."""
+            # Collect compound children of this token
+            compounds = [c for c in token.children if c.dep_ == "compound"]
+            if compounds:
+                return " ".join([c.text.lower() for c in compounds] + [token.text.lower()])
+            return token.text.lower()
+
+        subjects = [_token_text(subject_token)]
+
+        # Walk conj children (direct coordination: "Alice and Bob")
+        for child in subject_token.children:
+            if child.dep_ == "conj":
+                subjects.append(_token_text(child))
+                # Walk nested conj (A, B and C → France, Germany, Italy)
+                for grandchild in child.children:
+                    if grandchild.dep_ == "conj":
+                        subjects.append(_token_text(grandchild))
+
+        # Walk nmod children (noun modifiers: "Algorithms and data structures")
+        for child in subject_token.children:
+            if child.dep_ == "nmod":
+                subjects.append(_token_text(child))
+                # Walk conj of nmod ("data" conj of "Algorithms")
+                for grandchild in child.children:
+                    if grandchild.dep_ == "conj":
+                        subjects.append(_token_text(grandchild))
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique = []
+        for s in subjects:
+            if s not in seen:
+                seen.add(s)
+                unique.append(s)
+        return unique
 
     def _merge_compound_nouns_in_graph(self, graph, tokens):
         """Merge adjacent single-token entities that form compound nouns.

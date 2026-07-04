@@ -463,6 +463,67 @@ The parser adapts by using dependency relations (which are largely word-order in
 
 ---
 
+## 8.5 Knowledge Graph Structure Rules (TODO)
+
+The following fundamental KG structures are supported by the RDF/OWL standard and should be supported by TD v2. Current status and planned fixes are noted.
+
+### Supported Structures (15 total)
+
+| # | Structure | Pattern | Example | Status |
+|---|-----------|---------|---------|--------|
+| 1 | **Atomic Triple** | S—P→O | Paris capital_of France | ✅ Working |
+| 2 | **Chain/Path** | A→B→C→D | Paris→France→EU→Europe | ✅ Working (BFS, up to 100 hops) |
+| 3 | **Hierarchy/Taxonomy** | A is_a B, B subclass_of C | Dog→Mammal→Animal | ✅ Working (transitive) |
+| 4 | **Inverse** | R1(X,Y)→R2(Y,X) | capital_of ↔ has_capital | ✅ Working |
+| 5 | **Symmetric** | R(X,Y)→R(Y,X) | married_to, borders | ✅ Working |
+| 6 | **Functional** | R(X,Y)∧R(X,Z)→Y=Z | capital_of is functional | ✅ Working |
+| 7 | **Composition** | R1∘R2→R3 | capital_of + in → in | ✅ Working (OWL PropertyChain) |
+| 8 | **Star** | Central entity + many attrs | Paris→France, Paris→EU | ✅ Working |
+| 9 | **Temporal** | Allen's 13 relations | A before B, A during B | ✅ Working |
+| 10 | **Dependency Chain** | A depends_on B depends_on C | API→DB→Server | ✅ Working (transitive teach) |
+| 11 | **Sequential** | Ordered steps | Step1→Step2→Step3 | ✅ Working (transitive before) |
+| 12 | **Coordinated** | X and Y are Z | Alice and Bob went to Paris | ✅ Working (spaCy conj/nmod) |
+| 13 | **Attributive** | Entity has value | Paris has_population 2.1M | 🔲 TODO (literal storage) |
+| 14 | **Causal** | A causes B causes C | Rain→Flood→Damage | ⚠️ Partial (needs transitive teach) |
+| 15 | **Negation** | X is NOT Y | Tokyo NOT in Europe | 🔲 TODO (negative reasoning) |
+
+### References
+
+| # | Paper/Standard | Year | Venue | Relevance |
+|---|---------------|------|-------|-----------|
+| 1 | W3C RDF 1.1 — Subject-Predicate-Object triples | 2014 | W3C Standard | Atomic triple structure |
+| 2 | W3C OWL 2 — PropertyChain axiom | 2009 | W3C Standard | Cross-relation composition |
+| 3 | W3C RDFS — subClassOf, subPropertyOf | 2004 | W3C Standard | Taxonomic hierarchies |
+| 4 | Allen, J.F. "Maintaining Knowledge about Temporal Intervals" | 1983 | CACM 26(11) | Temporal reasoning (13 relations) |
+| 5 | Manning & Schütze, "Foundations of Statistical NLP" | 1999 | MIT Press | Coordinated noun phrase extraction (Ch. 5) |
+| 6 | Honnibal & Montani, "spaCy 2" | 2017 | — | Dependency parsing for triple extraction |
+| 7 | Splunk, "Knowledge Graphs: What They Are" | 2025 | Splunk Blog | KG relationship types (hierarchical, association, network, sequential, causal) |
+| 8 | Neo4j, "What is a Knowledge Graph?" | 2026 | Neo4j Blog | Organizing principles, nodes, relationships |
+| 9 | Knowledge Systems Authority, "KG Structure" | 2026 | KSA | Entities, relations, literals, ontological schema |
+
+### TODO Items (Prioritized)
+
+**P0 — Fix now:**
+- [x] Coordinated subjects: "Alice and Bob went to Paris" → 2 triples
+- [x] Coordinated subjects: "France, Germany and Italy are in Europe" → 3 triples
+- [ ] Compound noun coordination: "data structures" should be one entity, not "data" alone
+- [ ] Prep chains from objects: "management of repositories of data" → capture full chain
+- [ ] Inverse queries: "What is the capital of France?" → find subject given object+relation
+
+**P1 — Next:**
+- [ ] Clausal complements (xcomp): "considers different ways to describe processes" → capture xcomp
+- [ ] Attributive literals: "Paris has_population 2.1M" → store numeric values
+- [ ] Text-to-number conversion: "2.1 million" → 2100000 (word2number library installed)
+- [ ] Causal chains: "Rain causes Flood causes Damage" → transitive causal relation
+
+**P2 — Future:**
+- [ ] Negation: "Tokyo is NOT in Europe" → negative facts
+- [ ] Clause segmentation: split compound sentences on "and", "but", "or"
+- [ ] Coreference resolution: "Alice went home. She was tired." → replace pronouns
+- [ ] Automatic relation property discovery (ILP)
+
+---
+
 ## 9. Storage Architecture
 
 ### Storage Strategy
