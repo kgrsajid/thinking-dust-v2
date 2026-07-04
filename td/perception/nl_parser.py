@@ -335,18 +335,20 @@ class GenericNLParser:
                 preps = [c for c in token.children if c.dep_ == "prep"]
 
                 # Collect attr (adjective/noun predicate)
-                attrs = [c for c in token.children if c.dep_ == "attr"]
+                attrs = [c for c in token.children if c.dep_ in ("attr", "acomp")]
 
                 if attrs:
                     attr = attrs[0]
-                    # Check if attr has its own prep chain: "part of Y", "capital of Y"
+                    # Check if attr has its own prep chain: "part of Y", "married to Y"
                     attr_preps = [c for c in attr.children if c.dep_ == "prep"]
                     if attr_preps:
                         prep = attr_preps[0]
                         pobj = [c for c in prep.children if c.dep_ == "pobj"]
                         if pobj:
                             obj_text = self._get_chunk_text(doc, pobj[0])
-                            rel = f"{attr.lemma_}_{prep.lemma_}"  # "part_of", "capital_of"
+                            # Use token text (not lemma) to preserve relation name
+                            # "sibling" → "sibling_of" (not "sible_of")
+                            rel = f"{attr.text.lower()}_{prep.lemma_}"
                             triples.append((subj_text, rel, obj_text))
                             continue
 
@@ -371,7 +373,7 @@ class GenericNLParser:
                         subj = child
                     elif child.dep_ == "dobj":
                         dobj = child
-                    elif child.dep_ == "prep":
+                    elif child.dep_ in ("prep", "agent"):
                         for gc in child.children:
                             if gc.dep_ == "pobj":
                                 prep_chain = (child, gc)
@@ -381,12 +383,61 @@ class GenericNLParser:
                     subj_text = self._get_chunk_text(doc, subj)
                     if dobj:
                         obj_text = self._get_chunk_text(doc, dobj)
-                        triples.append((subj_text, token.lemma_, obj_text))
+                        triples.append((subj_text, token.text.lower(), obj_text))
                     elif prep_chain:
                         prep, obj = prep_chain
                         obj_text = self._get_chunk_text(doc, obj)
-                        rel = f"{token.lemma_}_{prep.lemma_}"
+                        # Use token text (not lemma) to preserve relation name
+                        # "sibling" → "sibling_of" (not "sible_of")
+                        # "evolved" → "evolved_from" (not "evolve_from")
+                        rel = f"{token.text.lower()}_{prep.lemma_}"
                         triples.append((subj_text, rel, obj_text))
+
+            # ─── Noun-based constructions (no copula) ──────────────
+            # "Paris capital of France" → (paris, capital_of, france)
+            # "France in the EU" → (france, in, eu)
+            # "Kazakhstan north of Uzbekistan" → (kazakhstan, north_of, uzbekistan)
+            if token.dep_ == "ROOT" and token.pos_ in ("NOUN", "PROPN"):
+                # The ROOT itself is the subject
+                subj_text = self._get_chunk_text(doc, token)
+
+                # Check for compound children (subject is compound of ROOT)
+                # "Paris capital of France" → compound=Paris, ROOT=capital
+                compounds = [c for c in token.children if c.dep_ == "compound"]
+                if compounds:
+                    # Join all compound tokens for multi-word entities
+                    # "New York City capital of USA" → subj = "new york city"
+                    subj_text = " ".join([c.text.lower() for c in compounds])
+
+                # Check for prep chain: "capital of France", "in the EU"
+                preps = [c for c in token.children if c.dep_ == "prep"]
+                if preps:
+                    prep = preps[0]
+                    pobj = [c for c in prep.children if c.dep_ == "pobj"]
+                    if pobj:
+                        obj_text = self._get_chunk_text(doc, pobj[0])
+                        if compounds:
+                            # "Paris capital of France" → capital_of
+                            rel = f"{token.text.lower()}_{prep.lemma_}"
+                        else:
+                            # "France in the EU" → in
+                            rel = prep.lemma_
+                        triples.append((subj_text, rel, obj_text))
+                        continue
+
+                # Check for appos with prep: "Kazakhstan north of Uzbekistan"
+                appos = [c for c in token.children if c.dep_ == "appos"]
+                if appos:
+                    appos_token = appos[0]
+                    appos_preps = [c for c in appos_token.children if c.dep_ == "prep"]
+                    if appos_preps:
+                        prep = appos_preps[0]
+                        pobj = [c for c in prep.children if c.dep_ == "pobj"]
+                        if pobj:
+                            obj_text = self._get_chunk_text(doc, pobj[0])
+                            rel = f"{appos_token.text.lower()}_{prep.lemma_}"
+                            triples.append((subj_text, rel, obj_text))
+                            continue
 
         return triples
 

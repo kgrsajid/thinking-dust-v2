@@ -78,7 +78,13 @@ class TestApollo:
         assert r.answer is True
 
     def test_5hop_confidence(self, kg):
-        """Confidence decreases with hop count."""
+        """Confidence reflects chain quality, not hop count.
+        
+        Research: CPR (arXiv 2026), UaG (AAAI 2025), UnKGCP (arXiv 2025).
+        A chain with all explicit composition rules has high confidence
+        regardless of length. A chain with heuristic fallbacks has lower
+        confidence.
+        """
         kg.add_fact("apollo 11", "launched_by", "nasa")
         kg.add_fact("nasa", "in", "united states")
         kg.add_fact("united states", "in", "north america")
@@ -87,7 +93,12 @@ class TestApollo:
 
         r1 = kg.query("apollo 11", "launched_by", "nasa")
         r5 = kg.query("apollo 11", "in", "solar system")
-        assert r1.confidence > r5.confidence
+        # Both should have high confidence (explicit rules)
+        assert r1.confidence >= 0.90
+        # 5-hop with explicit rules should also have high confidence
+        assert r5.confidence >= 0.70
+        # Direct fact is always >= derived
+        assert r1.confidence >= r5.confidence
 
 
 # ═══════════════════════════════════════════════════════════════════

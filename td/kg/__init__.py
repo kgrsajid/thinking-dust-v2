@@ -58,23 +58,23 @@ RULE_TEMPLATES = {
 
 # Pre-seeded relation properties (bootstrap, user can extend)
 DEFAULT_RELATION_PROPERTIES = {
-    "in": ["transitive"],
-    "part_of": ["transitive"],
-    "before": ["transitive"],
-    "after": ["transitive"],
-    "inside": ["transitive"],
-    "contains": ["transitive"],
-    "subset_of": ["transitive"],
-    "ancestor_of": ["transitive"],
-    "descendant_of": ["transitive"],
-    "larger_than": ["transitive"],
-    "smaller_than": ["transitive"],
-    "capital_of": ["functional"],
-    "equals": ["symmetric", "transitive"],
-    "same_as": ["symmetric", "transitive"],
-    "married_to": ["symmetric"],
-    "sibling_of": ["symmetric"],
-    "adjacent_to": ["symmetric"],
+    "in": {"transitive"},
+    "part_of": {"transitive"},
+    "before": {"transitive"},
+    "after": {"transitive"},
+    "inside": {"transitive"},
+    "contains": {"transitive"},
+    "subset_of": {"transitive"},
+    "ancestor_of": {"transitive"},
+    "descendant_of": {"transitive"},
+    "larger_than": {"transitive"},
+    "smaller_than": {"transitive"},
+    "capital_of": {"functional"},
+    "equals": {"symmetric", "transitive"},
+    "same_as": {"symmetric", "transitive"},
+    "married_to": {"symmetric"},
+    "sibling_of": {"symmetric"},
+    "adjacent_to": {"symmetric"},
 }
 
 
@@ -130,7 +130,7 @@ class KnowledgeGraph:
 
     def __init__(self, max_hops: int = 100):
         self.triples: list[Triple] = []
-        self.relation_properties: dict[str, list[str]] = dict(DEFAULT_RELATION_PROPERTIES)
+        self.relation_properties: dict[str, set[str]] = dict(DEFAULT_RELATION_PROPERTIES)
         self._entity_index: dict[str, list[int]] = defaultdict(list)  # entity → triple indices
         self.max_hops = max_hops  # Effectively unlimited (100 hops)
 
@@ -215,21 +215,25 @@ class KnowledgeGraph:
     def _init_default_composition_rules(self):
         """Initialize default composition rules from OWL best practices.
 
-        These are the "obvious" compositions that hold in most domains:
-        - in ∘ in → in (transitive spatial containment)
-        - part_of ∘ part_of → part_of (transitive part-whole)
-        - before ∘ before → before (transitive temporal)
-        - after ∘ after → after (transitive temporal)
-
-        Domain-specific compositions (capital_of ∘ in → in) are NOT pre-seeded.
-        Users teach them explicitly via set_composition_rule().
+        Same-relation transitive compositions + key cross-relation compositions.
+        Domain-specific compositions can be added via set_composition_rule().
 
         Reference: OWL 2 Web Ontology Language (W3C, 2009) — PropertyChain
         """
         # Same-relation transitive compositions
-        for rel in ("in", "part_of", "before", "after", "contains",
-                     "subset_of", "ancestor_of", "descendant_of"):
+        for rel in ("in", "part_of", "before", "after", "inside", "contains",
+                     "subset_of", "ancestor_of", "descendant_of",
+                     "larger_than", "smaller_than"):
             self.composition_rules[(rel, rel)] = rel
+
+        # Cross-relation compositions (common domain patterns)
+        # capital_of(X,Y) ∧ in(Y,Z) → in(X,Z)
+        # "Paris capital_of France ∧ France in EU → Paris in EU"
+        self.composition_rules[("capital_of", "in")] = "in"
+        # part_of ∘ in → in
+        self.composition_rules[("part_of", "in")] = "in"
+        # in ∘ part_of → in
+        self.composition_rules[("in", "part_of")] = "in"
 
     def set_composition_rule(self, rel1: str, rel2: str, target: str | None):
         """Declare a composition rule: rel1(X,Y) ∧ rel2(Y,Z) → target(X,Z).
@@ -261,15 +265,17 @@ class KnowledgeGraph:
         """
         relation = relation.strip().lower()
         if relation not in self.relation_properties:
-            self.relation_properties[relation] = []
+            self.relation_properties[relation] = set()
         for prop in properties:
-            if prop not in self.relation_properties[relation]:
-                self.relation_properties[relation].append(prop)
+            self.relation_properties[relation].add(prop)
             # Track inverse pairs
             if prop.startswith("inverse:"):
                 inv = prop.split(":", 1)[1]
                 self._inverse_pairs[relation] = inv
                 self._inverse_pairs[inv] = relation
+            # Auto-add same-relation composition rule for transitive relations
+            if prop == "transitive" and (relation, relation) not in self.composition_rules:
+                self.composition_rules[(relation, relation)] = relation
 
     def get_facts_for_relation(self, relation: str) -> list[Triple]:
         """Get all triples with a given relation."""
@@ -546,7 +552,7 @@ class KnowledgeGraph:
 
     def _is_functional(self, relation: str) -> bool:
         """Check if a relation is functional (one object per subject)."""
-        props = self.relation_properties.get(relation, [])
+        props = self.relation_properties.get(relation, set())
         return "functional" in props
 
     def _find_valid_path(self, paths: list[list[Triple]], target_relation: str,
@@ -567,7 +573,7 @@ class KnowledgeGraph:
             - HolmE (Zheng et al., 2024) — KGE closed under composition
             - GLIDR (arXiv, 2025) — differentiable ILP for graph-structured rules
         """
-        target_props = self.relation_properties.get(target_relation, [])
+        target_props = self.relation_properties.get(target_relation, set())
         target_is_transitive = "transitive" in target_props
 
         # Priority 1: pure transitivity (all edges = target relation)
@@ -623,7 +629,7 @@ class KnowledgeGraph:
             if len(path) >= 2 and path[-1].relation == target_relation:
                 preceding = path[:-1]
                 all_prec_transitive = all(
-                    "transitive" in self.relation_properties.get(t.relation, [])
+                    "transitive" in self.relation_properties.get(t.relation, set())
                     for t in preceding
                 )
                 if all_prec_transitive or target_is_transitive:
@@ -632,7 +638,7 @@ class KnowledgeGraph:
         # Priority 3: ALL relations in path are transitive (heuristic fallback)
         for path in paths:
             all_transitive = all(
-                "transitive" in self.relation_properties.get(t.relation, [])
+                "transitive" in self.relation_properties.get(t.relation, set())
                 for t in path
             )
             if all_transitive:
@@ -675,7 +681,7 @@ class KnowledgeGraph:
                 # Explicit composition rule — high confidence
                 step_score = 1.0
                 composed = rule
-            elif "transitive" in self.relation_properties.get(composed, []):
+            elif "transitive" in self.relation_properties.get(composed, set()):
                 # Transitive fallback — moderate confidence
                 step_score = 0.7
                 composed = path[i].relation
@@ -760,8 +766,11 @@ class KnowledgeGraph:
         
         Handles:
         - Pure transitivity: R(X,Y) ∧ R(Y,Z) → R(X,Z) where R is same relation
-        - Cross-relation composition: R1(X,Y) ∧ R2(Y,Z) → R2(X,Z) when both are transitive
+        - Cross-relation composition: R1(X,Y) ∧ R2(Y,Z) → target(X,Z)
+          Uses explicit composition_rules (OWL Property Chain) as authority.
           (e.g., capital_of(Paris, France) ∧ in(France, EU) → in(Paris, EU))
+
+        Reference: OWL 2 PropertyChain axiom (W3C, 2009)
         """
         all_derived = []
         
@@ -771,46 +780,45 @@ class KnowledgeGraph:
                 derived = self.derive_transitive(relation)
                 all_derived.extend(derived)
 
-        # Phase 2: Cross-relation composition
-        # If R1 and R2 are both transitive, and R1(X,Y) ∧ R2(Y,Z) exist,
-        # then R2(X,Z) is derivable (compose through the chain)
-        transitive_relations = [
-            r for r, props in self.relation_properties.items() 
-            if "transitive" in props
-        ]
-        
+        # Phase 2: Cross-relation composition (OWL Property Chain)
+        # Only compose relations that have explicit composition_rules.
+        # If (r1, r2) → target in composition_rules, derive target(X,Z)
+        # from r1(X,Y) ∧ r2(Y,Z).
+        # If (r1, r2) → None, composition is explicitly blocked.
+        # If (r1, r2) not in rules, skip (no implicit composition).
         changed = True
         while changed:
             changed = False
-            for r1 in transitive_relations:
-                for r2 in transitive_relations:
-                    # Find R1(X,Y) ∧ R2(Y,Z) → R2(X,Z)
-                    facts_r1 = self.get_facts_for_relation(r1)
-                    facts_r2 = self.get_facts_for_relation(r2)
-                    
-                    # Build lookup: entity → things it connects to via R2
-                    r2_by_subject = defaultdict(list)
-                    for t in facts_r2:
-                        r2_by_subject[t.subject].append(t.object)
-                    
-                    for t1 in facts_r1:
-                        x, y = t1.subject, t1.object
-                        # For each Z where R2(Y, Z) exists, derive R2(X, Z)
-                        for z in r2_by_subject.get(y, []):
-                            if z != x:
-                                # Check if R2(X,Z) already exists
-                                exists = any(
-                                    t.subject == x and t.relation == r2 and t.object == z
-                                    for t in self.triples
-                                )
-                                if not exists:
-                                    proof = f"derived: {r1}({x},{y}) ∧ {r2}({y},{z}) → {r2}({x},{z})"
-                                    triple = self.add_fact(x, r2, z, source="derived", proof=proof)
-                                    if triple:
-                                        all_derived.append(triple)
-                                        # Also add to r2_by_subject for chaining
-                                        r2_by_subject[x].append(z)
-                                        changed = True
+            for (r1, r2), target in list(self.composition_rules.items()):
+                if target is None:
+                    continue  # Explicitly blocked
+                facts_r1 = self.get_facts_for_relation(r1)
+                facts_r2 = self.get_facts_for_relation(r2)
+                
+                # Build lookup: entity → things it connects to via R2
+                r2_by_subject = defaultdict(list)
+                for t in facts_r2:
+                    r2_by_subject[t.subject].append(t.object)
+                
+                for t1 in facts_r1:
+                    x, y = t1.subject, t1.object
+                    for z in r2_by_subject.get(y, []):
+                        if z != x:
+                            # Pre-check existence to avoid add_fact returning
+                            # existing triple (which would set changed=True forever)
+                            already_exists = any(
+                                t.subject == x and t.relation == target and t.object == z
+                                for t in self.triples
+                            )
+                            if not already_exists:
+                                proof = f"derived: {r1}({x},{y}) ∧ {r2}({y},{z}) → {target}({x},{z})"
+                                triple = self.add_fact(x, target, z, source="derived", proof=proof)
+                                all_derived.append(triple)
+                                # Only update lookup if target matches r2
+                                # (avoids polluting r2 lookup with target facts)
+                                if target == r2:
+                                    r2_by_subject[x].append(z)
+                                changed = True
 
         return all_derived
 
