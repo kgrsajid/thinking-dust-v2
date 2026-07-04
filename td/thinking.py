@@ -645,6 +645,16 @@ class GenericThinkingDust:
         from .kg import KnowledgeGraph
         self.kg = KnowledgeGraph()
 
+        # SPARQL query layer (pyoxigraph bridge)
+        # Provides: inverse queries, property paths, named graphs, FILTER
+        # Falls back gracefully if pyoxigraph not installed
+        self.sparql_store = None
+        try:
+            from .query import SparqlStore
+            self.sparql_store = SparqlStore()
+        except ImportError:
+            pass  # pyoxigraph not installed; BFS-only mode
+
         # Sync pre-seeded relation properties to parser prototypes
         # (married_to, capital_of, in, part_of, etc.)
         self.sync_kg_to_parser()
@@ -696,6 +706,9 @@ class GenericThinkingDust:
                 latency = (time.perf_counter() - t0) * 1000
                 # Auto-derive new facts periodically
                 self.kg.derive_all()
+                # Sync newly derived facts to SPARQL store
+                if self.sparql_store is not None:
+                    self.sparql_store.sync_from_kg(self.kg)
                 return ThinkingResult(
                     problem=problem_text, evolved_state=problem_hdc,
                     thoughts=[], sub_problems=[],
@@ -894,6 +907,9 @@ class GenericThinkingDust:
         triples = self._extract_triples(problem_text, solution_text)
         for (s, r, o) in triples:
             self.kg.add_fact(s, r, o)
+            # Sync to SPARQL store (if available)
+            if self.sparql_store is not None:
+                self.sparql_store.add_fact(s, r, o, source="user")
 
         return {
             "status": "learned", "problem": problem_text[:80],
@@ -927,6 +943,9 @@ class GenericThinkingDust:
                 self.kg.set_relation_property(doc[0].lemma_, *properties)
         # Sync to parser so it can detect this relation in future queries
         self.parser.register_relation(relation)
+        # Sync to SPARQL store (if available)
+        if self.sparql_store is not None:
+            self.sparql_store.sync_from_kg(self.kg)
         return {
             "status": "learned",
             "relation": relation,
@@ -942,6 +961,13 @@ class GenericThinkingDust:
         """
         for relation in self.kg.relation_properties:
             self.parser.register_relation(relation)
+
+        # Sync full KG to SPARQL store (if available)
+        if self.sparql_store is not None:
+            count = self.sparql_store.sync_from_kg(self.kg)
+            if count > 0:
+                import sys
+                print(f"  ✓ SPARQL store synced: {count} facts", file=sys.stderr)
 
     def needs_teaching(self, result):
         if self.total_thinks < 3 and len(self.mhn.patterns) < 10:
@@ -1282,6 +1308,50 @@ class GenericThinkingDust:
                     }
 
         # For each entity pair, check for paths in the KG
+        # ─── SPARQL-first path (pyoxigraph) ─────────────────────────
+        # Try SPARQL before BFS: handles inverse queries, property paths,
+        # multi-hop transitive chains, and FILTER natively.
+        if self.sparql_store is not None and self.sparql_store._synced:
+            for i, e1 in enumerate(entities_in_query):
+                for e2 in entities_in_query[i + 1:]:
+                    # SPARQL ask with relation (if found)
+                    if relation_in_query:
+                        result = self.sparql_store.ask(e1, e2, relation_in_query)
+                        if result.found:
+                            return {
+                                "type": "inferred",
+                                "formatted": result.proof_trace,
+                                "confidence": result.confidence,
+                                "method": result.method,
+                            }
+                    # SPARQL ask without relation (finds any path)
+                    result = self.sparql_store.ask(e1, e2)
+                    if result.found:
+                        return {
+                            "type": "inferred",
+                            "formatted": result.proof_trace,
+                            "confidence": result.confidence,
+                            "method": result.method,
+                        }
+
+            # SPARQL inverse query: "What is the capital of France?"
+            # (single entity + relation, open question)
+            if len(entities_in_query) == 1 and relation_in_query:
+                question_words = {"what", "who", "where", "which"}
+                is_question = any(t in question_words for t in tokens)
+                if is_question:
+                    inv_results = self.sparql_store.inverse_query(
+                        relation_in_query, entities_in_query[0]
+                    )
+                    if inv_results:
+                        return {
+                            "type": "inferred",
+                            "formatted": f"{relation_in_query}({', '.join(inv_results)}) → {entities_in_query[0]}",
+                            "confidence": 0.90,
+                            "method": "sparql_inverse",
+                        }
+
+        # ─── BFS fallback (existing logic) ─────────────────────────
         for i, e1 in enumerate(entities_in_query):
             for e2 in entities_in_query[i + 1:]:
                 # For non-symmetric relations, only try query direction (e1 → e2)
