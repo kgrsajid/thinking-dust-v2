@@ -1178,6 +1178,54 @@ class GenericThinkingDust:
                             entities_in_query.remove(part)
 
             if len(entities_in_query) < 2:
+                # Try inverse/open query: "What is the capital of France?"
+                # Only for "what/who/where" questions (not "is X Y?" yes/no questions)
+                if len(entities_in_query) == 1:
+                    question_words = {"what", "who", "where", "which"}
+                    is_question = any(t in question_words for t in tokens)
+                    if not is_question:
+                        return None
+
+                    kg_relations = set(t.relation for t in self.kg.triples)
+                    kg_relations.update(self.kg.relation_properties.keys())
+                    entity = entities_in_query[0]
+
+                    def _try_inverse_query(rel):
+                        """Try entity as subject first, then as object."""
+                        # Forward: capital_of(france, ?) → what does France have?
+                        result = self.kg.query(entity, rel)
+                        if result.answer is not None:
+                            return result
+                        # Inverse: capital_of(?, france) → what is the capital of France?
+                        for t in self.kg.triples:
+                            if t.relation == rel and t.object == entity:
+                                return self.kg.query(t.subject, rel, entity)
+                        return None
+
+                    for token in tokens:
+                        if token in kg_relations:
+                            result = _try_inverse_query(token)
+                            if result and result.answer is not None:
+                                return {
+                                    "type": "inferred",
+                                    "formatted": result.proof_trace,
+                                    "confidence": result.confidence,
+                                    "method": result.method,
+                                }
+                    # Also check compound relations
+                    for i, token in enumerate(tokens):
+                        for rel in kg_relations:
+                            parts = rel.split("_")
+                            if len(parts) == 2 and i + 1 < len(tokens):
+                                if token == parts[0] and tokens[i + 1] == parts[1]:
+                                    result = _try_inverse_query(rel)
+                                    if result and result.answer is not None:
+                                        return {
+                                            "type": "inferred",
+                                            "formatted": result.proof_trace,
+                                            "confidence": result.confidence,
+                                            "method": result.method,
+                                        }
                 return None
 
         # Collect relation words in the query that match KG relations

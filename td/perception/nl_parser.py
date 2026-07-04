@@ -472,56 +472,81 @@ class GenericNLParser:
     def _get_coordinated_subjects(self, doc, subject_token) -> list[str]:
         """Extract all coordinated subjects from a subject token.
 
-        Handles:
+        Handles arbitrarily deep coordination:
         - "Alice and Bob went to Paris" → ["alice", "bob"]
+        - "Alice, Bob, Carol, Dave and Eve went to Paris" → [all 5]
         - "Algorithms and data structures are central to CS" → ["algorithms", "data structures"]
         - "France, Germany and Italy are in Europe" → ["france", "germany", "italy"]
 
-        Walks conj (coordinated) and nmod (noun modifier) chains recursively.
-        Also handles nested coordination: A, B and C → [A, B, C].
-
-        For coordinated tokens within a single noun chunk (e.g., "Algorithms
-        and data structures"), uses individual token text instead of the full
-        chunk to preserve entity boundaries.
+        Uses BFS to walk conj/nmod chains to arbitrary depth.
+        Preserves modifiers (amod, compound, det) via noun chunk lookup.
 
         Reference: Manning & Schütze (1999), Chapter 5: Collocations.
         """
         def _token_text(token):
-            """Get text for a single coordinated token, preserving compounds."""
-            # Collect compound children of this token
+            """Get text for a token, preserving compounds and modifiers."""
+            # Find the noun chunk for this token
+            token_chunk = None
+            for chunk in doc.noun_chunks:
+                if token.i >= chunk.start and token.i < chunk.end:
+                    token_chunk = chunk
+                    break
+
+            if token_chunk:
+                # Check if this token is a coordinated element within a larger chunk
+                # If so, use just the token's subtree (not the full chunk)
+                has_coord_siblings = any(
+                    c.dep_ in ("conj", "nmod", "npadvmod") 
+                    for c in token.children
+                ) or any(
+                    token.dep_ in ("conj", "nmod", "npadvmod")
+                    for c in doc if c.i == token.head.i
+                    for c2 in c.children if c2.i == token.i
+                )
+
+                # If this token has coordinated siblings in the same chunk,
+                # use just this token's subtree text
+                if has_coord_siblings and token_chunk.end - token_chunk.start > 2:
+                    # Get this token's compounds and modifiers (not full subtree)
+                    modifiers = [c for c in token.children if c.dep_ in ("compound", "amod")]
+                    all_tokens = sorted(
+                        modifiers + [token],
+                        key=lambda t: t.i
+                    )
+                    words = [t.text.lower() for t in all_tokens]
+                    if words:
+                        return " ".join(words)
+
+                # Otherwise use the full chunk
+                words = token_chunk.text.lower().split()
+                while words and words[0] in ("the", "a", "an"):
+                    words = words[1:]
+                return " ".join(words) if words else token_chunk.text.lower()
+
+            # Fallback: compound + token
             compounds = [c for c in token.children if c.dep_ == "compound"]
             if compounds:
                 return " ".join([c.text.lower() for c in compounds] + [token.text.lower()])
             return token.text.lower()
 
-        subjects = [_token_text(subject_token)]
+        # BFS to collect all coordinated tokens at arbitrary depth
+        visited = set()
+        queue = [subject_token]
+        subjects = []
 
-        # Walk conj children (direct coordination: "Alice and Bob")
-        for child in subject_token.children:
-            if child.dep_ == "conj":
-                subjects.append(_token_text(child))
-                # Walk nested conj (A, B and C → France, Germany, Italy)
-                for grandchild in child.children:
-                    if grandchild.dep_ == "conj":
-                        subjects.append(_token_text(grandchild))
+        while queue:
+            token = queue.pop(0)
+            if token.i in visited:
+                continue
+            visited.add(token.i)
+            subjects.append(_token_text(token))
 
-        # Walk nmod children (noun modifiers: "Algorithms and data structures")
-        for child in subject_token.children:
-            if child.dep_ == "nmod":
-                subjects.append(_token_text(child))
-                # Walk conj of nmod ("data" conj of "Algorithms")
-                for grandchild in child.children:
-                    if grandchild.dep_ == "conj":
-                        subjects.append(_token_text(grandchild))
+            # Walk conj, nmod, and npadvmod children (all coordination types)
+            for child in token.children:
+                if child.dep_ in ("conj", "nmod", "npadvmod") and child.i not in visited:
+                    queue.append(child)
 
-        # Deduplicate while preserving order
-        seen = set()
-        unique = []
-        for s in subjects:
-            if s not in seen:
-                seen.add(s)
-                unique.append(s)
-        return unique
+        return list(dict.fromkeys(subjects))  # dedupe preserving order
 
     def _merge_compound_nouns_in_graph(self, graph, tokens):
         """Merge adjacent single-token entities that form compound nouns.
