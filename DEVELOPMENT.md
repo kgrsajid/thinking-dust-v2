@@ -12,7 +12,7 @@ This guide covers everything you need to set up, extend, and debug TD v2.
 
 - **Python 3.10 or 3.11** (3.12 may work; 3.9 is not supported)
 - **macOS or Linux** — tested on MacBook Pro (Intel and Apple Silicon M1 Pro) and Linux x86_64
-- **~200 MB disk space** for dependencies, word vectors, and SQLite data
+- **~200 MB disk space** for dependencies, word vectors, and RDF store
 
 ### Apple Silicon (M1/M2/M3 Pro) Note
 
@@ -119,7 +119,7 @@ td-v2/
 │   ├── chat_flare.py         # Main interactive demo
 │   └── interactive_demo.py   # Alternative demo
 ├── data/
-│   ├── td_knowledge.db        # SQLite KG (created on first run)
+│   ├── td_store/              # pyoxigraph RDF store (created on first run)
 │   ├── word_vectors_10k.pkl  # BEAGLE vectors (auto-trained if missing)
 │   ├── td_knowledge_mhn.pkl  # MHN patterns (created on first run)
 │   ├── ca_reservoir_state.pkl # CA state (created on first run)

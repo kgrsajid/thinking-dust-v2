@@ -50,7 +50,7 @@ Four layers, each with a specific role:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Query path:** Parser extracts entities → KG BFS finds all paths → Rule templates derive new facts → MHN retrieves paraphrase matches → Answer + proof trace returned.
+**Query path:** Parser extracts entities → SPARQL queries (inverse, transitive, multi-hop) → BFS fallback for cross-relation paths → Answer + proof trace returned.
 
 **Teach path:** MHN stores semantic key → Parser extracts triples → KG stores facts → BEAGLE updates context vectors → Inference immediately derives new facts.
 
@@ -68,7 +68,8 @@ Four layers, each with a specific role:
 - **Online learning** — word vectors evolve from every teach() interaction
 - **Zero GPU** — pure HDC algebra + Z3, runs on any CPU
 - **<100K parameters** total
-- **SQLite persistence** — knowledge survives restarts
+- **SPARQL 1.1 queries** — inverse, transitive, FILTER, named graphs (pyoxigraph, Rust-backed)
+- **RDF persistence** — knowledge survives restarts, standard interchange format
 - **Interpretable** — every inference step is traceable
 
 ---
@@ -120,7 +121,8 @@ relation: capital_of functional inverse:has_capital
 | Inverse relations | ✅ Working | capital_of ↔ has_capital |
 | Paraphrase matching | ✅ Working | "capital of" ↔ "france capital" |
 | BEAGLE online learning | ✅ Working | Context vectors accumulate |
-| SQLite persistence | ✅ Working | Knowledge survives restarts |
+| SPARQL queries | ✅ Working | Inverse, transitive, FILTER, named graphs |
+| RDF persistence | ✅ Working | Knowledge survives restarts, Turtle/JSON-LD export |
 | Proof traces | ✅ Working | Full derivation chain shown |
 | Z3 constraint solving | ✅ Working | 18 mathematical primitives |
 | Test suite | ✅ 99 passing | 50 original + 34 generalization + 15 realworld |
@@ -199,7 +201,7 @@ arch -arm64 .venv-arm64/bin/python demos/chat_flare.py
 | `relation: <name> <property>` | `relation: capital_of functional` | Teaches how a relation behaves |
 | `ask: <question>` | `ask: is Paris in the EU?` | Asks a question |
 | `stats` | | Shows memory state |
-| `save` | | Saves to SQLite |
+| `save` | | Saves to RDF store |
 | `quit` | | Exit |
 
 ### Question Types
@@ -273,7 +275,7 @@ Confidence is based on **chain quality**, not hop count:
 - Explain its reasoning (proof traces)
 - Handle temporal reasoning (before, after, meets, during)
 - Detect contradictions (functional relations)
-- Persist knowledge to SQLite
+- Persist knowledge to RDF (pyoxigraph, SPARQL 1.1)
 
 ### ❌ Can't do
 - Answer general knowledge questions (only knows what you teach it)
@@ -291,12 +293,12 @@ User Input
     ↓
 Parser: entities + relations extracted
     ↓
-KG: BFS paths(entity_a → entity_b)
+SPARQL: inverse/transitive/multi-hop queries (pyoxigraph)
+    ↓ If SPARQL misses
+BFS: cross-relation path search (fallback)
     ↓ Path found
 Rule Templates: apply inference (transitive/symmetric/functional/inverse)
     ↓ New facts derived
-MHN: store semantic keys for paraphrase retrieval
-    ↓
 Answer + proof trace returned (<50ms)
 ```
 
