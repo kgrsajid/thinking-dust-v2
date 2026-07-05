@@ -124,12 +124,29 @@ def uri_to_entity(uri) -> str:
 
     NamedNode('http://thinking-dust.org/entity/south_korea') → 'south korea'
     """
-    return uri.value.replace(TD_ENT, "").replace("_", " ")
+    val = uri.value
+    if val.startswith(TD_ENT):
+        return val[len(TD_ENT):].replace("_", " ")
+    return val.replace("_", " ")
 
 
 def uri_to_relation(uri) -> str:
     """Convert RDF URI back to TD relation name."""
-    return uri.value.replace(TD_REL, "")
+    val = uri.value
+    if val.startswith(TD_REL):
+        return val[len(TD_REL):]
+    return val
+
+
+def _sanitize_for_sparql(value: str) -> str:
+    """Sanitize a value for safe SPARQL string interpolation.
+
+    Prevents SPARQL injection by escaping special characters.
+    Only allows alphanumeric, underscore, hyphen, space, period.
+    """
+    import re
+    # Remove anything that's not safe
+    return re.sub(r'[^a-zA-Z0-9_\- .]', '', value)
 
 
 # ─── SPARQL Result Types ─────────────────────────────────────────────
@@ -148,12 +165,11 @@ class SparqlResult:
 
 @dataclass
 class FactId:
-    """Counter for generating unique fact URIs."""
-    _counter: int = 0
+    """Generate unique fact URIs using random UUIDs (no collision risk)."""
 
-    def next(self) -> int:
-        self._counter += 1
-        return self._counter
+    def next(self) -> str:
+        import uuid
+        return uuid.uuid4().hex[:12]
 
 
 # ─── SparqlStore ──────────────────────────────────────────────────────

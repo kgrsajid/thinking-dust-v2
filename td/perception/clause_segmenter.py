@@ -33,7 +33,7 @@ class SimpleClause:
     confidence: float = 1.0
 
     def __repr__(self):
-        return f"({self.subject}, {self.relation}, {self.object})"
+        return f"({self.subject}, {self.relation}, {self.obj})"
 
 
 def _get_conj_chain(token) -> list:
@@ -144,6 +144,7 @@ def segment_clauses(doc) -> list[SimpleClause]:
                 continue
 
             # Generate one clause per (subject, object) pair
+            verb_text = _get_verb_text(verb)
             for subj in subjects:
                 subj_text = _get_subject_text(subj)
 
@@ -152,7 +153,7 @@ def segment_clauses(doc) -> list[SimpleClause]:
                         obj_text = _get_object_text(obj)
                         clauses.append(SimpleClause(
                             subject=subj_text.lower().strip(),
-                            relation=verb.text.lower().strip(),
+                            relation=verb_text.lower().strip(),
                             obj=obj_text.lower().strip(),
                             source_text=f"{subj_text} {verb.text} {obj_text}",
                         ))
@@ -160,7 +161,7 @@ def segment_clauses(doc) -> list[SimpleClause]:
                     # Verb with no object (intransitive)
                     clauses.append(SimpleClause(
                         subject=subj_text.lower().strip(),
-                        relation=verb.text.lower().strip(),
+                        relation=verb_text.lower().strip(),
                         obj="",
                         source_text=f"{subj_text} {verb.text}",
                     ))
