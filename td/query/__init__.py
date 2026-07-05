@@ -225,13 +225,18 @@ class SparqlStore:
         """Get NamedNode for an entity, with gazetteer-aware normalization.
 
         Strips leading articles ("the", "a", "an") to match how the parser
-        stores entities (without articles).
+        stores entities (without articles). Only strips when 2+ words remain
+        (preserves proper nouns like "The Hague").
         """
         normalized = entity.lower().strip()
-        # Strip leading articles (matches parser's _get_chunk_text behavior)
+        # Strip leading articles only if 2+ words remain
+        # "the united states of america" → "united states of america" ✓
+        # "The Hague" → "the hague" (keep, only 1 word after stripping)
         for article in ("the ", "a ", "an "):
             if normalized.startswith(article):
-                normalized = normalized[len(article):]
+                remainder = normalized[len(article):]
+                if " " in remainder:  # 2+ words remain
+                    normalized = remainder
                 break
         return entity_to_uri(normalized)
 

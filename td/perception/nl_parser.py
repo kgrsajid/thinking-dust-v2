@@ -448,17 +448,20 @@ class GenericNLParser:
                 # Check for det-as-subject pattern: "A feeds into B"
                 # spaCy misparses verb+prep as NOUN+prep with det subject
                 # det=feeds(ROOT), prep=into, pobj=B → (a, feeds_into, b)
+                # Only match single uppercase letters (entity names like A, B, X)
+                # NOT common articles ("the", "a", "an") or real determiners
                 dets = [c for c in token.children if c.dep_ == "det"]
                 preps_for_det = [c for c in token.children if c.dep_ == "prep"]
                 if dets and preps_for_det and not compounds:
                     det = dets[0]
-                    prep = preps_for_det[0]
-                    pobj = [c for c in prep.children if c.dep_ == "pobj"]
-                    if pobj:
-                        obj_text = self._get_chunk_text(doc, pobj[0])
-                        rel = f"{token.text.lower()}_{prep.lemma_}"
-                        triples.append((det.text.lower(), rel, obj_text))
-                        continue
+                    if len(det.text) == 1 and det.text.isupper():
+                        prep = preps_for_det[0]
+                        pobj = [c for c in prep.children if c.dep_ == "pobj"]
+                        if pobj:
+                            obj_text = self._get_chunk_text(doc, pobj[0])
+                            rel = f"{token.text.lower()}_{prep.lemma_}"
+                            triples.append((det.text.lower(), rel, obj_text))
+                            continue
 
                 # Check for prep chain: "capital of France", "in the EU"
                 preps = [c for c in token.children if c.dep_ == "prep"]
