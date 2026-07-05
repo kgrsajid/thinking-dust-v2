@@ -1,22 +1,22 @@
 """Temporal ordering extraction from discourse connectives.
 
-Detects temporal connectives ("then", "after", "before", "subsequently")
-in text and extracts temporal ordering triples between events.
+Detects temporal connectives ("then", "after", "before", "subsequently",
+"while", "meanwhile", "as soon as", etc.) in text and extracts temporal
+ordering triples between events using Allen's interval algebra.
 
-When "Alice went to Paris and then invested in stocks" is parsed:
-- Event 1: Alice went to Paris
-- Event 2: Alice invested in stocks
-- Temporal: Event 1 BEFORE Event 2
-
-This uses Allen's interval algebra (already implemented in TD v2) to
-store temporal relations as triples with the "before" relation.
+Architecture:
+- Temporal connectives defined in temporal_connectives.py (multilingual registry)
+- Extractor uses spaCy dependency parsing to detect connective patterns
+- Three extraction patterns: coordinated verbs, subordinating, prepositional
+- Allen's interval algebra for temporal relations (before, after, overlaps, etc.)
 
 References:
 - Allen, J.F. (1983). "Maintaining Knowledge about Temporal Intervals."
 - TimeML (Pustejovsky et al., 2003) — temporal annotation standard
+- PDTB 3.0 (Webber et al., 2019) — Penn Discourse Treebank
 - Chambers et al. — unsupervised temporal ordering extraction
 - Consistent Discourse-level TRE (EMNLP 2025)
-- ATOMIC-2020 — isBefore/isAfter relations
+- ATOMIC-2020 — common sense knowledge with isBefore/isAfter relations
 """
 
 from __future__ import annotations
@@ -24,60 +24,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-
-# Temporal connectives and their Allen's relation mappings.
-# "then" → BEFORE (event before the "then" clause happened first)
-# "after" → AFTER (event after "after" happened later)
-# "before" → BEFORE (event after "before" happened earlier)
-# "subsequently" → BEFORE
-# "first...then" → BEFORE
-TEMPORAL_CONNECTIVES = {
-    # connective: Allen relation mapping
-    # "before" means: event1 happened before event2
-
-    # Forward-looking (point to future events in timeline)
-    "then": "before",
-    "subsequently": "before",
-    "afterwards": "before",
-    "after": "after",
-    "before": "before",
-    "next": "before",
-    "first": "before",
-    "finally": "before",
-    "subsequent": "before",
-    "later": "before",
-    "soon": "before",
-    "eventually": "before",
-    "thereafter": "before",
-    "henceforth": "before",
-
-    # Backward-looking (point to past events in timeline)
-    "previously": "after",
-    "earlier": "after",
-    "beforehand": "after",
-    "prior": "after",
-
-    # Conditional-temporal hybrids (handled specially)
-    "once": "before",       # "Once X, Y" → X BEFORE Y
-    "since": "after",       # "Since X, Y" → X BEFORE Y (backward-looking)
-}
-
-# Conditional "then" — NOT temporal. Distinguished by context.
-# "If X then Y" — "then" is conditional, not temporal.
-CONDITIONAL_MARKERS = {"if", "when", "whenever", "unless", "provided"}
-
-# Time nouns — "before noon" is a time reference, not event ordering.
-TIME_NOUNS = frozenset({
-    "noon", "midnight", "dawn", "dusk", "sunrise", "sunset",
-    "morning", "afternoon", "evening", "night",
-    "today", "tomorrow", "yesterday",
-    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
-    "january", "february", "march", "april", "may", "june",
-    "july", "august", "september", "october", "november", "december",
-    "year", "month", "week", "day", "hour", "minute", "second",
-    "years", "months", "weeks", "days", "hours", "minutes", "seconds",
-    "noon", "midnight", "christmas", "easter",
-})
+from .temporal_connectives import (
+    get_connectives,
+    get_conditional_markers,
+    get_time_nouns,
+    TemporalConnective,
+)
 
 
 @dataclass
@@ -85,12 +37,13 @@ class TemporalOrdering:
     """A temporal ordering between two events."""
     event1_description: str  # e.g., "alice went to paris"
     event2_description: str  # e.g., "alice invested in stocks"
-    relation: str            # Allen's relation: "before", "after"
+    relation: str            # Allen's relation: "before", "after", "overlaps", "during"
     connective: str          # The connective word: "then", "after", etc.
+    semantic_type: str       # "sequential", "precedence", "simultaneous", etc.
     confidence: float = 0.8
 
 
-def extract_temporal_orderings(doc) -> list[TemporalOrdering]:
+def extract_temporal_orderings(doc, lang: str = "en") -> list[TemporalOrdering]:
     """Extract temporal orderings from a spaCy Doc.
 
     Detects temporal connectives between coordinated clauses and
@@ -103,10 +56,14 @@ def extract_temporal_orderings(doc) -> list[TemporalOrdering]:
 
     Args:
         doc: spaCy Doc object
+        lang: Language code (default "en")
 
     Returns:
         List of TemporalOrdering objects
     """
+    connectives = get_connectives(lang)
+    conditional_markers = get_conditional_markers(lang)
+    time_nouns = get_time_nouns(lang)
     orderings = []
 
     for sent in doc.sents:
@@ -114,27 +71,25 @@ def extract_temporal_orderings(doc) -> list[TemporalOrdering]:
 
         for i, token in enumerate(tokens):
             word = token.text.lower()
-            if word not in TEMPORAL_CONNECTIVES:
+            if word not in connectives:
                 continue
 
+            conn = connectives[word]
+
             # Skip conditional "then" — only check tokens BEFORE "then"
-            # "If it rains, Alice left and then Bob arrived" → "then" is temporal
-            # "If you go then you should visit" → "then" is conditional
             if word == "then":
                 tokens_before = tokens[:i]
-                is_conditional = any(t.text.lower() in CONDITIONAL_MARKERS for t in tokens_before)
+                is_conditional = any(t.text.lower() in conditional_markers for t in tokens_before)
                 if is_conditional:
-                    # Check if the conditional clause is complete
-                    # (has its own verb). If "then" is far from "if", it's temporal.
                     conditional_token = next(
-                        (t for t in tokens_before if t.text.lower() in CONDITIONAL_MARKERS), None
+                        (t for t in tokens_before if t.text.lower() in conditional_markers), None
                     )
                     if conditional_token and conditional_token.head == token.head:
-                        continue  # Same clause → conditional
+                        continue
 
-            # Pattern 1: "then" as advmod of a verb (coordinated verbs)
+            # Pattern 1: Sequential connectives as advmod of verb
             # "Alice went to Paris and then invested" → went BEFORE invested
-            if word in ("then", "subsequently", "afterwards", "next", "first", "finally", "later"):
+            if conn.semantic_type == "sequential" and conn.dep_pattern == "advmod":
                 if token.dep_ == "advmod" and token.head.pos_ in ("VERB", "AUX"):
                     head_verb = token.head
                     other_verb = _find_conjunct_verb(head_verb)
@@ -147,105 +102,130 @@ def extract_temporal_orderings(doc) -> list[TemporalOrdering]:
                             orderings.append(TemporalOrdering(
                                 event1_description=event1,
                                 event2_description=event2,
-                                relation="before",
+                                relation=conn.allen_relation,
                                 connective=word,
+                                semantic_type=conn.semantic_type,
                             ))
 
-            # Pattern 2: "after/before" as subordinating conjunction (mark)
+            # Pattern 2: Subordinating conjunctions (mark)
             # "After Alice went to Paris, she invested" → went BEFORE invested
-            elif word in ("after", "before") and token.dep_ == "mark":
-                # token.head is the verb of the subordinate clause
+            elif conn.dep_pattern == "mark" and token.dep_ == "mark":
                 subordinate_verb = token.head
-                # Find the main clause verb (the ROOT or the verb in the main clause)
                 main_verb = _find_main_clause_verb(sent, subordinate_verb)
                 if main_verb:
                     event_sub = _describe_verb_event(subordinate_verb, doc)
                     event_main = _describe_verb_event(main_verb, doc)
                     if event_sub and event_main:
-                        if word == "after":
-                            # "After X, Y" → X happened before Y
+                        # Determine event ordering based on connective semantics
+                        if conn.allen_relation in ("after",):
+                            # "After X, Y" → X BEFORE Y
                             orderings.append(TemporalOrdering(
                                 event1_description=event_sub,
                                 event2_description=event_main,
                                 relation="before",
                                 connective=word,
+                                semantic_type=conn.semantic_type,
                             ))
-                        else:  # before
-                            # "Before X, Y" → Y happened before X
+                        elif conn.allen_relation in ("before",):
+                            # "Before X, Y" → Y BEFORE X
                             orderings.append(TemporalOrdering(
                                 event1_description=event_main,
                                 event2_description=event_sub,
                                 relation="before",
                                 connective=word,
+                                semantic_type=conn.semantic_type,
+                            ))
+                        elif conn.allen_relation in ("overlaps", "during", "equals"):
+                            # "While X, Y" → X OVERLAPS Y
+                            orderings.append(TemporalOrdering(
+                                event1_description=event_sub,
+                                event2_description=event_main,
+                                relation=conn.allen_relation,
+                                connective=word,
+                                semantic_type=conn.semantic_type,
+                            ))
+                        elif conn.allen_relation in ("meets",):
+                            # "Until X, Y" → Y MEETS X
+                            orderings.append(TemporalOrdering(
+                                event1_description=event_main,
+                                event2_description=event_sub,
+                                relation="meets",
+                                connective=word,
+                                semantic_type=conn.semantic_type,
+                            ))
+                        else:
+                            # Default: use the connective's Allen relation
+                            orderings.append(TemporalOrdering(
+                                event1_description=event_sub,
+                                event2_description=event_main,
+                                relation=conn.allen_relation,
+                                connective=word,
+                                semantic_type=conn.semantic_type,
                             ))
 
-            # Pattern 3: "before/after" as preposition (prep)
+            # Pattern 3: Prepositional connectives
             # "Alice went to Paris before investing" → went BEFORE investing
-            # BUT: "I arrived before noon" → time reference, NOT event ordering
-            elif word in ("before", "after") and token.dep_ == "prep":
+            # Also handles subordinating connectives that spaCy parses as prep
+            elif (conn.dep_pattern == "prep" or conn.dep_pattern == "mark") and token.dep_ == "prep":
                 main_verb = token.head
                 if main_verb.pos_ in ("VERB", "AUX"):
-                    # Find the object of the preposition
                     pobj = None
                     for child in token.children:
                         if child.dep_ in ("pobj", "pcomp"):
                             pobj = child
                             break
                     if pobj:
-                        # Skip time expressions: "before noon", "after midnight"
-                        if pobj.text.lower() in TIME_NOUNS:
+                        # Skip time expressions
+                        if pobj.text.lower() in time_nouns:
                             continue
-                        # Skip numeric time: "before 5pm", "after 2020"
                         if pobj.pos_ in ("NUM",) or pobj.like_num:
                             continue
 
                         event_main = _describe_verb_event(main_verb, doc)
                         event_sub = _get_subtree_text(pobj)
                         if event_main and event_sub:
-                            if word == "before":
+                            if conn.allen_relation == "before":
                                 orderings.append(TemporalOrdering(
                                     event1_description=event_main,
                                     event2_description=event_sub,
                                     relation="before",
                                     connective=word,
+                                    semantic_type=conn.semantic_type,
                                 ))
-                            else:  # after
+                            elif conn.allen_relation in ("during", "overlaps"):
+                                orderings.append(TemporalOrdering(
+                                    event1_description=event_main,
+                                    event2_description=event_sub,
+                                    relation=conn.allen_relation,
+                                    connective=word,
+                                    semantic_type=conn.semantic_type,
+                                ))
+                            else:
                                 orderings.append(TemporalOrdering(
                                     event1_description=event_sub,
                                     event2_description=event_main,
                                     relation="before",
                                     connective=word,
+                                    semantic_type=conn.semantic_type,
                                 ))
 
     return orderings
 
 
 def _find_conjunct_verb(verb) -> Optional[object]:
-    """Find the verb that is coordinated with this verb via 'and'/'but'/'or'.
-
-    'Alice went to Paris and then invested' →
-    verb=invested, conjunct=went
-    """
-    # Check if this verb is a conjunct of another verb
+    """Find the verb that is coordinated with this verb."""
     if verb.dep_ == "conj":
         head = verb.head
         if head.pos_ in ("VERB", "AUX"):
             return head
-
-    # Check if another verb is a conjunct of this verb
     for child in verb.children:
         if child.dep_ == "conj" and child.pos_ in ("VERB", "AUX"):
             return child
-
     return None
 
 
 def _find_main_clause_verb(sent, subordinate_verb) -> Optional[object]:
-    """Find the main clause verb when a subordinate clause exists.
-
-    'After Alice went to Paris, she invested in stocks'
-    subordinate_verb = went, main_verb = invested
-    """
+    """Find the main clause verb when a subordinate clause exists."""
     for token in sent:
         if token.dep_ == "ROOT" and token.pos_ in ("VERB", "AUX"):
             if token != subordinate_verb:
@@ -266,27 +246,20 @@ def _find_verb_in_previous_sentence(current_sent, doc) -> Optional[object]:
 
 
 def _describe_verb_event(verb, doc) -> Optional[str]:
-    """Create a description of the event around a verb.
-
-    'went' with subject 'Alice' and prep 'to Paris' → 'alice went to paris'
-    """
+    """Create a description of the event around a verb."""
     parts = []
-
-    # Find subject
     for child in verb.children:
         if child.dep_ in ("nsubj", "nsubjpass"):
             subj_text = _get_subtree_text(child)
             parts.append(subj_text)
             break
 
-    # Add the verb
     parts.append(verb.text.lower())
 
-    # Add objects and prep phrases
     for child in verb.children:
         if child.dep_ in ("dobj", "attr", "prep", "advmod", "prt"):
-            if child.dep_ == "advmod" and child.text.lower() in TEMPORAL_CONNECTIVES:
-                continue  # Skip temporal connectives
+            if child.dep_ == "advmod" and child.text.lower() in get_connectives("en"):
+                continue
             obj_text = _get_subtree_text(child)
             if obj_text:
                 parts.append(obj_text)
@@ -303,25 +276,14 @@ def _get_subtree_text(token) -> str:
     return " ".join(words)
 
 
-def temporal_triples_from_text(text: str, nlp=None) -> list[tuple[str, str, str]]:
-    """Extract temporal ordering triples from text.
-
-    Convenience function that processes text and returns triples
-    in the format (event1, "before"/"after", event2).
-
-    Args:
-        text: Input text
-        nlp: spaCy model (loaded lazily if None)
-
-    Returns:
-        List of (event1, relation, event2) tuples
-    """
+def temporal_triples_from_text(text: str, nlp=None, lang: str = "en") -> list[tuple[str, str, str]]:
+    """Extract temporal ordering triples from text."""
     if nlp is None:
         import spacy
         nlp = spacy.load("en_core_web_sm")
 
     doc = nlp(text)
-    orderings = extract_temporal_orderings(doc)
+    orderings = extract_temporal_orderings(doc, lang)
 
     triples = []
     for ordering in orderings:

@@ -28,8 +28,10 @@ from td.perception.temporal_extractor import (
     extract_temporal_orderings,
     temporal_triples_from_text,
     TemporalOrdering,
-    TEMPORAL_CONNECTIVES,
-    CONDITIONAL_MARKERS,
+)
+from td.perception.temporal_connectives import (
+    ENGLISH_CONNECTIVES as TEMPORAL_CONNECTIVES,
+    ENGLISH_CONDITIONAL_MARKERS as CONDITIONAL_MARKERS,
 )
 
 
