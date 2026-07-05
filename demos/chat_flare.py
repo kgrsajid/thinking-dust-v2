@@ -332,6 +332,9 @@ def main():
     print(f"    {C['yellow']}teach: <problem> | <solution>{C['reset']}  — teach a fact with answer")
     print(f"    {C['yellow']}teach: <fact>{C['reset']}                   — teach a fact (triple only)")
     print(f"    {C['yellow']}relation: <name> <property>{C['reset']}     — teach relation logic")
+    print(f"    {C['yellow']}synonym: <rel1> = <rel2>{C['reset']}        — teach relation synonym")
+    print(f"    {C['yellow']}coref{C['reset']}                      — toggle coreference resolution")
+    print(f"    {C['yellow']}sparql: <query>{C['reset']}            — run raw SPARQL query")
     print(f"    {C['yellow']}stats{C['reset']}                      — show memory state")
     print(f"    {C['yellow']}save{C['reset']}                      — save memories to disk")
     print(f"    {C['yellow']}trace{C['reset']}                      — toggle reasoning trace")
@@ -369,6 +372,55 @@ def main():
         if user_input.lower() == "trace":
             show_trace = not show_trace
             print(f"  {C['yellow']}Reasoning trace: {'ON' if show_trace else 'OFF'}{C['reset']}")
+            continue
+
+        # ─── synonym command ──────────────────────────────────────
+        if user_input.lower().startswith("synonym:"):
+            rest = user_input[8:].strip()
+            if "=" in rest:
+                parts = rest.split("=", 1)
+                canonical = parts[0].strip()
+                synonyms = [s.strip() for s in parts[1].split(",")]
+                from td.kg.relation_synonyms import RelationSynonymRegistry
+                if not hasattr(td, '_synonym_registry'):
+                    td._synonym_registry = RelationSynonymRegistry()
+                td._synonym_registry.teach(canonical, synonyms)
+                print(f"\n  {C['green']}✓ '{canonical}' = {synonyms}{C['reset']}")
+            else:
+                print(f"\n  {C['red']}Format: synonym: <canonical> = <syn1>, <syn2>{C['reset']}")
+            print()
+            continue
+
+        # ─── coref command ────────────────────────────────────────
+        if user_input.lower() == "coref":
+            if td.parser._coref_enabled:
+                td.parser._coref_enabled = False
+                print(f"  {C['yellow']}Coreference: OFF{C['reset']}")
+            else:
+                try:
+                    td.parser.enable_coreference()
+                    print(f"  {C['green']}Coreference: ON{C['reset']}")
+                except Exception as e:
+                    print(f"  {C['red']}Coreference unavailable: {e}{C['reset']}")
+            print()
+            continue
+
+        # ─── sparql command ───────────────────────────────────────
+        if user_input.lower().startswith("sparql:"):
+            query = user_input[7:].strip()
+            if td.sparql_store:
+                try:
+                    results = td.sparql_store.query_sparql_bindings(query)
+                    print(f"\n  {C['cyan']}SPARQL results ({len(results)}):{C['reset']}")
+                    for r in results[:10]:
+                        print(f"    {r}")
+                    if len(results) > 10:
+                        print(f"    ... and {len(results) - 10} more")
+                except Exception as e:
+                    print(f"\n  {C['red']}SPARQL error: {e}{C['reset']}")
+            else:
+                print(f"\n  {C['red']}SPARQL not available{C['reset']}")
+            print()
             continue
 
         # Handle feedback
