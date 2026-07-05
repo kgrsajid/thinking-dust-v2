@@ -242,14 +242,14 @@ def _get_state_path():
 
 
 def _save_state(td):
-    """Save TD's learned state to SQLite."""
+    """Save TD's learned state to pyoxigraph RDF store + pickle."""
     state_path = _get_state_path()
 
     # Don't save if nothing was learned
     if not td.mhn.patterns and not td.kg.triples:
         return
 
-    # Save KG (triples + relation properties) to SQLite
+    # Save KG (triples + relation properties) to RDF store
     td.kg.save(state_path)
 
     # Save MHN patterns to pickle (dense arrays — SQLite is wrong for this)

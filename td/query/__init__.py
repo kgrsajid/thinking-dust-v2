@@ -115,7 +115,7 @@ def relation_to_uri(relation: str) -> NamedNode:
 
     'capital_of' → NamedNode('http://thinking-dust.org/relation/capital_of')
     """
-    normalized = relation.lower().strip()
+    normalized = relation.lower().strip().replace(" ", "_")
     return NamedNode(f"{TD_REL}{normalized}")
 
 

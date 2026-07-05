@@ -630,6 +630,13 @@ class GenericThinkingDust:
         self.dim = dim
         self.mhn = mhn or ModernHopfieldNetwork(MHNConfig(dim=dim, min_similarity=0.01, idp_enabled=False))
         self.parser = GenericNLParser(vocab, self.mhn, dim=dim)
+        # Enable coreference resolution if the model is available
+        # This resolves pronouns (he/she/it/they) before triple extraction
+        try:
+            self.parser.enable_coreference()
+        except Exception:
+            pass  # en_coreference_web_trf not installed — skip silently
+
         self.z3_solver = GenericZ3Solver()
         self.max_idp_iterations = max_idp_iterations
         self.idp_blend_factor = idp_blend_factor

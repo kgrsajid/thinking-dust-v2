@@ -78,15 +78,29 @@ def _get_objects(verb) -> list:
 
 
 def _get_verb_text(verb) -> str:
-    """Get the full verb phrase including auxiliaries.
+    """Get the verb text, excluding passive auxiliaries.
 
-    'may have' → 'may have'
-    'is running' → 'is running'
+    spaCy marks passive auxiliaries with dep='auxpass' (e.g., "is" in
+    "is designed"). These are syntactic markers — the passive voice is
+    already encoded in the verb form ("designed" = past participle).
+    Including them creates "is designed" which doesn't match "designed_for"
+    during canonicalization.
+
+    Modal auxiliaries (dep='aux': "may", "can", "should") and negation
+    ("not") are kept — they carry semantic meaning.
+
+    This is language-agnostic: it uses spaCy's Universal Dependencies
+    labels, not hardcoded English words. 'auxpass' is a UD standard label
+    that works across all spaCy-supported languages.
+
+    Reference: Universal Dependencies — auxpass dependency label
+    Reference: de Marneffe et al. (2014), "Universal Stanford Dependencies"
     """
     parts = []
     for child in verb.children:
-        if child.dep_ in ("aux", "auxpass", "neg"):
+        if child.dep_ in ("aux", "neg"):
             parts.append(child.text)
+        # Skip auxpass — passive marker, not semantic content
     parts.append(verb.text)
     return " ".join(parts)
 
