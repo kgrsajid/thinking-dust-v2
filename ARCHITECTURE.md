@@ -678,15 +678,12 @@ The following fundamental KG structures are supported by the RDF/OWL standard an
   - Fix: detect verb+prep patterns in dependency tree, recombine into compound relation
 
 **P1 — Next:**
-- [ ] Multi-word entity extraction — "World War 2", "the united states of america" unreliable
-  - spaCy treats numbers as separate NUM tokens
-  - Long phrases truncated by parser
-  - Gazetteer helps but isn't bulletproof
-- [ ] Attributive literals: "Paris has_population 2.1M" → store numeric values (word2number installed)
-- [ ] Clausal complements (xcomp): "considers different ways to describe processes" → capture xcomp
-- [ ] Causal chains: "Rain causes Flood causes Damage" → transitive causal relation
-- [ ] Confidence calibration via Conformal Prediction (using chat_flare feedback)
-- [ ] NL answer formatting (proof trace → proper English)
+- [x] Multi-word entity extraction — "World War 2", "the united states of america" ✅
+  - Fixed: `_get_chunk_text` includes nummod children and prep chains
+  - Fixed: `_entity_node` strips leading articles
+- [x] Compound verb+preposition relations — "feeds into" parsed correctly ✅
+  - Fixed: detect det-as-subject pattern in noun-based constructions
+  - "A feeds into B" → (a, feeds_into, b)
 
 **P2 — Future:**
 - [ ] Negation: "Tokyo is NOT in Europe" → negative facts
@@ -695,14 +692,14 @@ The following fundamental KG structures are supported by the RDF/OWL standard an
 - [ ] TD Pro integration (Liquid-KAN, hypernetworks, NCA)
 - [ ] Graph kernel ranking (WL kernel for multi-path disambiguation)
 
-### Known Parser Limitations (from xfail tests)
+### Known Parser Limitations (from xfail tests — ALL FIXED)
 
-| Limitation | Example | Root Cause | Impact |
+| Limitation | Example | Root Cause | Status |
 |-----------|---------|------------|--------|
-| Compound verb+prep | "feeds into" → (feeds, into, ...) | spaCy splits verb from prep | Relations with verb+prep not extracted |
-| Numbers in entities | "World War 2" → "World" + "War" + "2" | spaCy NUM tokenization | Multi-word entities with numbers broken |
-| Long entity names | "the united states of america" → truncated | Parser span detection | Very long entities not captured |
-| Multiple clauses | "X and Y are Z" → only X | No clause segmentation | Compound sentences produce 1 triple |
+| Compound verb+prep | "feeds into" → (feeds, into, ...) | spaCy misparses verb as NOUN | ✅ Fixed: det-as-subject pattern |
+| Numbers in entities | "World War 2" → "World War" | spaCy NUM tokenization | ✅ Fixed: nummod children included |
+| Long entity names | "the united states of america" → truncated | Parser span detection | ✅ Fixed: prep chain walking |
+| Multiple clauses | "X and Y are Z" → only X | No clause segmentation | ✅ Fixed: clause segmenter |
 
 ### Process Notes (2026-07-05)
 
