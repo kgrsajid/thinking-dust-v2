@@ -784,74 +784,44 @@ The following fundamental KG structures are supported by the RDF/OWL standard an
 
 ### TODO Items (Prioritized)
 
-**P0 — Fix now (core blockers):**
-- [x] Coordinated subjects: "Alice and Bob went to Paris" → 2 triples ✅
-- [x] Inverse queries: "What is the capital of France?" → SPARQL inverse ✅
-- [x] SPARQL query layer: pyoxigraph bridge ✅
-- [x] Storage migration: SQLite → pyoxigraph (RDF) ✅
-- [x] **Clause segmentation** — split compound/complex sentences into simple clauses ✅
-  - Verb-based splitting via spaCy dependency tree
-  - Handles coordinated objects, subjects, verbs, relative clauses
-  - Reference: Sahaj Software (2023)
-  - File: `td/perception/clause_segmenter.py`
-- [x] **Relation synonymy** — teach that "in" = "part of" = "contains" ✅
-  - Manual teaching via `RelationSynonymRegistry`
-  - Vector suggestion via spaCy 300d (experimental)
-  - OWL equivalentProperty in SPARQL
-  - Reference: alphaXiv (Dec 2025), MaGiX (EMNLP 2025)
-  - File: `td/kg/relation_synonyms.py`
-- [x] **Coreference resolution** — "Alice went home. She was tired." → resolve pronouns ✅
-  - spaCy two-pipeline approach (en_coreference_web_trf, 490MB model)
-  - Works on spaCy 3.7.5 (downgraded from 3.8, all 585 tests pass)
-  - Resolves: he/she/it/they/him/her/them/its → antecedents
-  - Does NOT resolve: "each", discourse deixis ("this"/"that" referring to clauses)
-  - Reference: spaCy coref blog (Explosion, 2022), GitHub #13111
-- [ ] **Discourse deixis** — "this"/"that" referring to clauses, not entities
-  - "I bought a car. This surprised my wife." → "this" = the event, not the car
-  - Two-stage approach: classify (entity vs discourse) then resolve
-  - For KG extraction: filter out "this"/"that" as subjects of abstract verbs
-  - Reference: Guerra et al., "Resolving Discourse-Deictic Pronouns" (SemEval 2015)
-  - Reference: Webber, "Discourse Deixis" (ACL 1988)
-- [ ] **Temporal ordering from discourse connectives** — "then", "after", "before"
-  - "Alice went to Paris and then invested in stocks" → Event1 BEFORE Event2
-  - Detect temporal connectives between coordinated clauses
-  - Add Allen's `before` relation as temporal ordering triple
-  - Reference: TimeML (Pustejovsky et al., 2003) — temporal annotation standard
-  - Reference: Chambers et al. — unsupervised temporal ordering extraction
-  - Reference: Consistent Discourse-level TRE (EMNLP 2025) — Allen's interval algebra for discourse-level extraction
-  - Reference: ATOMIC-2020 — common sense knowledge with isBefore/isAfter relations
-  - Reference: Allen (1983), "Maintaining Knowledge about Temporal Intervals"
-  - Reference: ChronoSense (arXiv, Jan 2025)
-  - Reference: Event Knowledge Graphs (arXiv, Oct 2023)
-- [ ] **Compound verb+preposition relations** — "feeds into", "depends on" not parsed correctly
-  - Parser splits "feeds" (verb) from "into" (prep) → produces (feeds, into, ...) instead of (entity, feeds_into, entity)
-  - Root cause: spaCy dependency parse treats verb as ROOT, prep as separate
-  - Fix: detect verb+prep patterns in dependency tree, recombine into compound relation
+**P0 — Done (all core blockers resolved):**
+- [x] Coordinated subjects ✅ — clause segmenter (Sahaj Software, 2023)
+- [x] Inverse queries ✅ — SPARQL `SELECT ?s WHERE { ?s capital_of france }`
+- [x] SPARQL query layer ✅ — pyoxigraph (Rust-backed, 18ms @ 10M)
+- [x] Storage migration ✅ — SQLite → pyoxigraph (RDF, disk-persistent)
+- [x] Clause segmentation ✅ — `td/perception/clause_segmenter.py`
+- [x] Relation synonymy ✅ — `td/kg/relation_synonyms.py` + OWL equivalentProperty
+- [x] Coreference resolution ✅ — spaCy two-pipeline (en_coreference_web_trf)
+- [x] Temporal ordering ✅ — `td/perception/temporal_extractor.py` (45 connectives)
+- [x] Compound verb+prep ✅ — "feeds into" → (a, feeds_into, b)
+- [x] Multi-word entities ✅ — "World War 2", "united states of america"
+- [x] Triple deduplication ✅ — `td/perception/relation_canonicalizer.py`
+- [x] Discourse deixis filtering ✅ — "this shows" filtered as non-entity
+- [x] Coreference integration ✅ — `enable_coreference()` opt-in
 
 **P1 — Next:**
-- [x] Multi-word entity extraction — "World War 2", "the united states of america" ✅
-- [x] Compound verb+preposition relations — "feeds into" parsed correctly ✅
-- [x] Triple deduplication via relation canonicalization ✅
-  - Post-extraction canonicalization (Option B from EDC framework)
-  - Reference: Zhang & Soh (2024), "Extract, Define, Canonicalize"
-- [ ] Temporal ordering from discourse connectives ("then", "after", "before")
-- [ ] Attributive literals: "Paris has_population 2.1M" → store numeric values
+- [ ] Attributive literals: "Paris has_population 2.1M" → store numeric values (word2number installed)
 - [ ] Confidence calibration via Conformal Prediction
 - [ ] NL answer formatting (proof trace → proper English)
+- [ ] Temporal extractor → KG event-level integration (store events as first-class entities)
 
 **P2 — Future:**
 - [ ] Negation: "Tokyo is NOT in Europe" → negative facts
 - [ ] Automatic relation property discovery (ILP)
-- [ ] Multilingual support (Universal Dependencies)
+- [ ] Multilingual temporal connective registry (zh, de, fr, es, ja, ko, ru, ar — architecture ready)
 - [ ] TD Pro integration (Liquid-KAN, hypernetworks, NCA)
 - [ ] Graph kernel ranking (WL kernel for multi-path disambiguation)
 
-### Known Parser Limitations (from xfail tests — ALL FIXED)
+### Known Parser Limitations (ALL FIXED)
 
 | Limitation | Example | Root Cause | Status |
 |-----------|---------|------------|--------|
-| Compound verb+prep | "feeds into" → (feeds, into, ...) | spaCy misparses verb as NOUN | ✅ Fixed: det-as-subject pattern |
-| Numbers in entities | "World War 2" → "World War" | spaCy NUM tokenization | ✅ Fixed: nummod children included |
+| Compound verb+prep | "feeds into" → (feeds, into, ...) | spaCy misparses verb as NOUN | ✅ Fixed |
+| Numbers in entities | "World War 2" → "World War" | spaCy NUM tokenization | ✅ Fixed |
+| Long entity names | "united states of america" → truncated | Parser span detection | ✅ Fixed |
+| Multiple clauses | "X and Y are Z" → only X | No clause segmentation | ✅ Fixed |
+| Duplicate triples | went_to vs went | Two extraction paths | ✅ Fixed (canonicalization) |
+| "The Hague" article | stripped "the" | Article stripping too aggressive | ✅ Fixed (2+ word guard) |
 | Long entity names | "the united states of america" → truncated | Parser span detection | ✅ Fixed: prep chain walking |
 | Multiple clauses | "X and Y are Z" → only X | No clause segmentation | ✅ Fixed: clause segmenter |
 

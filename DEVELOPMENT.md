@@ -1392,6 +1392,18 @@ TD v2 (Fast Path — 10-100ms)
 
 ## Roadmap
 
+### ✅ Phase 0: Core Engine (DONE — 2026-07-05)
+- [x] SPARQL query layer via pyoxigraph (18ms @ 10M triples)
+- [x] Storage migration: SQLite → pyoxigraph (RDF, disk-persistent)
+- [x] Clause segmentation: verb-based splitting via spaCy
+- [x] Relation synonymy: teach + auto-detect + OWL equivalentProperty
+- [x] Coreference resolution: spaCy two-pipeline approach
+- [x] Temporal ordering: 45 English connectives, Allen's interval algebra
+- [x] Triple deduplication: post-extraction canonicalization (EDC approach)
+- [x] Compound verb+prep: "feeds into" → (a, feeds_into, b)
+- [x] Multi-word entities: "World War 2", "united states of america"
+- [x] 655 tests, 0 failures, 45 research references
+
 ### Phase 1: TD v2 Public Release (Month 1)
 - Scale synthetic corpus to 100K-1M sentences
 - Build web UI (ChatGPT-style chat interface)
@@ -1412,7 +1424,7 @@ TD v2 (Fast Path — 10-100ms)
 - Structured data (CSV/JSON → triples)
 
 ### Phase 4: Multi-Agent TD (Month 6-12)
-- Specialized agents: TD-geo, TD-code, TD-schedule, TD-science
+- Specialized agents: TD-geo, TD-code, TD-schedule, TD-sience
 - Common HDC language for inter-agent communication
 - Collaborative reasoning across domains
 
