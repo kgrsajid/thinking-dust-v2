@@ -562,6 +562,47 @@ Final: (alice, went_to, paris) — 1 triple
 
 ---
 
+## 5.8 Passive Voice, Negation, and Relative Clause Extraction
+
+TD v2 handles three extraction patterns beyond basic SVO:
+
+### Passive Voice
+
+**Pattern:** "Tableau was acquired by Salesforce" → (Salesforce, acquired, Tableau)
+**Detection:** spaCy `nsubjpass` + `agent` dependency labels
+**Swap logic:** When `nsubjpass` detected AND `agent` (`by`-phrase) present, swap subject and object. Agent becomes logical subject. Agent-less passives ("The ball was thrown") produce no triple.
+
+**Reference:** TEA Nets (arXiv, Apr 2026) — `is_passive` and `passive_approx` flags for SVO extraction. Uses spaCy `nsubjpass` and `agent` dependency labels.
+**Reference:** Analytics Vidhya (2024) — `dep_.find("subjpass")` for passive detection in spaCy
+
+### Negation
+
+**Pattern:** "Tokyo is not in Europe" → (tokyo, NOT_in, europe)
+**Detection:** spaCy `neg` dependency token attached to verb. Prefixes relation with `NOT_`.
+
+### Relative Clause Attachment
+
+**Pattern:** "Paris which is the capital of France is beautiful" → resolves "which" to "Paris"
+**Detection:** spaCy `acl:relcl` dependency. `relcl.head` = antecedent.
+**Resolution:** Relative pronouns (`which`, `who`, `that`) resolved to the noun the clause modifies.
+
+**Reference:** Universal Dependencies — `acl:relcl` dependency label. "The relativizer can be understood as an anaphor whose antecedent is the head of the relative clause."
+**Reference:** de Marneffe et al. (2014), "Universal Stanford Dependencies"
+
+### Known Limitations (xfail)
+
+| Limitation | Example | Root Cause |
+|-----------|---------|------------|
+| Agentless passive | "The ball was thrown" → nothing | No dobj or prep, no agent |
+| Relcl + copular | "Paris which is the capital of France" → (paris, is, the capital) | Copular path doesn't handle relcl subjects |
+
+### Files
+- `td/perception/nl_parser.py` — passive voice + negation in verb extraction
+- `td/perception/clause_segmenter.py` — relative clause antecedent resolution
+- `tests/test_passive_negation_relcl.py` — 9 tests (7 pass, 2 xfail)
+
+---
+
 ## 7. Future Architecture (TD v2.5)
 
 TD v2.5 extends the current four-layer architecture with five additional layers. Each layer addresses a specific limitation of the current system. The core philosophy remains: **small, interpretable, provably correct**.
@@ -1048,6 +1089,8 @@ This table documents every research paper that influences or will influence TD v
 | 47 | "Are Large Language Models Effective Knowledge Graph Constructors?" | 2025 | EMNLP | Hierarchical approach: relational triple extraction, coreference resolution, entity deduplication, source tracing. Coreference-aware prompting. | ✅ Referenced | URL: [https://arxiv.org/abs/2510.11297](https://arxiv.org/abs/2510.11297) |
 | 48 | CEKFA. "A Canonicalization-Enhanced Known Fact-Aware Framework for Open KG Link Prediction." | 2023 | IJCAI | Similarity-driven relation phrase canonicalization. Reduces RP sparsity. | ✅ Referenced | URL: [https://www.ijcai.org/proceedings/2023/259](https://www.ijcai.org/proceedings/2023/259) |
 | 49 | de Marneffe, M.C. et al. "Universal Stanford Dependencies." | 2014 | LREC | UD standard: auxpass, cop, nsubj labels. Language-agnostic. | ✅ Referenced | URL: — |
+| 50 | TEA Nets. "Combining AI and cognitive network science for text analysis." | 2026 | arXiv | Passive voice handling in SVO extraction. nsubjpass + agent dep swap. is_passive and passive_approx flags. | ✅ Implemented | URL: [https://arxiv.org/html/2604.27673](https://arxiv.org/html/2604.27673) |
+| 51 | Analytics Vidhya. "Information Extraction using Python and spaCy." | 2024 | Tutorial | Passive voice detection via dep_.find('subjpass'). subtree_matcher for active/passive. | ✅ Referenced | URL: [https://www.analyticsvidhya.com/blog/2019/09/introduction-information-extraction-python-spacy/](https://www.analyticsvidhya.com/blog/2019/09/introduction-information-extraction-python-spacy/) |
 
 ---
 
