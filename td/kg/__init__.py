@@ -1285,6 +1285,17 @@ class KnowledgeGraph:
         if self._sparql_store is None:
             return False
 
+        # Clear in-memory state before loading
+        self.triples.clear()
+        self._entity_index.clear()
+        self._temporal_index.clear()
+        self.gazetteer.clear()
+        self.relation_properties = dict(
+            (k, v) for k, v in DEFAULT_RELATION_PROPERTIES.items()
+        )
+        self.composition_rules.clear()
+        self._init_default_composition_rules()
+
         # Populate in-memory structures from SPARQL store
         # Query all triples from default graph
         results = self._sparql_store.query_sparql_bindings(
@@ -1360,6 +1371,17 @@ class KnowledgeGraph:
         self._init_sparql_store(sparql_path)
         if self._sparql_store is None:
             return False
+
+        # Clear in-memory state before migration
+        self.triples.clear()
+        self._entity_index.clear()
+        self._temporal_index.clear()
+        self.gazetteer.clear()
+        self.relation_properties = dict(
+            (k, v) for k, v in DEFAULT_RELATION_PROPERTIES.items()
+        )
+        self.composition_rules.clear()
+        self._init_default_composition_rules()
 
         conn = sqlite3.connect(sqlite_path)
         try:
