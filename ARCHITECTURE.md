@@ -816,6 +816,10 @@ The following fundamental KG structures are supported by the RDF/OWL standard an
   - "Alice went to Paris and then invested in stocks" → Event1 BEFORE Event2
   - Detect temporal connectives between coordinated clauses
   - Add Allen's `before` relation as temporal ordering triple
+  - Reference: TimeML (Pustejovsky et al., 2003) — temporal annotation standard
+  - Reference: Chambers et al. — unsupervised temporal ordering extraction
+  - Reference: Consistent Discourse-level TRE (EMNLP 2025) — Allen's interval algebra for discourse-level extraction
+  - Reference: ATOMIC-2020 — common sense knowledge with isBefore/isAfter relations
   - Reference: Allen (1983), "Maintaining Knowledge about Temporal Intervals"
   - Reference: ChronoSense (arXiv, Jan 2025)
   - Reference: Event Knowledge Graphs (arXiv, Oct 2023)
@@ -1018,6 +1022,10 @@ This table documents every research paper that influences or will influence TD v
 | 36 | Khorashadizadeh et al. "Construction and Canonicalization of Economic Knowledge Graphs with LLMs." | 2025 | Springer LNCS | Two-step canonicalization process to ensure consistency and reduce redundancy in OpenIE. | ✅ Referenced | URL: [https://link.springer.com/chapter/10.1007/978-3-031-81221-7_23](https://link.springer.com/chapter/10.1007/978-3-031-81221-7_23) |
 | 37 | Stanford OpenIE. "Open Information Extraction." | 2015 | Stanford NLP | Clause splitting + forward entailment + pattern matching. 3-stage pipeline. Gold standard for OpenIE. | ✅ Referenced (approach) | URL: [https://nlp.stanford.edu/software/openie.html](https://nlp.stanford.edu/software/openie.html) |
 | 38 | Stanford CoreNLP. "Resolving Discourse-Deictic Pronouns." Guerra et al. | 2015 | SemEval | Two-stage approach: classify (entity vs discourse deixis) then resolve. | ✅ Referenced | URL: [https://aclanthology.org/S15-1035.pdf](https://aclanthology.org/S15-1035.pdf) |
+| 39 | Pustejovsky, J. et al. "TimeML: Robust Specification of Event and Temporal Expressions in Text." | 2003 | IWCS-5 | Foundational standard for temporal annotation. Defines temporal connectives as explicit markup. | ✅ Referenced | URL: — |
+| 40 | Chambers, N. et al. "Unsupervised Learning of Temporal Orderings for Events." | — | — | Extracts temporal orderings from text using unsupervised learning. | ✅ Referenced | URL: — |
+| 41 | "Consistent Discourse-level Temporal Relation Extraction." | 2025 | EMNLP Findings | Allen's interval algebra for discourse-level temporal extraction. Self-reflection step for consistency. | ✅ Referenced | URL: [https://aclanthology.org/2025.findings-emnlp.1010.pdf](https://aclanthology.org/2025.findings-emnlp.1010.pdf) |
+| 42 | ATOMIC-2020. "On Symbolic and Neural Commonsense Knowledge Graphs." | 2020 | — | Common sense knowledge with `isBefore` and `isAfter` relations for event ordering. | ✅ Referenced | URL: — |
 
 ---
 

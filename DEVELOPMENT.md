@@ -1654,6 +1654,10 @@ The "then" implies a `before` relation between events:
 
 **Research:**
 - **Allen's Interval Algebra (1983)** — already implemented in TD v2. 13 temporal relations (before, after, meets, overlaps, etc.)
+- **TimeML (Pustejovsky et al., 2003)** — foundational standard for temporal annotation. Defines temporal connectives ("then", "after", "before") as explicit markup. Used in TimeBank corpus.
+- **Chambers et al.** — "Unsupervised learning of temporal orderings of events" — extracts temporal orderings from text using unsupervised learning.
+- **Consistent Discourse-level TRE (EMNLP 2025)** — uses Allen's interval algebra for temporal relation extraction at discourse level. Self-reflection step for consistency.
+- **ATOMIC-2020** — common sense knowledge dataset with `isBefore` and `isAfter` relations for event ordering.
 - **ChronoSense (arXiv, Jan 2025)** — "Exploring Temporal Understanding in LLMs with Time Intervals of Events"
 - **Event Knowledge Graphs (arXiv, Oct 2023)** — "On the Evolution of Knowledge Graphs: A Survey and Perspective". Events as first-class entities with temporal relations.
 
@@ -1668,6 +1672,10 @@ The parser extracts `(alice, went_to, paris)` and `(alice, invested_in, stocks)`
 
 **References:**
 - Allen, J.F. (1983). "Maintaining Knowledge about Temporal Intervals." CACM, 26(11): 832–843.
+- Pustejovsky, J. et al. (2003). "TimeML: Robust Specification of Event and Temporal Expressions in Text." IWCS-5.
+- Chambers, N. et al. "Unsupervised Learning of Temporal Orderings for Events."
+- Consistent Discourse-level TRE (EMNLP 2025). URL: https://aclanthology.org/2025.findings-emnlp.1010.pdf
+- ATOMIC-2020. "ATOMIC 2020: On Symbolic and Neural Commonsense Knowledge Graphs."
 - ChronoSense (arXiv, Jan 2025). "Exploring Temporal Understanding in LLMs with Time Intervals of Events." URL: https://arxiv.org/abs/2501.03040
 - On the Evolution of Knowledge Graphs (arXiv, Oct 2023). Event Knowledge Graphs with temporal entities. URL: https://arxiv.org/abs/2310.04835
 
