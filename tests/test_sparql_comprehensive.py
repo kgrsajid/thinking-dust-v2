@@ -197,7 +197,134 @@ class TestMultiHopTransitive:
         """Entity related to itself."""
         result = geo_td.sparql_store.ask("paris", "paris")
         # Should find via reflexive or direct assertion
-        # (depends on whether we taught paris same_as paris)
+
+
+# ─── Dependency Chains ──────────────────────────────────────────────
+
+class TestDependencyChains:
+    """Test dependency chain patterns: A depends on B depends on C..."""
+
+    def test_3hop_dependency_chain(self, td):
+        """API depends on Database depends on Server."""
+        td.teach_relation("depends_on", "transitive")
+        td.teach("API depends on Database", "API")
+        td.teach("Database depends on Server", "Database")
+
+        result = td.sparql_store.ask("api", "server")
+        assert result.found is True
+
+    def test_5hop_dependency_chain(self, td):
+        """5-hop dependency chain: App → Framework → Runtime → OS → Hardware."""
+        td.teach_relation("depends_on", "transitive")
+        td.teach("App depends on Framework", "App")
+        td.teach("Framework depends on Runtime", "Framework")
+        td.teach("Runtime depends on OS", "Runtime")
+        td.teach("OS depends on Hardware", "OS")
+
+        # All intermediate hops
+        assert td.sparql_store.ask("app", "framework").found is True
+        assert td.sparql_store.ask("app", "runtime").found is True
+        assert td.sparql_store.ask("app", "os").found is True
+        assert td.sparql_store.ask("app", "hardware").found is True
+
+        # Inverse: what depends on OS?
+        dependents = td.sparql_store.inverse_query("depends_on", "os")
+        assert "runtime" in dependents
+
+    def test_6hop_dependency_chain(self, td):
+        """6-hop: Function → Module → Package → Language → Compiler → CPU."""
+        td.teach_relation("depends_on", "transitive")
+        td.teach("Function depends on Module", "Function")
+        td.teach("Module depends on Package", "Module")
+        td.teach("Package depends on Language", "Package")
+        td.teach("Language depends on Compiler", "Language")
+        td.teach("Compiler depends on CPU", "Compiler")
+
+        # Full chain
+        result = td.sparql_store.ask("function", "cpu")
+        assert result.found is True
+
+    def test_7hop_dependency_chain(self, td):
+        """7-hop: Button → UI → Controller → Service → Repository → Database → Disk."""
+        td.teach_relation("depends_on", "transitive")
+        td.teach("Button depends on UI", "Button")
+        td.teach("UI depends on Controller", "UI")
+        td.teach("Controller depends on Service", "Controller")
+        td.teach("Service depends on Repository", "Service")
+        td.teach("Repository depends on Database", "Repository")
+        td.teach("Database depends on Disk", "Database")
+
+        # Full chain
+        result = td.sparql_store.ask("button", "disk")
+        assert result.found is True
+
+        # Partial chains
+        assert td.sparql_store.ask("button", "service").found is True
+        assert td.sparql_store.ask("button", "repository").found is True
+        assert td.sparql_store.ask("controller", "disk").found is True
+
+    def test_10hop_dependency_chain(self, td):
+        """10-hop dependency chain — stress test."""
+        td.teach_relation("depends_on", "transitive")
+        entities = [f"Layer_{i}" for i in range(11)]
+        for i in range(10):
+            td.teach(f"{entities[i]} depends on {entities[i+1]}", entities[i])
+
+        # Full 10-hop chain
+        result = td.sparql_store.ask("layer_0", "layer_10")
+        assert result.found is True
+
+        # Each intermediate hop
+        for end in range(1, 11):
+            r = td.sparql_store.ask("layer_0", f"layer_{end}")
+            assert r.found is True, f"Layer_0 → Layer_{end} should be found"
+
+    def test_branching_dependency(self, td):
+        """Branching: A depends on B AND A depends on C, B depends on D."""
+        td.teach_relation("depends_on", "transitive")
+        td.teach("App depends on Database", "App")
+        td.teach("App depends on Cache", "App")
+        td.teach("Database depends on Disk", "Database")
+        td.teach("Cache depends on Memory", "Cache")
+
+        # Both branches should work
+        assert td.sparql_store.ask("app", "disk").found is True
+        assert td.sparql_store.ask("app", "memory").found is True
+
+        # But disk and memory are not connected
+        assert td.sparql_store.ask("disk", "memory").found is False
+
+    def test_diamond_dependency(self, td):
+        """Diamond: A→B→D AND A→C→D."""
+        td.teach_relation("depends_on", "transitive")
+        td.teach("App depends on Frontend", "App")
+        td.teach("App depends on Backend", "App")
+        td.teach("Frontend depends on API", "Frontend")
+        td.teach("Backend depends on API", "Backend")
+
+        # Both paths should reach API
+        assert td.sparql_store.ask("app", "api").found is True
+
+    def test_mixed_dependency_relations(self, td):
+        """Different dependency types: depends_on, connected_to, leads_to."""
+        td.teach_relation("depends_on", "transitive")
+        td.teach_relation("connected_to", "symmetric")
+        td.teach_relation("leads_to", "transitive")
+
+        td.teach("A depends on B", "A")
+        td.teach("B depends on C", "B")
+        td.teach("C is connected to D", "C")
+        td.teach("D leads to E", "D")
+        td.teach("E leads to F", "E")
+
+        # Transitive: A → C via depends_on
+        assert td.sparql_store.ask("a", "c").found is True
+
+        # Direct: C connected to D (forward direction stored)
+        assert td.sparql_store.ask("c", "d", "connected_to").found is True
+
+        # Transitive: D → F via leads_to
+        assert td.sparql_store.ask("d", "f").found is True
 
 
 # ─── All 7 Question Types ──────────────────────────────────────────
