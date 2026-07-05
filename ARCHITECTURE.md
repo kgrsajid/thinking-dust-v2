@@ -431,6 +431,137 @@ This relation was never seen during training. The system generalizes the transit
 
 ---
 
+## 5.7 Triple Deduplication via Relation Canonicalization
+
+TD v2 runs two extraction paths on the same sentence — clause segmentation and dependency parsing — which can produce duplicate triples with different relation names for the same fact. This section describes the research-backed solution.
+
+### The Problem
+
+```
+Input: "Alice and Bob went to Paris."
+
+Dependency extraction → (alice, went_to, paris), (bob, went_to, paris)
+Clause segmenter      → (alice, went, paris),   (bob, went, paris)
+
+Result: 4 triples instead of 2.
+```
+
+The dependency extraction combines verb + preposition into a compound relation (`went_to`), while the clause segmenter uses the bare verb (`went`). Both are valid, but they represent the same fact with different relation names. Exact `(s, r, o)` deduplication misses this.
+
+### Why Two Extraction Paths?
+
+Both paths are needed for different reasons:
+
+| Path | Strength | Weakness |
+|------|----------|----------|
+| **Clause segmenter** | Handles coordinated subjects/objects: "Alice and Bob went to Paris" → 2 triples | Bare verbs only: "went" not "went_to" |
+| **Dependency extraction** | Handles prepositional semantics: "invested in AI" → "invested_in" | Misses coordination: "Alice and Bob" → 1 triple |
+
+Neither path alone handles all cases. Both are needed.
+
+### Why Option B (Post-Extraction Canonicalization) Over Option A (Constrained Extraction)
+
+**Option A (Constrained extraction — Stanford OpenIE approach):**
+Track which entity pairs were covered by the clause segmenter, skip dependency extraction for those pairs.
+
+**Option B (Post-extraction canonicalization — EDC/UDASTE approach):**
+Run both paths, canonicalize relations, then deduplicate.
+
+| Dimension | Option A | Option B |
+|-----------|----------|----------|
+| **Correctness** | ⚠️ Discards one path's output entirely. Which is "better" depends on context. | ✅ Keeps both paths' best output. |
+| **Information loss** | Yes — loses either clause segmenter's coordination or dependency's prepositional semantics | No — preserves the richer relation |
+| **Simplicity** | Medium — tracking covered pairs, interleaving logic | High — pure function, string in → string out |
+| **Testability** | Good but routing logic is a bug source | Excellent — canonicalization is deterministic |
+| **Research alignment** | Stanford OpenIE (designed for single-path systems) | EDC framework (Zhang & Soh, 2024), UDASTE (2023), KGGen (2025) |
+
+**The key insight:** Stanford OpenIE designs for ONE extraction path per clause. TD v2 has TWO complementary paths for good reason. Option A forces a tradeoff that loses information. Option B keeps both strengths.
+
+**Reference:** Zhang & Soh (2024), "Extract, Define, Canonicalize: An LLM-based Framework for Knowledge Graph Construction." arXiv:2404.03868. Three-phase framework: extract → define → canonicalize.
+
+**Reference:** UDASTE (ScienceDirect, 2023). "Triplet extraction leveraging sentence transformers and dependency parsing." Uses "restrictive triple relation types" to reduce redundancy.
+
+**Reference:** KGGen (arXiv, Feb 2025). "Iterative LM-based clustering to refine the raw graph. Variations in tense, plurality, stemming, or capitalization are normalized."
+
+**Reference:** Relation Canonicalization in Open KGs (ResearchGate, 2022). "Clustering synonymous names and phrases."
+
+### The Canonicalization Rule
+
+The duplicate pattern is always structural — verb + preposition vs bare verb:
+
+```
+dependency: "went_to"     → verb="went", prep="to"
+clause seg: "went"        → verb="went"
+```
+
+The verb root is identical. The preposition is noise for deduplication purposes.
+
+**Rule:** Strip preposition suffix, lemmatize the verb root, use as canonical key.
+
+```python
+PREPOSITION_SUFFIXES = {
+    "_to", "_in", "_at", "_for", "_with", "_from", "_on", "_of",
+    "_into", "_onto", "_about", "_through", "_over", "_under",
+}
+
+def canonicalize_relation(relation: str) -> str:
+    """Strip preposition suffix and lemmatize verb root."""
+    for suffix in PREPOSITION_SUFFIXES:
+        if relation.endswith(suffix):
+            verb_part = relation[:-len(suffix)]
+            return lemmatize_verb(verb_part)  # spaCy lemma
+    return lemmatize_verb(relation)
+```
+
+**Examples:**
+```
+"went_to"      → "go"        (strip "_to", lemmatize "went")
+"invested_in"  → "invest"    (strip "_in", lemmatize "invested")
+"went"         → "go"        (no suffix, lemmatize "went")
+"capital_of"   → "capital_of" (not a verb+prep, keep as-is)
+"in"           → "in"        (not a verb+prep, keep as-is)
+```
+
+### The Pipeline (with Canonicalization)
+
+```
+Sentence
+  ├→ Clause Segmenter → (alice, went, paris)
+  ├→ Dependency Extractor → (alice, went_to, paris)
+  │
+  ▼
+[NEW] Canonicalize all relations
+  │    "went_to" → "go", "went" → "go"
+  ▼
+Deduplicate on (subject, canonical_relation, object)
+  │    Both map to (alice, go, paris) → duplicate detected
+  ▼
+[NEW] Keep the MORE SPECIFIC original relation
+  │    "went_to" > "went" (has preposition = more informative)
+  ▼
+Final: (alice, went_to, paris) — 1 triple
+```
+
+**Specificity heuristic:** Relations with `_` (compound verb+prep) are more specific than bare verbs. When duplicates are found post-canonicalization, keep the richer relation.
+
+### Edge Cases
+
+| Case | Expected | Result |
+|------|----------|--------|
+| "Alice went to Paris and invested in stocks" | 2 triples | ✅ Canonicalizes to (alice, go, paris) + (alice, invest, stocks) |
+| "The company invested in AI and invested in robotics" | 2 triples | ✅ Same relation, different objects — no deduplication |
+| "He turned off the light" vs "He turned off the highway" | 2 triples | ✅ Same canonical relation, different objects |
+| "Paris is the capital of France" | 1 triple | ✅ "capital_of" is not verb+prep, no canonicalization |
+| "Alice is in France" | 1 triple | ✅ "in" is not verb+prep |
+
+### Files
+
+- `td/perception/relation_canonicalizer.py` — standalone module
+- `td/perception/nl_parser.py` — integrated into `extract_triples_spacy()`
+- `tests/test_relation_canonicalizer.py` — unit tests
+
+---
+
 ## 7. Future Architecture (TD v2.5)
 
 TD v2.5 extends the current four-layer architecture with five additional layers. Each layer addresses a specific limitation of the current system. The core philosophy remains: **small, interpretable, provably correct**.
@@ -681,6 +812,13 @@ The following fundamental KG structures are supported by the RDF/OWL standard an
   - For KG extraction: filter out "this"/"that" as subjects of abstract verbs
   - Reference: Guerra et al., "Resolving Discourse-Deictic Pronouns" (SemEval 2015)
   - Reference: Webber, "Discourse Deixis" (ACL 1988)
+- [ ] **Temporal ordering from discourse connectives** — "then", "after", "before"
+  - "Alice went to Paris and then invested in stocks" → Event1 BEFORE Event2
+  - Detect temporal connectives between coordinated clauses
+  - Add Allen's `before` relation as temporal ordering triple
+  - Reference: Allen (1983), "Maintaining Knowledge about Temporal Intervals"
+  - Reference: ChronoSense (arXiv, Jan 2025)
+  - Reference: Event Knowledge Graphs (arXiv, Oct 2023)
 - [ ] **Compound verb+preposition relations** — "feeds into", "depends on" not parsed correctly
   - Parser splits "feeds" (verb) from "into" (prep) → produces (feeds, into, ...) instead of (entity, feeds_into, entity)
   - Root cause: spaCy dependency parse treats verb as ROOT, prep as separate
@@ -688,11 +826,14 @@ The following fundamental KG structures are supported by the RDF/OWL standard an
 
 **P1 — Next:**
 - [x] Multi-word entity extraction — "World War 2", "the united states of america" ✅
-  - Fixed: `_get_chunk_text` includes nummod children and prep chains
-  - Fixed: `_entity_node` strips leading articles
 - [x] Compound verb+preposition relations — "feeds into" parsed correctly ✅
-  - Fixed: detect det-as-subject pattern in noun-based constructions
-  - "A feeds into B" → (a, feeds_into, b)
+- [x] Triple deduplication via relation canonicalization ✅
+  - Post-extraction canonicalization (Option B from EDC framework)
+  - Reference: Zhang & Soh (2024), "Extract, Define, Canonicalize"
+- [ ] Temporal ordering from discourse connectives ("then", "after", "before")
+- [ ] Attributive literals: "Paris has_population 2.1M" → store numeric values
+- [ ] Confidence calibration via Conformal Prediction
+- [ ] NL answer formatting (proof trace → proper English)
 
 **P2 — Future:**
 - [ ] Negation: "Tokyo is NOT in Europe" → negative facts
@@ -871,6 +1012,12 @@ This table documents every research paper that influences or will influence TD v
 | 30 | OntoKG. "Ontology-Oriented Knowledge Graph Construction." | 2026 | arXiv | 94 relation modules, intrinsic-relational routing. Schema-guided extraction. 34M Wikidata entities classified. | ✅ Referenced | URL: [https://arxiv.org/html/2604.02618v1](https://arxiv.org/html/2604.02618v1) |
 | 31 | Trainmarks. "Benchmarking 11 RDF Frameworks." | 2026 | Substack | QLever 2ms, pyoxigraph 18ms, RDFLib 43s at 10M triples. Python-accessible RDF stores compared. | ✅ Referenced | URL: [https://veronahe.substack.com/p/trainmarks-benchmarking-11-rdf-frameworks](https://veronahe.substack.com/p/trainmarks-benchmarking-11-rdf-frameworks) |
 | 32 | Min et al. "Towards Practical GraphRAG: Efficient Knowledge Graph Construction via Dependency Parsing." | 2025 | arXiv | spaCy dependency parsing achieves 94% of LLM-based KG extraction performance at orders of magnitude faster speed. Validates the dependency-parsing-first approach. | ✅ Inspiration | URL: [https://arxiv.org/pdf/2507.03226](https://arxiv.org/pdf/2507.03226) |
+| 33 | Zhang & Soh. "Extract, Define, Canonicalize: An LLM-based Framework for Knowledge Graph Construction." | 2024 | arXiv:2404.03868 | Three-phase framework: extract → define → canonicalize. Post-extraction canonicalization via vector similarity + LLM verification. | ✅ Implemented (rule-based variant) | URL: [https://arxiv.org/abs/2404.03868](https://arxiv.org/abs/2404.03868) |
+| 34 | UDASTE. "Triplet extraction leveraging sentence transformers and dependency parsing." | 2023 | ScienceDirect | "Proliferation of redundant triplets" is the core challenge. Solution: restrictive triple relation types to reduce redundancy. | ✅ Referenced | URL: [https://www.sciencedirect.com/science/article/pii/S2590005623000590](https://www.sciencedirect.com/science/article/pii/S2590005623000590) |
+| 35 | KGGen. "Extracting Knowledge Graphs from Plain Text with Language Models." | 2025 | arXiv:2502.09956 | Iterative LM-based clustering to refine raw graphs. Variations in tense, plurality, stemming normalized. | ✅ Referenced | URL: [https://arxiv.org/abs/2502.09956](https://arxiv.org/abs/2502.09956) |
+| 36 | Khorashadizadeh et al. "Construction and Canonicalization of Economic Knowledge Graphs with LLMs." | 2025 | Springer LNCS | Two-step canonicalization process to ensure consistency and reduce redundancy in OpenIE. | ✅ Referenced | URL: [https://link.springer.com/chapter/10.1007/978-3-031-81221-7_23](https://link.springer.com/chapter/10.1007/978-3-031-81221-7_23) |
+| 37 | Stanford OpenIE. "Open Information Extraction." | 2015 | Stanford NLP | Clause splitting + forward entailment + pattern matching. 3-stage pipeline. Gold standard for OpenIE. | ✅ Referenced (approach) | URL: [https://nlp.stanford.edu/software/openie.html](https://nlp.stanford.edu/software/openie.html) |
+| 38 | Stanford CoreNLP. "Resolving Discourse-Deictic Pronouns." Guerra et al. | 2015 | SemEval | Two-stage approach: classify (entity vs discourse deixis) then resolve. | ✅ Referenced | URL: [https://aclanthology.org/S15-1035.pdf](https://aclanthology.org/S15-1035.pdf) |
 
 ---
 

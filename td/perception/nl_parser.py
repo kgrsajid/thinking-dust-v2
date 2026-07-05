@@ -627,15 +627,21 @@ class GenericNLParser:
                             triples.append((subj_text, rel, obj_text))
                             continue
 
-        # ─── Step 3: Merge with clause segmenter results ──────────
+        # ─── Step 3: Merge clause segmenter results ────────────────
         # Clause segmenter handles coordinated objects/subjects that
         # the dependency-based extraction above may miss.
-        # Deduplicate: both may extract the same simple triples.
         if all_triples:
-            existing = set((s, r, o) for s, r, o in triples)
-            for clause_triple in all_triples:
-                if clause_triple not in existing:
-                    triples.append(clause_triple)
+            triples.extend(all_triples)
+
+        # ─── Step 4: Deduplicate via relation canonicalization ─────
+        # Two extraction paths (clause segmenter + dependency) produce
+        # duplicates with different relation names for the same fact.
+        # Canonicalize relations, deduplicate, keep richer relation.
+        #
+        # Reference: Zhang & Soh (2024), "Extract, Define, Canonicalize"
+        # Reference: UDASTE (ScienceDirect, 2023)
+        from .relation_canonicalizer import deduplicate_triples
+        triples = deduplicate_triples(triples, nlp=self.nlp)
 
         return triples
 

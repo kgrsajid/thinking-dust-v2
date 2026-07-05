@@ -1604,6 +1604,73 @@ The parser treats "of" differently from other prepositions when building entity 
 
 **Reference:** Manning & Schütze (1999), "Foundations of Statistical NLP", Chapter 5: Collocations. Genitive markers vs spatial prepositions.
 
+### Triple Deduplication via Relation Canonicalization (Option B)
+
+**Problem:** Two extraction paths (clause segmenter + dependency extraction) produce duplicate triples with different relation names for the same fact:
+- Dependency: `(alice, went_to, paris)` — verb+prep compound
+- Clause segmenter: `(alice, went, paris)` — bare verb
+
+**Solution:** Post-extraction canonicalization (Option B from EDC framework).
+
+**Why Option B over Option A (constrained extraction):**
+- Option A discards one path's output entirely — loses information
+- Option B keeps both paths' best output, canonicalizes, then deduplicates
+- Option B is a pure function (string in → string out) — trivially testable
+- Stanford OpenIE uses Option A, but it has ONE extraction path. TD v2 has TWO complementary paths for different reasons.
+
+**Implementation:**
+```python
+# td/perception/relation_canonicalizer.py
+PREPOSITION_SUFFIXES = {"_to", "_in", "_at", "_for", "_with", "_from", "_on", ...}
+
+def canonicalize_relation(relation: str) -> str:
+    for suffix in PREPOSITION_SUFFIXES:
+        if relation.endswith(suffix):
+            verb_part = relation[:-len(suffix)]
+            return lemmatize_verb(verb_part)  # spaCy lemma
+    return lemmatize_verb(relation)
+```
+
+**Integration point:** Between extraction and deduplication in `extract_triples_spacy()`.
+
+**Specificity heuristic:** When duplicates found post-canonicalization, keep the more specific relation (`went_to` > `went`).
+
+**References:**
+- Zhang & Soh (2024), "Extract, Define, Canonicalize" — arXiv:2404.03868
+- UDASTE (ScienceDirect, 2023) — "restrictive triple relation types"
+- KGGen (arXiv, Feb 2025) — "variations in tense, plurality, stemming normalized"
+- Stanford OpenIE (2015) — clause splitting + forward entailment pipeline
+
+### Temporal Ordering from Discourse Connectives ("then", "after", "before")
+
+**The Problem:**
+"Alice went to Paris and then invested in stocks" implies temporal ordering (Paris BEFORE stocks). "Alice went to Paris and invested in stocks" does not. Currently TD v2 extracts the same triples from both sentences — the "then" is lost.
+
+**What Should Happen:**
+The "then" implies a `before` relation between events:
+- Event 1: Alice went to Paris
+- Event 2: Alice invested in stocks
+- Temporal: Event 1 BEFORE Event 2
+
+**Research:**
+- **Allen's Interval Algebra (1983)** — already implemented in TD v2. 13 temporal relations (before, after, meets, overlaps, etc.)
+- **ChronoSense (arXiv, Jan 2025)** — "Exploring Temporal Understanding in LLMs with Time Intervals of Events"
+- **Event Knowledge Graphs (arXiv, Oct 2023)** — "On the Evolution of Knowledge Graphs: A Survey and Perspective". Events as first-class entities with temporal relations.
+
+**Current Limitation:**
+The parser extracts `(alice, went_to, paris)` and `(alice, invested_in, stocks)` but does NOT create `(alice_went_to_paris, before, alice_invested_in_stocks)`. The temporal ordering from "then" is not captured.
+
+**TODO:**
+1. Detect discourse temporal connectives: "then", "after", "before", "subsequently", "next"
+2. When found between coordinated clauses, add a temporal ordering triple
+3. Use Allen's `before` relation: Event1 BEFORE Event2
+4. Reference: Allen (1983), "Maintaining Knowledge about Temporal Intervals"
+
+**References:**
+- Allen, J.F. (1983). "Maintaining Knowledge about Temporal Intervals." CACM, 26(11): 832–843.
+- ChronoSense (arXiv, Jan 2025). "Exploring Temporal Understanding in LLMs with Time Intervals of Events." URL: https://arxiv.org/abs/2501.03040
+- On the Evolution of Knowledge Graphs (arXiv, Oct 2023). Event Knowledge Graphs with temporal entities. URL: https://arxiv.org/abs/2310.04835
+
 ### Multi-Hop Open Queries
 
 Open queries follow BFS paths to find answers at any hop count:
