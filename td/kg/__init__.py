@@ -141,26 +141,15 @@ class KnowledgeGraph:
         self._temporal_index: dict[str, tuple[int | None, int | None]] = {}
 
         # Composition rules: (rel1, rel2) → target_relation
-        # OWL Property Chain style: explicit declaration of which relations compose.
-        # If (rel1, rel2) → target, then rel1(X,Y) ∧ rel2(Y,Z) → target(X,Z)
-        # If (rel1, rel2) → None, composition is explicitly INVALID.
-        # If (rel1, rel2) not in dict, fall back to transitivity heuristics.
-        #
-        # References:
-        #   - OWL 2 Web Ontology Language (W3C, 2009) — PropertyChain axiom
-        #   - HolmE (Zheng et al., 2024) — KGE closed under composition
-        #   - Rot-Pro (NeurIPS, 2021) — transitivity by projection
-        #   - GLIDR (arXiv, 2025) — differentiable ILP for graph-structured rules
         self.composition_rules: dict[tuple[str, str], str | None] = {}
-
-        # Pre-seeded composition rules (from OWL best practices)
         self._init_default_composition_rules()
 
         # Gazetteer: learned multi-word entity dictionary
-        # Populated from teach() interactions. Used by query parser to
-        # recognize "United Kingdom" as a single entity in queries.
-        # Reference: Named Entity Recognition (Nadeau & Sekine, 2007)
         self.gazetteer: set[str] = set()
+
+        # SPARQL store (pyoxigraph) — primary storage backend
+        # Initialized lazily on first add_fact or explicit load
+        self._sparql_store = None
 
     def add_fact(self, subject: str, relation: str, obj: str, source: str = "user",
                  proof: str = "", temporal_start: int = None,
@@ -209,6 +198,14 @@ class KnowledgeGraph:
         # Store even if one end is open (None) — used for open-ended comparisons
         if temporal_start is not None:
             self._temporal_index[subject] = (temporal_start, temporal_end)
+
+        # Sync to SPARQL store (primary persistence)
+        if self._sparql_store is not None:
+            self._sparql_store.add_fact(
+                subject, relation, obj,
+                source=source, proof=proof,
+                temporal_start=temporal_start, temporal_end=temporal_end,
+            )
 
         return triple
 
@@ -1133,22 +1130,53 @@ class KnowledgeGraph:
     # ─── SQLite Persistence ──────────────────────────────────────────
 
     def save(self, path: str = None):
-        """Save knowledge graph to SQLite database.
+        """Save knowledge graph to pyoxigraph RDF store (primary persistence).
 
-        Stores triples and relation properties in a queryable SQLite file.
-        Dense vectors (BEAGLE, MHN) remain as separate pickle files.
+        Triples stored as RDF quads with named graphs for provenance.
+        Also exports to SQLite for backward compatibility.
 
         Args:
-            path: Path to .db file. Defaults to data/td_knowledge.db
+            path: Path to store directory OR .db file. Defaults to data/td_store/
         """
         if path is None:
-            path = os.path.join(
+            base_dir = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "data", "td_knowledge.db"
+                "data"
             )
+            store_path = os.path.join(base_dir, "td_store")
+            sqlite_path = os.path.join(base_dir, "td_knowledge.db")
+        else:
+            # Handle .db file paths (backward compat from tests)
+            if path.endswith(".db"):
+                store_path = path.replace(".db", "_store")
+                sqlite_path = path
+            else:
+                store_path = path
+                sqlite_path = path.replace("td_store", "td_knowledge.db")
 
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(store_path, exist_ok=True)
 
+        # Initialize SPARQL store if not already done
+        if self._sparql_store is None:
+            self._init_sparql_store(store_path)
+
+        # Full sync from in-memory list to SPARQL store
+        self._sparql_store.sync_from_kg(self)
+
+        # Flush to disk
+        self._sparql_store.store.flush()
+
+        # Release the store lock (data is persisted)
+        del self._sparql_store
+        import gc; gc.collect()
+        self._sparql_store = None
+
+        # Also export to SQLite for backward compatibility
+        self._save_sqlite(sqlite_path)
+
+    def _save_sqlite(self, path: str):
+        """Export to SQLite for backward compatibility."""
+        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
         conn = sqlite3.connect(path)
         try:
             conn.executescript("""
@@ -1163,139 +1191,218 @@ class KnowledgeGraph:
                     temporal_end INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-
                 CREATE TABLE IF NOT EXISTS relation_properties (
                     relation TEXT PRIMARY KEY,
                     properties TEXT NOT NULL
                 );
-
-
                 CREATE TABLE IF NOT EXISTS composition_rules (
                     rel1 TEXT NOT NULL,
                     rel2 TEXT NOT NULL,
                     target_relation TEXT,
                     PRIMARY KEY (rel1, rel2)
                 );
-
                 CREATE TABLE IF NOT EXISTS gazetteer (
                     entity TEXT PRIMARY KEY
                 );
-
-                CREATE INDEX IF NOT EXISTS idx_triples_subject ON triples(subject);
-                CREATE INDEX IF NOT EXISTS idx_triples_relation ON triples(relation);
-                CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
             """)
-
-            # Migration: add temporal columns if they don't exist (for old DBs)
-            try:
-                conn.execute("ALTER TABLE triples ADD COLUMN temporal_start INTEGER")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            try:
-                conn.execute("ALTER TABLE triples ADD COLUMN temporal_end INTEGER")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-
-            # Clear and re-insert (full sync)
             conn.execute("DELETE FROM triples")
             conn.execute("DELETE FROM relation_properties")
-
             conn.executemany(
                 "INSERT INTO triples (subject, relation, object, source, proof, temporal_start, temporal_end) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [(t.subject, t.relation, t.object, t.source, t.proof,
                   t.temporal_start, t.temporal_end) for t in self.triples]
             )
-
             conn.executemany(
                 "INSERT INTO relation_properties (relation, properties) VALUES (?, ?)",
                 [(rel, ",".join(props)) for rel, props in self.relation_properties.items()]
             )
-
             conn.execute("DELETE FROM composition_rules")
             conn.executemany(
                 "INSERT INTO composition_rules (rel1, rel2, target_relation) VALUES (?, ?, ?)",
                 [(r1, r2, target) for (r1, r2), target in self.composition_rules.items()]
             )
-
             conn.execute("DELETE FROM gazetteer")
             conn.executemany(
                 "INSERT INTO gazetteer (entity) VALUES (?)",
                 [(e,) for e in self.gazetteer]
             )
-
             conn.commit()
         finally:
             conn.close()
 
     def load(self, path: str = None) -> bool:
-        """Load knowledge graph from SQLite database.
+        """Load knowledge graph from pyoxigraph RDF store.
+
+        Falls back to SQLite migration if RDF store doesn't exist.
 
         Args:
-            path: Path to .db file. Defaults to data/td_knowledge.db
+            path: Path to store directory OR .db file. Defaults to data/td_store/
 
         Returns:
-            True if loaded successfully, False if file doesn't exist.
+            True if loaded successfully, False if not found.
         """
         if path is None:
-            path = os.path.join(
+            base_dir = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "data", "td_knowledge.db"
+                "data"
             )
+            store_path = os.path.join(base_dir, "td_store")
+            sqlite_path = os.path.join(base_dir, "td_knowledge.db")
+        else:
+            if path.endswith(".db"):
+                store_path = path.replace(".db", "_store")
+                sqlite_path = path
+            else:
+                store_path = path
+                sqlite_path = path.replace("td_store", "td_knowledge.db")
 
-        if not os.path.exists(path):
+        # Try pyoxigraph store first
+        if os.path.exists(store_path) and os.path.isdir(store_path):
+            return self._load_sparql(store_path)
+
+        # Fall back: try SQLite migration
+        if os.path.exists(sqlite_path):
+            return self._load_sqlite_migrate(sqlite_path, store_path)
+
+        return False
+
+    def _init_sparql_store(self, path: str = None):
+        """Initialize the SPARQL store backend."""
+        # Release any existing store (frees disk locks)
+        if self._sparql_store is not None:
+            del self._sparql_store
+            import gc; gc.collect()
+            self._sparql_store = None
+        try:
+            from ..query import SparqlStore
+            self._sparql_store = SparqlStore(store_path=path)
+        except ImportError:
+            pass  # pyoxigraph not installed
+
+    def _load_sparql(self, path: str) -> bool:
+        """Load from existing pyoxigraph store."""
+        self._init_sparql_store(path)
+        if self._sparql_store is None:
             return False
 
-        conn = sqlite3.connect(path)
+        # Populate in-memory structures from SPARQL store
+        # Query all triples from default graph
+        results = self._sparql_store.query_sparql_bindings(
+            'SELECT ?s ?p ?o WHERE { ?s ?p ?o . FILTER(STRSTARTS(STR(?p), "http://thinking-dust.org/relation/")) }'
+        )
+
+        # Disable SPARQL sync during load (data already in store)
+        old_store = self._sparql_store
+        self._sparql_store = None
+
+        for r in results:
+            subject = r.get('?s', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' ')
+            relation = r.get('?p', '').replace('http://thinking-dust.org/relation/', '')
+            obj = r.get('?o', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' ')
+
+            if subject and relation and obj:
+                # Get metadata if available
+                meta = old_store.get_fact_metadata(subject, relation, obj)
+                source = meta.get('source', 'user') if meta else 'user'
+                proof = meta.get('proof', '') if meta else ''
+                t_start = meta.get('temporal_start') if meta else None
+                t_end = meta.get('temporal_end') if meta else None
+
+                self.add_fact(subject, relation, obj, source=source, proof=proof,
+                             temporal_start=t_start, temporal_end=t_end)
+
+        # Load relation properties from SPARQL store
+        from ..query import _TD_PROPERTY
+        prop_results = old_store.query_sparql_bindings(
+            f'SELECT ?r ?p WHERE {{ ?r <http://thinking-dust.org/vocab/property> ?p }}'
+        )
+        for pr in prop_results:
+            rel_uri = pr.get('?r', '')
+            prop_val = pr.get('?p', '')
+            if rel_uri and prop_val:
+                rel_name = rel_uri.replace('http://thinking-dust.org/relation/', '')
+                if rel_name:
+                    self.relation_properties.setdefault(rel_name, set())
+                    self.relation_properties[rel_name].add(prop_val)
+
+        # Load composition rules from SPARQL store (metadata graph)
+        comp_results = old_store.query_sparql_bindings(
+            'SELECT ?rule ?first ?second ?result WHERE { '
+            'GRAPH <http://thinking-dust.org/graph/metadata> { '
+            '?rule <http://thinking-dust.org/vocab/composition_first> ?first . '
+            '?rule <http://thinking-dust.org/vocab/composition_second> ?second . '
+            'OPTIONAL { ?rule <http://thinking-dust.org/vocab/composition_result> ?result } } }'
+        )
+        for cr in comp_results:
+            first_uri = cr.get('?first', '')
+            second_uri = cr.get('?second', '')
+            result_uri = cr.get('?result', '')
+            if first_uri and second_uri:
+                r1 = first_uri.replace('http://thinking-dust.org/relation/', '')
+                r2 = second_uri.replace('http://thinking-dust.org/relation/', '')
+                target = result_uri.replace('http://thinking-dust.org/relation/', '') if result_uri else None
+                self.composition_rules[(r1, r2)] = target
+
+        # Restore store reference
+        self._sparql_store = old_store
+
+        # Populate gazetteer
+        for t in self.triples:
+            if " " in t.subject:
+                self.gazetteer.add(t.subject)
+            if " " in t.object:
+                self.gazetteer.add(t.object)
+
+        return len(self.triples) > 0
+
+    def _load_sqlite_migrate(self, sqlite_path: str, sparql_path: str) -> bool:
+        """Migrate from SQLite to pyoxigraph. One-time operation."""
+        self._init_sparql_store(sparql_path)
+        if self._sparql_store is None:
+            return False
+
+        conn = sqlite3.connect(sqlite_path)
         try:
-            # Load triples (including temporal fields)
             rows = conn.execute(
                 "SELECT subject, relation, object, source, proof, temporal_start, temporal_end FROM triples"
             ).fetchall()
-
             for row in rows:
                 subject, relation, obj, source, proof, t_start, t_end = row
                 self.add_fact(subject, relation, obj, source=source, proof=proof,
                              temporal_start=t_start, temporal_end=t_end)
 
-            # Load relation properties
-            prop_rows = conn.execute(
-                "SELECT relation, properties FROM relation_properties"
-            ).fetchall()
-
+            prop_rows = conn.execute("SELECT relation, properties FROM relation_properties").fetchall()
             for relation, props_str in prop_rows:
                 props = props_str.split(",") if props_str else []
                 if props:
                     self.set_relation_property(relation, *props)
 
-            # Load composition rules
             try:
-                comp_rows = conn.execute(
-                    "SELECT rel1, rel2, target_relation FROM composition_rules"
-                ).fetchall()
+                comp_rows = conn.execute("SELECT rel1, rel2, target_relation FROM composition_rules").fetchall()
                 for rel1, rel2, target in comp_rows:
                     self.composition_rules[(rel1, rel2)] = target if target else None
             except sqlite3.OperationalError:
-                pass  # Old DB without composition_rules table
+                pass
 
-            # Load gazetteer
             try:
                 gaz_rows = conn.execute("SELECT entity FROM gazetteer").fetchall()
                 for (entity,) in gaz_rows:
                     self.gazetteer.add(entity)
             except sqlite3.OperationalError:
-                pass  # Old DB without gazetteer table
+                pass
 
-            # Also populate gazetteer from multi-word entities in triples
             for t in self.triples:
                 if " " in t.subject:
                     self.gazetteer.add(t.subject)
                 if " " in t.object:
                     self.gazetteer.add(t.object)
 
-            conn.close()
+            # Sync to SPARQL store
+            self._sparql_store.sync_from_kg(self)
+            self._sparql_store.store.flush()
 
-            loaded_count = len(rows)
-            return loaded_count > 0
+            conn.close()
+            return len(rows) > 0
         except Exception:
             conn.close()
             return False

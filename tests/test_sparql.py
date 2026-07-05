@@ -84,8 +84,9 @@ class TestUriMapping:
         assert uri.value == f"{TD_ENT}south_korea"
 
     def test_entity_hyphen(self):
+        """Hyphens are preserved in URIs (only spaces → underscores)."""
         uri = entity_to_uri("world-war-2")
-        assert uri.value == f"{TD_ENT}world_war_2"
+        assert uri.value == f"{TD_ENT}world-war-2"
 
     def test_entity_case_insensitive(self):
         uri = entity_to_uri("Paris")

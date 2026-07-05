@@ -106,7 +106,7 @@ def entity_to_uri(entity: str) -> NamedNode:
     'paris' → NamedNode('http://thinking-dust.org/entity/paris')
     'south korea' → NamedNode('http://thinking-dust.org/entity/south_korea')
     """
-    normalized = entity.lower().strip().replace(" ", "_").replace("-", "_")
+    normalized = entity.lower().strip().replace(" ", "_")
     return NamedNode(f"{TD_ENT}{normalized}")
 
 
