@@ -56,6 +56,10 @@ TEMPORAL_CONNECTIVES = {
     "earlier": "after",
     "beforehand": "after",
     "prior": "after",
+
+    # Conditional-temporal hybrids (handled specially)
+    "once": "before",       # "Once X, Y" → X BEFORE Y
+    "since": "after",       # "Since X, Y" → X BEFORE Y (backward-looking)
 }
 
 # Conditional "then" — NOT temporal. Distinguished by context.
@@ -113,11 +117,20 @@ def extract_temporal_orderings(doc) -> list[TemporalOrdering]:
             if word not in TEMPORAL_CONNECTIVES:
                 continue
 
-            # Skip conditional "then"
+            # Skip conditional "then" — only check tokens BEFORE "then"
+            # "If it rains, Alice left and then Bob arrived" → "then" is temporal
+            # "If you go then you should visit" → "then" is conditional
             if word == "then":
-                is_conditional = any(t.text.lower() in CONDITIONAL_MARKERS for t in tokens)
+                tokens_before = tokens[:i]
+                is_conditional = any(t.text.lower() in CONDITIONAL_MARKERS for t in tokens_before)
                 if is_conditional:
-                    continue
+                    # Check if the conditional clause is complete
+                    # (has its own verb). If "then" is far from "if", it's temporal.
+                    conditional_token = next(
+                        (t for t in tokens_before if t.text.lower() in CONDITIONAL_MARKERS), None
+                    )
+                    if conditional_token and conditional_token.head == token.head:
+                        continue  # Same clause → conditional
 
             # Pattern 1: "then" as advmod of a verb (coordinated verbs)
             # "Alice went to Paris and then invested" → went BEFORE invested
@@ -205,18 +218,6 @@ def extract_temporal_orderings(doc) -> list[TemporalOrdering]:
                                 ))
 
     return orderings
-
-
-def _find_parent_verb(token) -> Optional[object]:
-    """Walk up the dependency tree to find the parent verb."""
-    current = token.head
-    for _ in range(5):  # max 5 hops
-        if current.pos_ in ("VERB", "AUX"):
-            return current
-        if current == current.head:
-            break
-        current = current.head
-    return None
 
 
 def _find_conjunct_verb(verb) -> Optional[object]:
