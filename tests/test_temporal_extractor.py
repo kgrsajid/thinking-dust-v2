@@ -30,8 +30,10 @@ from td.perception.temporal_extractor import (
     TemporalOrdering,
 )
 from td.perception.temporal_connectives import (
-    ENGLISH_CONNECTIVES as TEMPORAL_CONNECTIVES,
-    ENGLISH_CONDITIONAL_MARKERS as CONDITIONAL_MARKERS,
+    get_connectives,
+    get_conditional_markers,
+    AllenRelation,
+    SemanticType,
 )
 
 

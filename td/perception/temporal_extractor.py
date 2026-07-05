@@ -29,6 +29,8 @@ from .temporal_connectives import (
     get_conditional_markers,
     get_time_nouns,
     TemporalConnective,
+    AllenRelation,
+    SemanticType,
 )
 
 
@@ -76,8 +78,8 @@ def extract_temporal_orderings(doc, lang: str = "en") -> list[TemporalOrdering]:
 
             conn = connectives[word]
 
-            # Skip conditional "then" — only check tokens BEFORE "then"
-            if word == "then":
+            # Skip conditional context (e.g., "then" in "If X then Y")
+            if conn.is_conditional_context:
                 tokens_before = tokens[:i]
                 is_conditional = any(t.text.lower() in conditional_markers for t in tokens_before)
                 if is_conditional:
@@ -89,7 +91,7 @@ def extract_temporal_orderings(doc, lang: str = "en") -> list[TemporalOrdering]:
 
             # Pattern 1: Sequential connectives as advmod of verb
             # "Alice went to Paris and then invested" → went BEFORE invested
-            if conn.semantic_type == "sequential" and conn.dep_pattern == "advmod":
+            if conn.semantic_type == SemanticType.SEQUENTIAL and conn.dep_pattern == "advmod":
                 if token.dep_ == "advmod" and token.head.pos_ in ("VERB", "AUX"):
                     head_verb = token.head
                     other_verb = _find_conjunct_verb(head_verb)
@@ -117,7 +119,7 @@ def extract_temporal_orderings(doc, lang: str = "en") -> list[TemporalOrdering]:
                     event_main = _describe_verb_event(main_verb, doc)
                     if event_sub and event_main:
                         # Determine event ordering based on connective semantics
-                        if conn.allen_relation in ("after",):
+                        if conn.allen_relation == AllenRelation.AFTER:
                             # "After X, Y" → X BEFORE Y
                             orderings.append(TemporalOrdering(
                                 event1_description=event_sub,
@@ -126,7 +128,7 @@ def extract_temporal_orderings(doc, lang: str = "en") -> list[TemporalOrdering]:
                                 connective=word,
                                 semantic_type=conn.semantic_type,
                             ))
-                        elif conn.allen_relation in ("before",):
+                        elif conn.allen_relation == AllenRelation.BEFORE:
                             # "Before X, Y" → Y BEFORE X
                             orderings.append(TemporalOrdering(
                                 event1_description=event_main,
@@ -135,7 +137,7 @@ def extract_temporal_orderings(doc, lang: str = "en") -> list[TemporalOrdering]:
                                 connective=word,
                                 semantic_type=conn.semantic_type,
                             ))
-                        elif conn.allen_relation in ("overlaps", "during", "equals"):
+                        elif conn.allen_relation in (AllenRelation.OVERLAPS, AllenRelation.DURING, AllenRelation.EQUALS):
                             # "While X, Y" → X OVERLAPS Y
                             orderings.append(TemporalOrdering(
                                 event1_description=event_sub,
@@ -144,7 +146,7 @@ def extract_temporal_orderings(doc, lang: str = "en") -> list[TemporalOrdering]:
                                 connective=word,
                                 semantic_type=conn.semantic_type,
                             ))
-                        elif conn.allen_relation in ("meets",):
+                        elif conn.allen_relation == AllenRelation.MEETS:
                             # "Until X, Y" → Y MEETS X
                             orderings.append(TemporalOrdering(
                                 event1_description=event_main,
@@ -184,7 +186,7 @@ def extract_temporal_orderings(doc, lang: str = "en") -> list[TemporalOrdering]:
                         event_main = _describe_verb_event(main_verb, doc)
                         event_sub = _get_subtree_text(pobj)
                         if event_main and event_sub:
-                            if conn.allen_relation == "before":
+                            if conn.allen_relation == AllenRelation.BEFORE:
                                 orderings.append(TemporalOrdering(
                                     event1_description=event_main,
                                     event2_description=event_sub,
@@ -192,7 +194,7 @@ def extract_temporal_orderings(doc, lang: str = "en") -> list[TemporalOrdering]:
                                     connective=word,
                                     semantic_type=conn.semantic_type,
                                 ))
-                            elif conn.allen_relation in ("during", "overlaps"):
+                            elif conn.allen_relation in (AllenRelation.DURING, AllenRelation.OVERLAPS):
                                 orderings.append(TemporalOrdering(
                                     event1_description=event_main,
                                     event2_description=event_sub,
