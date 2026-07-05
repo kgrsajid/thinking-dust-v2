@@ -32,8 +32,10 @@ from typing import Optional
 # "subsequently" → BEFORE
 # "first...then" → BEFORE
 TEMPORAL_CONNECTIVES = {
-    # connective: (Allen relation, which event is first)
-    # "before" means: the clause WITHOUT the connective happened BEFORE the clause WITH it
+    # connective: Allen relation mapping
+    # "before" means: event1 happened before event2
+
+    # Forward-looking (point to future events in timeline)
     "then": "before",
     "subsequently": "before",
     "afterwards": "before",
@@ -43,14 +45,35 @@ TEMPORAL_CONNECTIVES = {
     "first": "before",
     "finally": "before",
     "subsequent": "before",
+    "later": "before",
+    "soon": "before",
+    "eventually": "before",
+    "thereafter": "before",
+    "henceforth": "before",
+
+    # Backward-looking (point to past events in timeline)
     "previously": "after",
     "earlier": "after",
-    "later": "before",
+    "beforehand": "after",
+    "prior": "after",
 }
 
 # Conditional "then" — NOT temporal. Distinguished by context.
 # "If X then Y" — "then" is conditional, not temporal.
 CONDITIONAL_MARKERS = {"if", "when", "whenever", "unless", "provided"}
+
+# Time nouns — "before noon" is a time reference, not event ordering.
+TIME_NOUNS = frozenset({
+    "noon", "midnight", "dawn", "dusk", "sunrise", "sunset",
+    "morning", "afternoon", "evening", "night",
+    "today", "tomorrow", "yesterday",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+    "year", "month", "week", "day", "hour", "minute", "second",
+    "years", "months", "weeks", "days", "hours", "minutes", "seconds",
+    "noon", "midnight", "christmas", "easter",
+})
 
 
 @dataclass
@@ -145,6 +168,7 @@ def extract_temporal_orderings(doc) -> list[TemporalOrdering]:
 
             # Pattern 3: "before/after" as preposition (prep)
             # "Alice went to Paris before investing" → went BEFORE investing
+            # BUT: "I arrived before noon" → time reference, NOT event ordering
             elif word in ("before", "after") and token.dep_ == "prep":
                 main_verb = token.head
                 if main_verb.pos_ in ("VERB", "AUX"):
@@ -155,6 +179,13 @@ def extract_temporal_orderings(doc) -> list[TemporalOrdering]:
                             pobj = child
                             break
                     if pobj:
+                        # Skip time expressions: "before noon", "after midnight"
+                        if pobj.text.lower() in TIME_NOUNS:
+                            continue
+                        # Skip numeric time: "before 5pm", "after 2020"
+                        if pobj.pos_ in ("NUM",) or pobj.like_num:
+                            continue
+
                         event_main = _describe_verb_event(main_verb, doc)
                         event_sub = _get_subtree_text(pobj)
                         if event_main and event_sub:
