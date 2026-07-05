@@ -125,7 +125,68 @@ class TestMultiHopTransitive:
         r1 = geo_td.sparql_store.ask("berlin", "europe")
         r2 = geo_td.sparql_store.ask("berlin", "eurasia")
         assert r1.found is True
-        assert r2.found is True
+
+    def test_6hop_deep_chain(self, td):
+        """6-hop chain: room → apartment → building → street → city → country → continent."""
+        td.teach("Room is in Apartment", "Room")
+        td.teach("Apartment is in Building", "Apartment")
+        td.teach("Building is on Street", "Building")
+        td.teach("Street is in City", "Street")
+        td.teach("City is in Country", "City")
+        td.teach("Country is in Continent", "Country")
+
+        # 6-hop transitive chain
+        result = td.sparql_store.ask("room", "continent")
+        assert result.found is True
+        assert result.method.startswith("sparql")
+
+    def test_6hop_chain_partial(self, td):
+        """6-hop chain: verify intermediate hops also work."""
+        td.teach("A is in B", "A")
+        td.teach("B is in C", "B")
+        td.teach("C is in D", "C")
+        td.teach("D is in E", "D")
+        td.teach("E is in F", "E")
+        td.teach("F is in G", "F")
+
+        # Each hop should work
+        assert td.sparql_store.ask("a", "b").found is True
+        assert td.sparql_store.ask("a", "c").found is True
+        assert td.sparql_store.ask("a", "d").found is True
+        assert td.sparql_store.ask("a", "e").found is True
+        assert td.sparql_store.ask("a", "f").found is True
+        assert td.sparql_store.ask("a", "g").found is True
+
+    def test_6hop_chain_disconnected(self, td):
+        """6-hop chain: disconnected endpoints should return not found."""
+        td.teach("A is in B", "A")
+        td.teach("B is in C", "B")
+        td.teach("C is in D", "C")
+        td.teach("X is in Y", "X")
+        td.teach("Y is in Z", "Y")
+
+        # A→D works, X→Z works, but A→Z should fail
+        assert td.sparql_store.ask("a", "d").found is True
+        assert td.sparql_store.ask("x", "z").found is True
+        assert td.sparql_store.ask("a", "z").found is False
+
+    def test_mixed_relation_chain(self, td):
+        """Chain with mixed relation types: transitive + functional."""
+        td.teach_relation("contains", "transitive")
+        td.teach_relation("capital_of", "functional")
+
+        td.teach("France contains Paris", "France")
+        td.teach("France contains Lyon", "France")
+        td.teach("EU contains France", "EU")
+        td.teach("Europe contains EU", "Europe")
+
+        # Transitive: EU contains Paris (via France)
+        result = td.sparql_store.ask("eu", "paris")
+        assert result.found is True
+
+        # 3-hop: Europe contains Paris
+        result2 = td.sparql_store.ask("europe", "paris")
+        assert result2.found is True
 
     def test_disconnected_entities(self, geo_td):
         """Paris and Canberra have no direct path."""

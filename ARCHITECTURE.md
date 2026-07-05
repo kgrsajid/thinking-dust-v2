@@ -538,19 +538,31 @@ The following fundamental KG structures are supported by the RDF/OWL standard an
 
 ### TODO Items (Prioritized)
 
-**P0 — Fix now:**
-- [x] Coordinated subjects: "Alice and Bob went to Paris" → 2 triples
-- [x] Coordinated subjects: "France, Germany and Italy are in Europe" → 3 triples
+**P0 — Fix now (core blockers):**
+- [x] Coordinated subjects: "Alice and Bob went to Paris" → 2 triples ✅
 - [x] Inverse queries: "What is the capital of France?" → SPARQL inverse ✅
 - [x] SPARQL query layer: pyoxigraph bridge ✅
 - [x] Storage migration: SQLite → pyoxigraph (RDF) ✅
-- [ ] Clause segmentation: split compound sentences on "and", "but", "or" (#1 blocker)
-- [ ] Coreference resolution: "Alice went home. She was tired." → replace pronouns
+- [ ] **Clause segmentation** — split compound/complex sentences into simple clauses (#1 blocker)
+  - "X depends on Y which depends on Z" → only 1 triple (needs 2)
+  - "Paris is X and France is Y" → only 1st clause
+  - Reference: Sahaj Software (2023) — verb-based sentence splitting via spaCy
+  - Reference: DisCoDisCo (Hu et al., 2023) — 91.3 F1 clause segmentation
+- [ ] **Coreference resolution** — "Alice went home. She was tired." → resolve pronouns
+  - NOTE: coreferee is DEPRECATED. spaCy built-in needs 3.4 (incompatible with 3.8)
+  - Practical: rule-based recency + type constraints (no external dep)
+- [ ] **Compound verb+preposition relations** — "feeds into", "depends on" not parsed correctly
+  - Parser splits "feeds" (verb) from "into" (prep) → produces (feeds, into, ...) instead of (entity, feeds_into, entity)
+  - Root cause: spaCy dependency parse treats verb as ROOT, prep as separate
+  - Fix: detect verb+prep patterns in dependency tree, recombine into compound relation
 
 **P1 — Next:**
+- [ ] Multi-word entity extraction — "World War 2", "the united states of america" unreliable
+  - spaCy treats numbers as separate NUM tokens
+  - Long phrases truncated by parser
+  - Gazetteer helps but isn't bulletproof
 - [ ] Attributive literals: "Paris has_population 2.1M" → store numeric values (word2number installed)
 - [ ] Clausal complements (xcomp): "considers different ways to describe processes" → capture xcomp
-- [ ] Compound noun coordination: "data structures" should be one entity, not "data" alone
 - [ ] Causal chains: "Rain causes Flood causes Damage" → transitive causal relation
 - [ ] Confidence calibration via Conformal Prediction (using chat_flare feedback)
 - [ ] NL answer formatting (proof trace → proper English)
@@ -561,6 +573,15 @@ The following fundamental KG structures are supported by the RDF/OWL standard an
 - [ ] Multilingual support (Universal Dependencies)
 - [ ] TD Pro integration (Liquid-KAN, hypernetworks, NCA)
 - [ ] Graph kernel ranking (WL kernel for multi-path disambiguation)
+
+### Known Parser Limitations (from xfail tests)
+
+| Limitation | Example | Root Cause | Impact |
+|-----------|---------|------------|--------|
+| Compound verb+prep | "feeds into" → (feeds, into, ...) | spaCy splits verb from prep | Relations with verb+prep not extracted |
+| Numbers in entities | "World War 2" → "World" + "War" + "2" | spaCy NUM tokenization | Multi-word entities with numbers broken |
+| Long entity names | "the united states of america" → truncated | Parser span detection | Very long entities not captured |
+| Multiple clauses | "X and Y are Z" → only X | No clause segmentation | Compound sentences produce 1 triple |
 
 ### Process Notes (2026-07-05)
 
