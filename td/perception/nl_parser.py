@@ -741,12 +741,28 @@ class GenericNLParser:
                     if child.dep_ == "nummod" and child.text.lower() not in words:
                         words.append(child.text.lower())
                 # Walk prep chains (e.g., "united states of america")
+                # "of" is entity-internal (genitive), always include
+                # Other preps are relations, only include when pobj has compounds
                 for child in token.children:
                     if child.dep_ == "prep":
                         for gc in child.children:
                             if gc.dep_ == "pobj":
-                                prep_phrase = f"{child.text.lower()} {gc.text.lower()}"
-                                words.append(prep_phrase)
+                                if child.text.lower() == "of":
+                                    # "of" is entity-internal, always include
+                                    prep_phrase = f"of {gc.text.lower()}"
+                                    for ggc in gc.children:
+                                        if ggc.dep_ in ("compound", "nummod") and ggc.text.lower() not in prep_phrase:
+                                            prep_phrase = f"{ggc.text.lower()} {prep_phrase}"
+                                    words.append(prep_phrase)
+                                else:
+                                    # Other preps: only include when pobj has compounds
+                                    pobj_compounds = [c for c in gc.children if c.dep_ in ("compound", "nummod")]
+                                    if pobj_compounds:
+                                        prep_phrase = f"{child.text.lower()} {gc.text.lower()}"
+                                        for ggc in gc.children:
+                                            if ggc.dep_ in ("compound", "nummod") and ggc.text.lower() not in prep_phrase:
+                                                prep_phrase = f"{ggc.text.lower()} {prep_phrase}"
+                                        words.append(prep_phrase)
                 return " ".join(words) if words else token_chunk.text.lower()
 
             # Fallback: compound + token
