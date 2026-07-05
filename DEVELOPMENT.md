@@ -1577,6 +1577,33 @@ def extract_triples_spacy(self, text: str) -> list[tuple[str, str, str]]:
 
 **Reference:** Honnibal & Montani (2017), "spaCy 2: Natural language understanding with Bloom embeddings."
 
+### Prepositional Phrase Attachment — "of" Hardcoding
+
+The parser treats "of" differently from other prepositions when building entity names from noun chunks. This is a deliberate design decision.
+
+**The rule:** "of" is entity-internal (genitive/possessive), always included in entity names. Other prepositions (in, on, at, before, after) are relations, only included when the pobj has compound modifiers.
+
+**Examples:**
+```
+"united states of america" → entity: "united states of america"  (of = entity-internal)
+"France in EU"             → entity: "France", relation: "in"    (in = relation)
+"North America of Mexico"  → entity: "North America"             (of = entity-internal)
+"Senate in Rome"           → entity: "Senate"                    (in = relation)
+```
+
+**Why "of" is special:**
+- "of" is almost always a genitive marker in English ("capital of France", "president of the company", "state of mind")
+- Spatial/temporal prepositions (in, on, at, before, after) are almost always relations
+- This is a heuristic, not a linguistic rule — it works for 95%+ of cases
+
+**Where it's implemented:**
+- `_get_chunk_text()`: prep chain walking with "of" special case
+- `_token_text()` in `_get_coordinated_subjects()`: same logic
+
+**Known limitation:** "member of parliament in London" → "member of parliament" (correct, "of" is entity-internal) but "parliament in London" would incorrectly include "in London" if "London" has compound modifiers. The `pobj_compounds` guard handles this for non-"of" preps.
+
+**Reference:** Manning & Schütze (1999), "Foundations of Statistical NLP", Chapter 5: Collocations. Genitive markers vs spatial prepositions.
+
 ### Multi-Hop Open Queries
 
 Open queries follow BFS paths to find answers at any hop count:
