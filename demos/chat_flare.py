@@ -234,10 +234,10 @@ def handle_feedback(td, problem_text, result, user_input):
 
 
 def _get_state_path():
-    """Get the path for the SQLite knowledge database."""
+    """Get the path for the RDF knowledge store."""
     return os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "td_knowledge.db"
+        "data", "td_store"
     )
 
 
