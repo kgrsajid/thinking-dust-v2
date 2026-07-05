@@ -633,7 +633,21 @@ class GenericNLParser:
         if all_triples:
             triples.extend(all_triples)
 
-        # ─── Step 4: Deduplicate via relation canonicalization ─────
+        # ─── Step 4: Extract temporal orderings ─────────────────
+        # Detect discourse connectives ("then", "after", "before")
+        # and create temporal ordering triples.
+        #
+        # Reference: Allen (1983), TimeML (Pustejovsky et al., 2003)
+        from .temporal_extractor import extract_temporal_orderings
+        temporal_orderings = extract_temporal_orderings(doc)
+        for ordering in temporal_orderings:
+            triples.append((
+                ordering.event1_description,
+                ordering.relation,
+                ordering.event2_description,
+            ))
+
+        # ─── Step 5: Deduplicate via relation canonicalization ─────
         # Two extraction paths (clause segmenter + dependency) produce
         # duplicates with different relation names for the same fact.
         # Canonicalize relations, deduplicate, keep richer relation.
