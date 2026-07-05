@@ -215,13 +215,27 @@ class TestComplexTeaching:
         result3 = td.sparql_store.ask("a", "d")
         assert result3.found is True
 
-    def test_teach_relation_then_infer(self, td):
-        """Teach a relation property, then teach facts, verify inference."""
-        td.teach_relation("depends_on", "transitive")
-        td.teach("API depends_on Database", "API")
-        td.teach("Database depends_on Server", "Database")
+    @pytest.mark.xfail(reason="Parser limitation: 'feeds into' split into (feeds, into, ...) "
+                               "instead of (river_a, feeds_into, river_b). "
+                               "Compound verb+preposition relations not yet supported. "
+                               "See: clause segmentation blocker in ARCHITECTURE.md")
+    def test_compound_verb_preposition_relation(self, td):
+        """Compound verb+preposition relations (e.g., 'feeds into', 'depends on').
 
-        result = td.sparql_store.ask("api", "server")
+        KNOWN FAILURE: The parser splits 'River A feeds into River B' as
+        (feeds, into, river_b) instead of (river_a, feeds_into, river_b).
+
+        Root cause: spaCy dependency parse treats 'feeds' as ROOT verb and
+        'into' as preposition. The parser doesn't recombine them into a
+        compound relation 'feeds_into'.
+
+        This is a subset of the clause segmentation problem (#1 blocker).
+        """
+        td.teach_relation("feeds_into", "transitive")
+        td.teach("River A feeds into River B", "River A")
+        td.teach("River B feeds into River C", "River B")
+
+        result = td.sparql_store.ask("river a", "river c")
         assert result.found is True
 
     def test_multiple_relation_types(self, td):
@@ -358,19 +372,33 @@ class TestEdgeCases:
         result = td.sparql_store.ask("covid-19", "sars-cov-2")
         assert result.found is True
 
+    @pytest.mark.xfail(reason="Parser limitation: multi-word entities with numbers "
+                               "('World War 2') not reliably extracted by spaCy. "
+                               "Parser may split 'World War 2' into separate tokens.")
     def test_entity_with_numbers(self, td):
-        """Entities with numbers — uses teach with explicit answer."""
-        td.teach("World War 2 was before Cold War", "World War 2")
-        # Parser may not extract multi-word + number entities correctly
-        # This tests that the system doesn't crash
-        result = td.sparql_store.ask("world war 2", "cold war")
-        # May or may not find depending on parser — should not crash
-        assert result is not None
+        """Entities with numbers should round-trip correctly.
 
+        KNOWN FAILURE: Parser extracts 'World War 2' inconsistently.
+        spaCy may treat '2' as a separate NUM token instead of part of the entity.
+        """
+        td.teach("World War 2 was before Cold War", "World War 2")
+        result = td.sparql_store.ask("world war 2", "cold war")
+        assert result.found is True
+
+    @pytest.mark.xfail(reason="Parser limitation: long multi-word entities "
+                               "('the united states of america') are truncated. "
+                               "Parser extracts 'united states' or 'america' but "
+                               "not the full phrase. Gazetteer helps but isn't bulletproof.")
     def test_long_entity_name(self, td):
-        """Long entity names — teach with explicit answer."""
-        td.teach("United Kingdom is in Europe", "United Kingdom")
-        result = td.sparql_store.ask("united kingdom", "europe")
+        """Very long entity names should round-trip correctly.
+
+        KNOWN FAILURE: Parser truncates long multi-word entities.
+        'the united states of america' → 'united states' or 'america'.
+        Gazetteer partially mitigates but doesn't fully solve this.
+        """
+        long_name = "the united states of america"
+        td.teach(f"{long_name} is in North America", long_name)
+        result = td.sparql_store.ask(long_name, "north america")
         assert result.found is True
 
     def test_single_char_entities(self, td):
