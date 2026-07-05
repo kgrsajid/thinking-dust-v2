@@ -26,6 +26,8 @@ Thinking Dust v2 is a **neuro-symbolic reasoning engine** that derives facts it 
 
 **The core philosophy:** Intelligence is not scale. It is architecture. Teach dust how to think, and it will.
 
+**Proof point:** Min et al. (2025), "Towards Practical GraphRAG" — spaCy dependency parsing achieves **94% of LLM-based KG extraction performance** at orders of magnitude faster speed. TD v2's architecture (dependency parsing + HDC + Z3 + SPARQL) is validated by this result. The 6% gap is where TD Pro (Liquid-KAN + NCA) is designed to operate.
+
 **Slogan:** "Computer intelligence is just human beings teaching dust how to think."
 
 ---
@@ -862,6 +864,7 @@ This table documents every research paper that influences or will influence TD v
 | 29 | MaGiX. "Multi-Granular Adaptive Graph Intelligence." | 2025 | EMNLP Findings | Cross-synonym edges via embedding similarity (τ=0.9). Contrastive learning for semantic alignment. | ✅ Referenced | URL: [https://aclanthology.org/2025.findings-emnlp.279.pdf](https://aclanthology.org/2025.findings-emnlp.279.pdf) |
 | 30 | OntoKG. "Ontology-Oriented Knowledge Graph Construction." | 2026 | arXiv | 94 relation modules, intrinsic-relational routing. Schema-guided extraction. 34M Wikidata entities classified. | ✅ Referenced | URL: [https://arxiv.org/html/2604.02618v1](https://arxiv.org/html/2604.02618v1) |
 | 31 | Trainmarks. "Benchmarking 11 RDF Frameworks." | 2026 | Substack | QLever 2ms, pyoxigraph 18ms, RDFLib 43s at 10M triples. Python-accessible RDF stores compared. | ✅ Referenced | URL: [https://veronahe.substack.com/p/trainmarks-benchmarking-11-rdf-frameworks](https://veronahe.substack.com/p/trainmarks-benchmarking-11-rdf-frameworks) |
+| 32 | Min et al. "Towards Practical GraphRAG: Efficient Knowledge Graph Construction via Dependency Parsing." | 2025 | arXiv | spaCy dependency parsing achieves 94% of LLM-based KG extraction performance at orders of magnitude faster speed. Validates the dependency-parsing-first approach. | ✅ Inspiration | URL: [https://arxiv.org/pdf/2507.03226](https://arxiv.org/pdf/2507.03226) |
 
 ---
 

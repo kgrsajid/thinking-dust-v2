@@ -166,6 +166,7 @@ Built on verified research from the HDC/VSA literature and symbolic AI:
 | Lewis, M. "Role-Filler Binding in VSA" | 2024 | arXiv:2401.06808 | Role-filler structured representations |
 | Fodor et al., "Syntax+Semantics with Transformers" | 2025 | *Computational Linguistics*, 51(1): 1–45 | Neuro-symbolic hybrid motivation |
 | Liu et al., "PathHD: KG Reasoning with HD Vectors" | 2025 | *NeurIPS* | HDC multi-hop KG reasoning |
+| Min et al., "Towards Practical GraphRAG" | 2025 | arXiv | **Proof point:** dependency parsing achieves 94% of LLM-based KG extraction. Validates TD v2's architecture. |
 
 **Future layers:**
 
