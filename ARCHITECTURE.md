@@ -785,19 +785,64 @@ The following fundamental KG structures are supported by the RDF/OWL standard an
 ### TODO Items (Prioritized)
 
 **P0 — Done (all core blockers resolved):**
-- [x] Coordinated subjects ✅ — clause segmenter (Sahaj Software, 2023)
-- [x] Inverse queries ✅ — SPARQL `SELECT ?s WHERE { ?s capital_of france }`
-- [x] SPARQL query layer ✅ — pyoxigraph (Rust-backed, 18ms @ 10M)
-- [x] Storage migration ✅ — SQLite → pyoxigraph (RDF, disk-persistent)
-- [x] Clause segmentation ✅ — `td/perception/clause_segmenter.py`
-- [x] Relation synonymy ✅ — `td/kg/relation_synonyms.py` + OWL equivalentProperty
-- [x] Coreference resolution ✅ — spaCy two-pipeline (en_coreference_web_trf)
-- [x] Temporal ordering ✅ — `td/perception/temporal_extractor.py` (45 connectives)
-- [x] Compound verb+prep ✅ — "feeds into" → (a, feeds_into, b)
-- [x] Multi-word entities ✅ — "World War 2", "united states of america"
-- [x] Triple deduplication ✅ — `td/perception/relation_canonicalizer.py`
-- [x] Discourse deixis filtering ✅ — "this shows" filtered as non-entity
-- [x] Coreference integration ✅ — `enable_coreference()` opt-in
+- [x] Coordinated subjects ✅
+  - Clause segmenter: verb-based splitting via spaCy dependency tree
+  - Handles coordinated objects, subjects, verbs, relative clauses
+  - Reference: Sahaj Software (2023)
+  - File: `td/perception/clause_segmenter.py`
+- [x] Inverse queries ✅
+  - SPARQL: `SELECT ?s WHERE { ?s capital_of france }`
+  - No more heuristic linear scan
+- [x] SPARQL query layer ✅
+  - pyoxigraph (Rust-backed, 18ms @ 10M triples, SPARQL 1.1)
+  - Property paths, FILTER, OPTIONAL, named graphs
+  - File: `td/query/__init__.py`
+- [x] Storage migration ✅
+  - SQLite → pyoxigraph (RDF, disk-persistent)
+  - SQLite retained as backward-compatible export
+- [x] Clause segmentation ✅
+  - Verb-based splitting via spaCy dependency tree
+  - Handles coordinated objects, subjects, verbs, relative clauses
+  - Reference: Sahaj Software (2023)
+  - File: `td/perception/clause_segmenter.py`
+- [x] Relation synonymy ✅
+  - Manual teaching via `RelationSynonymRegistry`
+  - Vector suggestion via spaCy 300d (experimental)
+  - OWL equivalentProperty in SPARQL
+  - Reference: alphaXiv (Dec 2025), MaGiX (EMNLP 2025)
+  - File: `td/kg/relation_synonyms.py`
+- [x] Coreference resolution ✅
+  - spaCy two-pipeline approach (en_coreference_web_trf, 490MB model)
+  - Works on spaCy 3.7.5 (downgraded from 3.8)
+  - Resolves: he/she/it/they/him/her/them/its → antecedents
+  - Does NOT resolve: "each", discourse deixis
+  - Reference: spaCy coref blog (Explosion, 2022), GitHub #13111
+- [x] Temporal ordering from discourse connectives ✅
+  - "Alice went to Paris and then invested in stocks" → Event1 BEFORE Event2
+  - 45 English connectives from TimeML, PDTB 3.0, CICLING
+  - Allen's interval algebra (before, after, overlaps, during, meets)
+  - Multilingual registry architecture (zh, de, fr, es placeholders)
+  - Reference: TimeML (Pustejovsky et al., 2003)
+  - Reference: PDTB 3.0 (Webber et al., 2019)
+  - Reference: Allen (1983), "Maintaining Knowledge about Temporal Intervals"
+  - Files: `td/perception/temporal_connectives.py`, `td/perception/temporal_extractor.py`
+- [x] Compound verb+preposition relations ✅
+  - "feeds into" → (a, feeds_into, b)
+  - Fix: detect det-as-subject pattern in noun-based constructions
+  - File: `td/perception/nl_parser.py`
+- [x] Multi-word entities ✅
+  - "World War 2" → includes nummod children
+  - "united states of america" → walks prep chains
+  - File: `td/perception/nl_parser.py`
+- [x] Triple deduplication ✅
+  - Post-extraction canonicalization (Option B from EDC framework)
+  - Strip preposition suffix, lemmatize verb, keep richer relation
+  - Reference: Zhang & Soh (2024), "Extract, Define, Canonicalize"
+  - File: `td/perception/relation_canonicalizer.py`
+- [x] Discourse deixis filtering ✅
+  - "this shows", "this means" filtered as non-entity
+  - DISCOURSE_DEIXIS_VERBS set for filtering
+  - Reference: Guerra et al. (SemEval 2015), Webber (ACL 1988)
 
 **P1 — Next:**
 - [ ] Attributive literals: "Paris has_population 2.1M" → store numeric values (word2number installed)
