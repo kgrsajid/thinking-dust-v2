@@ -172,6 +172,149 @@ class GenericNLParser:
                 self._nlp = False  # spaCy not available
         return self._nlp if self._nlp is not False else None
 
+    @property
+    def nlp_coref(self):
+        """Lazy-load spaCy coreference resolution pipeline.
+
+        Uses en_coreference_web_trf model (490MB, one-time download).
+        Two-pipeline approach: process text with main nlp first,
+        then resolve coreferences with nlp_coref.
+
+        Reference: spaCy coref blog (Explosion, 2022)
+        Reference: spaCy Discussion #12302
+        """
+        if not hasattr(self, '_nlp_coref'):
+            self._nlp_coref = None
+            try:
+                import spacy
+                self._nlp_coref = spacy.load(
+                    "en_coreference_web_trf", vocab=self.nlp.vocab
+                )
+            except (ImportError, OSError):
+                self._nlp_coref = False
+        return self._nlp_coref if self._nlp_coref is not False else None
+
+    def enable_coreference(self):
+        """Enable coreference resolution in the parser pipeline.
+
+        Loads the en_coreference_web_trf model (490MB, one-time download).
+        After calling this, extract_triples_spacy() will resolve pronouns
+        before extracting triples.
+
+        Note: This downgrades spaCy compatibility (model trained on 3.4).
+        """
+        self._coref_enabled = True
+        # Force load the model
+        _ = self.nlp_coref
+
+    def disable_coreference(self):
+        """Disable coreference resolution (default state)."""
+        self._coref_enabled = False
+
+    # Discourse deixis: abstract verbs that indicate "this"/"that" refers
+    # to a clause/event, not an entity. When "this"/"that" is the subject
+    # of one of these verbs, it's discourse deixis — skip it.
+    # Reference: Guerra et al. (SemEval 2015), Webber (ACL 1988)
+    DISCOURSE_DEIXIS_VERBS = {
+        "show", "prove", "mean", "suggest", "indicate", "demonstrate",
+        "reveal", "confirm", "imply", "require", "involve", "affect",
+        "surprise", "shock", "please", "anger", "upset", "annoy",
+        "result", "lead", "cause", "enable", "allow", "prevent",
+    }
+
+    def resolve_coreferences(self, text: str) -> tuple[str, dict]:
+        """Resolve coreferences in text using spaCy two-pipeline approach.
+
+        Replaces pronouns (he/she/it/they/its/his/her) with their resolved
+        entity names. Filters out discourse deixis ("this"/"that" referring
+        to clauses).
+
+        Args:
+            text: Input text with potential coreferences
+
+        Returns:
+            Tuple of (resolved_text, coref_map) where coref_map maps
+            pronoun positions to resolved entity names.
+        """
+        if self.nlp is None:
+            return text, {}
+
+        # Only load coreference model if explicitly enabled
+        if not hasattr(self, '_coref_enabled'):
+            self._coref_enabled = False
+        if not hasattr(self, '_coref_enabled'):
+            self._coref_enabled = False
+        if not self._coref_enabled:
+            return text, {}
+
+        if self.nlp_coref is None:
+            return text, {}
+
+        doc = self.nlp(text)
+
+        doc = self.nlp(text)
+        doc = self.nlp_coref(doc)
+
+        # Build pronoun → entity map from coreference clusters
+        pronoun_map = {}  # token_idx → entity_name
+        entity_pronouns = {"he", "she", "it", "they", "him", "her",
+                           "them", "his", "its", "their", "theirs"}
+
+        for key, spans in doc.spans.items():
+            if not key.startswith("coref_clusters"):
+                continue
+
+            # Find the entity mention (first non-pronoun span)
+            entity_span = None
+            pronoun_spans = []
+            for span in spans:
+                span_text = span.text.lower().strip()
+                if span_text not in entity_pronouns:
+                    entity_span = span
+                else:
+                    pronoun_spans.append(span)
+
+            if entity_span is None:
+                continue
+
+            entity_name = entity_span.text.lower().strip()
+            # Strip leading articles
+            for article in ("the ", "a ", "an "):
+                if entity_name.startswith(article):
+                    remainder = entity_name[len(article):]
+                    if " " in remainder:
+                        entity_name = remainder
+                    break
+
+            # Map each pronoun to the entity
+            for pronoun_span in pronoun_spans:
+                for token in pronoun_span:
+                    pronoun_map[token.i] = entity_name
+
+        # Replace pronouns in text
+        if not pronoun_map:
+            return text, {}
+
+        tokens = list(doc)
+        resolved_tokens = []
+        for i, token in enumerate(tokens):
+            if i in pronoun_map:
+                # Check for discourse deixis: "this"/"that" as subject of abstract verb
+                if token.text.lower() in ("this", "that"):
+                    # Check if it's the subject of an abstract verb
+                    head = token.head
+                    if head.pos_ == "VERB" and head.lemma_ in self.DISCOURSE_DEIXIS_VERBS:
+                        # Discourse deixis — skip this token (don't replace)
+                        resolved_tokens.append(token.text_with_ws)
+                        continue
+
+                resolved_tokens.append(pronoun_map[i] + token.whitespace_)
+            else:
+                resolved_tokens.append(token.text_with_ws)
+
+        resolved_text = "".join(resolved_tokens)
+        return resolved_text, pronoun_map
+
     def register_relation(self, relation: str, example_phrases: str = None):
         """Register a learned relation as a prototype for future parsing.
 
@@ -299,24 +442,11 @@ class GenericNLParser:
     def extract_triples_spacy(self, text: str) -> list[tuple[str, str, str]]:
         """Extract triples using spaCy dependency parsing.
 
-        Replaces all hardcoded regex patterns with dependency tree traversal.
-        Language-agnostic — works for any language spaCy supports.
-
         Pipeline:
-        1. Clause segmentation — split compound/complex sentences
-        2. Dependency parsing — extract SVO from each clause
-        3. Deduplication — merge results
-
-        Handles:
-        - "X is in Y" → (x, in, y)
-        - "X is part of Y" → (x, part_of, y)
-        - "X is the capital of Y" → (x, capital_of, y)
-        - "X is before Y on Z" → (x, before, y) — PP attachment
-        - "X evolved from Y" → (x, evolved_from, y)
-        - "X treats Y" → (x, treats, y)
-        - Coordinated objects: "Games have music, story and visuals" → 3 triples
-        - Coordinated subjects: "Alice and Bob went" → 2 triples
-        - Relative clauses: "Paris which is the capital of France"
+        1. Coreference resolution — replace pronouns with entity names
+        2. Clause segmentation — split compound/complex sentences
+        3. Dependency parsing — extract SVO from each clause
+        4. Deduplication — merge results
 
         Reference: Honnibal & Montani (2017), "spaCy 2"
         Reference: Sahaj Software (2023), "Knowledge graphs from complex text"
@@ -324,7 +454,11 @@ class GenericNLParser:
         if self.nlp is None:
             return []
 
-        doc = self.nlp(text)
+        # ─── Step 0: Coreference resolution ──────────────────────
+        # Replace pronouns (he/she/it/they) with their resolved entities.
+        # Filter out discourse deixis ("this"/"that" referring to clauses).
+        resolved_text, coref_map = self.resolve_coreferences(text)
+        doc = self.nlp(resolved_text)
         all_triples = []
 
         # ─── Step 1: Clause segmentation (only for complex sentences) ──

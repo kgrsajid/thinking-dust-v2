@@ -1090,6 +1090,103 @@ def discover_and_apply(td_instance, threshold: float = 0.9) -> Dict[str, List[st
     return discovered
 ```
 
+### 8.5 Coreference Resolution (spaCy Two-Pipeline Approach)
+
+**Status:** Working (spaCy 3.7.5 + en_coreference_web_trf)
+
+**The problem:** Pronouns ("it", "he", "she", "they", "its", "this") refer to entities mentioned earlier. Without coreference resolution, the parser extracts pronouns as entities instead of resolving them.
+
+```
+Input:  "A video game console is designed for its video games. It runs smoother."
+Without coref: (it, runs, smoother) ← "it" is not an entity
+With coref:    (video game console, runs, smoother) ← resolved
+```
+
+**The solution:** spaCy's two-pipeline approach (official workaround):
+
+```python
+import spacy
+
+# Load main pipeline (for POS, dep, NER)
+nlp = spacy.load("en_core_web_sm")
+
+# Load coreference pipeline (separate model, shared vocab)
+nlp_coref = spacy.load("en_coreference_web_trf", vocab=nlp.vocab)
+
+# Process text through both pipelines
+doc = nlp(text)
+doc = nlp_coref(doc)
+
+# Access coreference clusters
+for cluster_key, spans in doc.spans.items():
+    if cluster_key.startswith("coref_clusters"):
+        print(f"{cluster_key}: {[str(s) for s in spans]}")
+# Output: coref_clusters_1: ['A video game console', 'its', 'it']
+```
+
+**What works:**
+- Pronouns (he/she/it/they/him/her/them/its) → antecedents across sentences
+- Split antecedents: "Alice and Bob... They" → [Alice, Bob]
+- Possessives: "its video games" → "video game console's video games"
+
+**What doesn't work:**
+- "Each" not resolved (split antecedent for coordinated objects)
+- Some cat/mat ambiguity (structural similarity confuses model)
+- "this" as demonstrative pronoun (sometimes resolved, sometimes not)
+
+**Dependencies:**
+```
+spacy-experimental>=0.6.4    # installs with spaCy 3.7.5
+en_coreference_web_trf        # 490MB model, one-time download
+spacy-transformers>=1.4.0     # transformer backend
+```
+
+**Note:** This downgrades spaCy from 3.8 to 3.7.5. All 585 tests pass on 3.7.5. The model is trained on spaCy 3.4 but works on 3.7.5 with version warnings.
+
+**Integration plan:**
+1. Add `resolve_coreferences(text)` method to `GenericNLParser`
+2. Run coreference resolution BEFORE triple extraction
+3. Replace pronouns with resolved entity names in the text
+4. Then run existing extraction pipeline on the resolved text
+
+**Research:**
+- spaCy coref blog: https://explosion.ai/blog/coref
+- spaCy Discussion #11585: End-to-end neural coref in spaCy
+- spaCy Discussion #12302: Combining en_coreference_web_trf with en_core_web_trf
+- GitHub #13111: Pre-trained coref incompatible with spaCy > 3.4
+
+---
+
+### 8.6 Discourse Deixis (the "this"/"that" problem)
+
+**Status:** Not implemented. Research only.
+
+**The problem:** "This" and "that" can refer to either an entity or a discourse segment (clause/event). Coreference resolution handles entity references but NOT discourse deixis.
+
+```
+Entity reference:     "I bought a car. This car is fast." → "this" = car
+Discourse deixis:     "I bought a car. This surprised my wife." → "this" = the event of buying
+```
+
+For KG extraction, discourse deixis is a **noise source** — "this" referring to a clause doesn't produce a valid (subject, relation, object) triple.
+
+**The Two-Stage Approach** (Guerra et al., SemEval 2015):
+1. **Classify:** Is the pronoun entity-referring or discourse-deictic?
+2. **Resolve:** If entity-referring, resolve to antecedent. If discourse-deictic, skip.
+
+**Key features for classification:**
+- Syntactic role: discourse deixis often appears as subject of abstract verbs ("this shows", "this means", "this proves")
+- Previous sentence: discourse deixis refers to whole clauses, not noun phrases
+- Verb type: abstract/cognitive verbs ("surprise", "show", "mean", "prove") → discourse deixis
+
+**For TD v2:** The simplest approach is to filter out "this"/"that" when they appear as subjects of abstract verbs, and treat them as noise. This avoids the complexity of full discourse deixis resolution while preventing false triples.
+
+**Reference:** Guerra, R.D. et al. "Resolving Discourse-Deictic Pronouns: A Two-Stage Approach." SemEval 2015. URL: https://aclanthology.org/S15-1035.pdf
+
+**Reference:** Webber, B.L. "Discourse Deixis: Reference to Discourse Segments." ACL 1988.
+
+**Reference:** Stanford Jurafsky, "Coreference Resolution." Chapter 21. URL: https://web.stanford.edu/~jurafsky/slp3/old_dec21/21.pdf
+
 ---
 
 ## 9. Test Suite Overview

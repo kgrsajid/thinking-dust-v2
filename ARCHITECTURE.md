@@ -669,9 +669,18 @@ The following fundamental KG structures are supported by the RDF/OWL standard an
   - OWL equivalentProperty in SPARQL
   - Reference: alphaXiv (Dec 2025), MaGiX (EMNLP 2025)
   - File: `td/kg/relation_synonyms.py`
-- [ ] **Coreference resolution** — "Alice went home. She was tired." → resolve pronouns
-  - NOTE: coreferee is DEPRECATED. spaCy built-in needs 3.4 (incompatible with 3.8)
-  - Practical: rule-based recency + type constraints (no external dep)
+- [x] **Coreference resolution** — "Alice went home. She was tired." → resolve pronouns ✅
+  - spaCy two-pipeline approach (en_coreference_web_trf, 490MB model)
+  - Works on spaCy 3.7.5 (downgraded from 3.8, all 585 tests pass)
+  - Resolves: he/she/it/they/him/her/them/its → antecedents
+  - Does NOT resolve: "each", discourse deixis ("this"/"that" referring to clauses)
+  - Reference: spaCy coref blog (Explosion, 2022), GitHub #13111
+- [ ] **Discourse deixis** — "this"/"that" referring to clauses, not entities
+  - "I bought a car. This surprised my wife." → "this" = the event, not the car
+  - Two-stage approach: classify (entity vs discourse) then resolve
+  - For KG extraction: filter out "this"/"that" as subjects of abstract verbs
+  - Reference: Guerra et al., "Resolving Discourse-Deictic Pronouns" (SemEval 2015)
+  - Reference: Webber, "Discourse Deixis" (ACL 1988)
 - [ ] **Compound verb+preposition relations** — "feeds into", "depends on" not parsed correctly
   - Parser splits "feeds" (verb) from "into" (prep) → produces (feeds, into, ...) instead of (entity, feeds_into, entity)
   - Root cause: spaCy dependency parse treats verb as ROOT, prep as separate
