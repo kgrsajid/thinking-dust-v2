@@ -1616,6 +1616,29 @@ The parser treats "of" differently from other prepositions when building entity 
 
 **Reference:** Manning & Schütze (1999), "Foundations of Statistical NLP", Chapter 5: Collocations. Genitive markers vs spatial prepositions.
 
+### Passive Voice Extraction
+
+**Pattern:** "France is known for wine" → (wine, known_for, france)
+**Detection:** spaCy `nsubjpass` + `agent` dependency labels
+**Swap logic:** When `nsubjpass` detected AND `agent` (`by`-phrase) present, swap subject and object.
+
+**Reference:** TEA Nets (arXiv, Apr 2026) — `is_passive` and `passive_approx` flags. Uses spaCy `nsubjpass` and `agent` dependency labels.
+**Reference:** Analytics Vidhya (2024) — `dep_.find("subjpass")` for passive detection in spaCy.
+
+### Negation Detection
+
+**Pattern:** "Tokyo is not in Europe" → (tokyo, NOT_in, europe)
+**Detection:** spaCy `neg` dependency token attached to verb. Prefixes relation with `NOT_`.
+
+### Relative Clause Attachment
+
+**Pattern:** "Paris which is the capital of France is beautiful" → resolves "which" to "Paris"
+**Detection:** spaCy `acl:relcl` dependency. `relcl.head` = antecedent.
+**Resolution:** Relative pronouns (`which`, `who`, `that`) resolved to the noun the clause modifies.
+
+**Reference:** Universal Dependencies — `acl:relcl` dependency label. "The relativizer can be understood as an anaphor whose antecedent is the head of the relative clause."
+**Reference:** de Marneffe et al. (2014), "Universal Stanford Dependencies"
+
 ### Triple Deduplication via Relation Canonicalization (Option B)
 
 **Problem:** Two extraction paths (clause segmenter + dependency extraction) produce duplicate triples with different relation names for the same fact:
