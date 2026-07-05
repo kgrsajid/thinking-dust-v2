@@ -269,9 +269,122 @@ Pre-seeded defaults (work out of the box):
 
 ---
 
-## 6. What's Proven
+## 5.5 Clause Segmentation (Verb-Based Splitting)
 
-As of the current test suite (99 tests passing):
+TD v2 splits compound/complex sentences into simple clauses before triple extraction. This is critical for real-world text where a single sentence may contain multiple facts.
+
+### Algorithm (Sahaj Software, 2023)
+
+1. **Find all verbs** in the sentence (`ROOT`, `conj`, `relcl`, `advcl`, `xcomp`, `ccomp`)
+2. **For each verb**, find its subject(s) and object(s) via dependency tree
+3. **Walk conj chains** to expand coordinated elements
+4. **Generate one clause** per (subject, verb, object) combination
+
+### Example
+
+```
+INPUT: "Games may have music, a story and visuals – each an artistic
+        creation but which aggregate into a functional whole."
+
+OUTPUT: 5 clauses from 1 sentence:
+  (games, have, music)                    ← coordinated object 1
+  (games, have, a story)                  ← coordinated object 2
+  (games, have, visuals)                  ← coordinated object 3
+  (games, have, an artistic creation)     ← coordinated object 4
+  (which, aggregate, a functional whole)  ← relative clause
+```
+
+### Integration
+
+The clause segmenter runs **before** the dependency-based extraction in `extract_triples_spacy()`. It only activates when coordination is detected (`conj` or `relcl` dependencies). For simple sentences, the dependency extraction runs alone.
+
+```
+extract_triples_spacy(text):
+    if has_coordination:
+        clauses = segment_clauses(doc)    ← clause segmenter
+        for clause in clauses:
+            all_triples.append(clause)
+    triples = dependency_extraction(doc)   ← existing extraction
+    return merge(all_triples, triples)     ← deduplicate
+```
+
+### References
+
+| Paper | Year | Technique |
+|-------|------|-----------|
+| Sahaj Software, "Knowledge graphs from complex text" | 2023 | Verb-based sentence splitting via spaCy dependency tree |
+| Manning & Schütze, "Foundations of Statistical NLP" | 1999 | Coordinated noun phrase extraction (Ch. 5) |
+| spaCy dependency labels | 2017 | Universal Dependencies v2 |
+
+### File
+
+`td/perception/clause_segmenter.py` — standalone module, 200 lines
+
+---
+
+## 5.6 Relation Synonymy (Embedding + Manual Teaching)
+
+TD v2 handles the fact that many natural language expressions map to the same logical relation. "A is in B" = "A is part of B" = "B contains A" = "A is located in B".
+
+### The Problem
+
+There are potentially hundreds of natural language expressions for the same logical relation. This is one of the hardest problems in KG construction.
+
+### Approaches Implemented
+
+| Approach | Method | Status | Reference |
+|----------|--------|--------|-----------|
+| **Manual teaching** | `registry.teach("in", ["part of", "contains"])` | ✅ Production | User-driven |
+| **Vector suggestion** | spaCy 300d word vectors + cosine similarity | ⚠️ Experimental | Honnibal & Montani (2017) |
+| **HDBSCAN clustering** | Cluster relation embeddings | ⚠️ Experimental | alphaXiv (Dec 2025) |
+| **OWL equivalentProperty** | SPARQL standard equivalence | ✅ Implemented | W3C OWL 2 |
+
+### API
+
+```python
+from td.kg.relation_synonyms import RelationSynonymRegistry
+
+registry = RelationSynonymRegistry()
+registry.teach("in", ["part of", "contains", "located in", "belongs to"])
+registry.teach("capital_of", ["has capital", "headquarters of"])
+registry.teach("created_by", ["made by", "built by", "developed by"])
+
+registry.get_canonical("part of")     # → "in"
+registry.are_synonyms("in", "contains")  # → True
+registry.get_synonyms("in")           # → ["part of", "contains", "located in", "belongs to"]
+```
+
+### SPARQL Integration
+
+Synonym groups exported as OWL `equivalentProperty`:
+
+```turtle
+td:in  owl:equivalentProperty  td:part_of .
+td:in  owl:equivalentProperty  td:contains .
+td:in  owl:equivalentProperty  td:located_in .
+```
+
+### Limitations
+
+spaCy word vectors are too coarse for fine-grained relation similarity. Directional relations (north_of, south_of) get 1.0 similarity (wrong). Manual teaching is the reliable path. Auto-detect is experimental/suggestion-only.
+
+### Research
+
+| Paper | Year | Venue | Technique | Relevance |
+|-------|------|-------|-----------|-----------|
+| alphaXiv, "Ontology-Based KG Framework" | 2025 | alphaXiv | HDBSCAN on relation embeddings for synonym normalization | State of the art |
+| MaGiX, "Multi-Granular Adaptive Graph Intelligence" | 2025 | EMNLP Findings | Cross-synonym edges via embedding similarity (τ=0.9) | Graph-based approach |
+| OntoKG, "Ontology-Oriented KG Construction" | 2026 | arXiv | 94 relation modules, intrinsic-relational routing | Schema-guided |
+| W3C OWL 2, "equivalentProperty" | 2009 | W3C Standard | Formal equivalence declaration | Standard |
+| Zhang & Soh, "Extract-Define-Canonicalize" | 2025 | — | LLM-based relation normalization | LLM approach |
+
+### File
+
+`td/kg/relation_synonyms.py` — standalone module, 250 lines
+
+---
+
+As of the current test suite (581 tests passing, 3 xfailed):
 
 ### Transitive Chains (2–6 hops)
 
@@ -543,11 +656,17 @@ The following fundamental KG structures are supported by the RDF/OWL standard an
 - [x] Inverse queries: "What is the capital of France?" → SPARQL inverse ✅
 - [x] SPARQL query layer: pyoxigraph bridge ✅
 - [x] Storage migration: SQLite → pyoxigraph (RDF) ✅
-- [ ] **Clause segmentation** — split compound/complex sentences into simple clauses (#1 blocker)
-  - "X depends on Y which depends on Z" → only 1 triple (needs 2)
-  - "Paris is X and France is Y" → only 1st clause
-  - Reference: Sahaj Software (2023) — verb-based sentence splitting via spaCy
-  - Reference: DisCoDisCo (Hu et al., 2023) — 91.3 F1 clause segmentation
+- [x] **Clause segmentation** — split compound/complex sentences into simple clauses ✅
+  - Verb-based splitting via spaCy dependency tree
+  - Handles coordinated objects, subjects, verbs, relative clauses
+  - Reference: Sahaj Software (2023)
+  - File: `td/perception/clause_segmenter.py`
+- [x] **Relation synonymy** — teach that "in" = "part of" = "contains" ✅
+  - Manual teaching via `RelationSynonymRegistry`
+  - Vector suggestion via spaCy 300d (experimental)
+  - OWL equivalentProperty in SPARQL
+  - Reference: alphaXiv (Dec 2025), MaGiX (EMNLP 2025)
+  - File: `td/kg/relation_synonyms.py`
 - [ ] **Coreference resolution** — "Alice went home. She was tired." → resolve pronouns
   - NOTE: coreferee is DEPRECATED. spaCy built-in needs 3.4 (incompatible with 3.8)
   - Practical: rule-based recency + type constraints (no external dep)
@@ -738,7 +857,11 @@ This table documents every research paper that influences or will influence TD v
 | 24 | Oxigraph / pyoxigraph. "SPARQL graph database." | 2026 | GitHub / PyPI | Rust-backed SPARQL 1.1 store. 18ms @ 10M triples. Disk persistence. Python bindings via PyO3. | ✅ Implemented | URL: [https://github.com/oxigraph/oxigraph](https://github.com/oxigraph/oxigraph) |
 | 25 | Trainmarks. "Benchmarking 11 RDF Frameworks on tracks." | 2026 | Substack | Benchmark of RDF frameworks at 100K/1M/10M triples. QLever fastest (2ms), pyoxigraph fastest Python (18ms), RDFLib 43s. | ✅ Referenced | URL: [https://veronahe.substack.com/p/trainmarks-benchmarking-11-rdf-frameworks](https://veronahe.substack.com/p/trainmarks-benchmarking-11-rdf-frameworks) |
 | 26 | ScienceDirect. "RDF(S) Store in Object-Relational Databases." | 2025 | ScienceDirect | Relational DBs have poor semantic storage for RDF. Vertical storage cannot store RDF Schema. Self-joins degrade query performance. | ✅ Referenced | URL: [https://www.sciencedirect.com/org/science/article/pii/S1063801624000026](https://www.sciencedirect.com/org/science/article/pii/S1063801624000026) |
-| 27 | Sahaj Software. "Knowledge graphs from complex text." | 2023 | Sahaj Blog | Verb-based sentence splitting using spaCy dependency tree. Compound sentence → simple sentences. SVO triple extraction. | 🔲 Clause seg. | URL: [https://www.sahaj.ai/knowledge-graphs-from-complex-text/](https://www.sahaj.ai/knowledge-graphs-from-complex-text/) |
+| 27 | Sahaj Software. "Knowledge graphs from complex text." | 2023 | Sahaj Blog | Verb-based sentence splitting using spaCy dependency tree. Compound sentence → simple sentences. SVO triple extraction. | ✅ Implemented | URL: [https://www.sahaj.ai/knowledge-graphs-from-complex-text/](https://www.sahaj.ai/knowledge-graphs-from-complex-text/) |
+| 28 | alphaXiv. "Ontology-Based KG Framework for Industrial Standard Documents." | 2025 | alphaXiv | HDBSCAN on relation embeddings for synonym normalization. Embedding-based clustering of diverse expressions into canonical forms. | ✅ Referenced | URL: [https://www.alphaxiv.org/overview/2512.08398v2](https://www.alphaxiv.org/overview/2512.08398v2) |
+| 29 | MaGiX. "Multi-Granular Adaptive Graph Intelligence." | 2025 | EMNLP Findings | Cross-synonym edges via embedding similarity (τ=0.9). Contrastive learning for semantic alignment. | ✅ Referenced | URL: [https://aclanthology.org/2025.findings-emnlp.279.pdf](https://aclanthology.org/2025.findings-emnlp.279.pdf) |
+| 30 | OntoKG. "Ontology-Oriented Knowledge Graph Construction." | 2026 | arXiv | 94 relation modules, intrinsic-relational routing. Schema-guided extraction. 34M Wikidata entities classified. | ✅ Referenced | URL: [https://arxiv.org/html/2604.02618v1](https://arxiv.org/html/2604.02618v1) |
+| 31 | Trainmarks. "Benchmarking 11 RDF Frameworks." | 2026 | Substack | QLever 2ms, pyoxigraph 18ms, RDFLib 43s at 10M triples. Python-accessible RDF stores compared. | ✅ Referenced | URL: [https://veronahe.substack.com/p/trainmarks-benchmarking-11-rdf-frameworks](https://veronahe.substack.com/p/trainmarks-benchmarking-11-rdf-frameworks) |
 
 ---
 

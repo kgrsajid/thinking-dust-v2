@@ -110,7 +110,16 @@ td-v2/
 │   ├── kg/
 │   │   ├── __init__.py       # KnowledgeGraph: add_fact, query, BFS, inference
 │   │   ├── rules.py          # RULE_TEMPLATES: transitive, symmetric, etc.
-│   │   └── queries.py        # SQL queries and path finding
+│   │   ├── queries.py        # SQL queries and path finding
+│   │   └── relation_synonyms.py  # Relation synonymy detection & registry
+│   ├── query/
+│   │   └── __init__.py       # SparqlStore: SPARQL 1.1 bridge (pyoxigraph)
+│   ├── perception/
+│   │   ├── __init__.py
+│   │   ├── hdc.py            # HDC operations: bind, bundle, permute, cosine
+│   │   ├── nl_parser.py      # CA reservoir, entity spans, relation prototypes
+│   │   ├── word_vectors.py   # BEAGLE word vector model (env + context)
+│   │   └── clause_segmenter.py  # Verb-based clause splitting
 │   ├── reasoning/
 │   │   └── inference.py      # Forward chaining, contradiction detection
 │   └── utils/
