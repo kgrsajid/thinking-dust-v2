@@ -22,6 +22,7 @@ class RelationSynonymGroup:
     canonical: str  # The representative relation name
     members: list[str]  # All synonyms including canonical
     confidence: float = 1.0  # 1.0 = user-taught, 0.5-0.9 = auto-detected
+    source: str = "user"  # "user", "auto", "cluster"
 
     def __repr__(self):
         return f"SynonymGroup({self.canonical}: {self.members})"
@@ -133,7 +134,8 @@ def cluster_relations(
         if len(group.members) > 1:
             # Use the shortest name as canonical (usually the most natural)
             group.canonical = min(group.members, key=len)
-            group.similarity_threshold = similarity_threshold
+            group.confidence = similarity_threshold
+            group.source = "cluster"
 
     return list(groups.values())
 
@@ -225,17 +227,21 @@ class RelationSynonymRegistry:
         canonical = canonical.lower().strip()
         synonyms = [s.lower().strip() for s in synonyms]
 
-        # If any synonym is already in a group, merge
+        # If canonical is already mapped to another group, merge into that
         existing_canonical = self._canonical_map.get(canonical)
         if existing_canonical:
             canonical = existing_canonical
 
-        all_members = {canonical} | set(synonyms)
+        # Start with existing members of the canonical's group
+        all_members = set(self._groups.get(canonical, set()))
+        all_members.add(canonical)
+        all_members.update(synonyms)
+
+        # Check if any synonym is already in a different group → merge
         for syn in synonyms:
             existing = self._canonical_map.get(syn)
             if existing and existing != canonical:
-                # Merge groups
-                all_members |= self._groups.pop(existing, set())
+                all_members.update(self._groups.pop(existing, set()))
 
         self._groups[canonical] = all_members
         for member in all_members:

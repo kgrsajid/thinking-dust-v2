@@ -57,6 +57,18 @@ class TestRelationSynonymRegistry:
         assert reg.are_synonyms("in", "located in") is True
         assert reg.are_synonyms("part of", "contains") is True
 
+    def test_teach_preserves_existing(self):
+        """Re-teaching a canonical should NOT lose existing synonyms."""
+        reg = RelationSynonymRegistry()
+        reg.teach("in", ["part of"])
+        reg.teach("in", ["contains"])
+        # "part of" should NOT be lost
+        assert reg.are_synonyms("in", "part of") is True
+        assert reg.are_synonyms("in", "contains") is True
+        syns = reg.get_synonyms("in")
+        assert "part of" in syns
+        assert "contains" in syns
+
     def test_case_insensitive(self):
         reg = RelationSynonymRegistry()
         reg.teach("In", ["Part Of", "Contains"])
