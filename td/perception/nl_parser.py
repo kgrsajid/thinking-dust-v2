@@ -302,6 +302,11 @@ class GenericNLParser:
         Replaces all hardcoded regex patterns with dependency tree traversal.
         Language-agnostic — works for any language spaCy supports.
 
+        Pipeline:
+        1. Clause segmentation — split compound/complex sentences
+        2. Dependency parsing — extract SVO from each clause
+        3. Deduplication — merge results
+
         Handles:
         - "X is in Y" → (x, in, y)
         - "X is part of Y" → (x, part_of, y)
@@ -309,13 +314,32 @@ class GenericNLParser:
         - "X is before Y on Z" → (x, before, y) — PP attachment
         - "X evolved from Y" → (x, evolved_from, y)
         - "X treats Y" → (x, treats, y)
+        - Coordinated objects: "Games have music, story and visuals" → 3 triples
+        - Coordinated subjects: "Alice and Bob went" → 2 triples
+        - Relative clauses: "Paris which is the capital of France"
 
         Reference: Honnibal & Montani (2017), "spaCy 2"
+        Reference: Sahaj Software (2023), "Knowledge graphs from complex text"
         """
         if self.nlp is None:
             return []
 
         doc = self.nlp(text)
+        all_triples = []
+
+        # ─── Step 1: Clause segmentation (only for complex sentences) ──
+        # Split compound/complex sentences into simple clauses.
+        # Only activate when coordination or relative clauses are present.
+        # For simple sentences, the dependency-based extraction below is better.
+        has_coordination = any(
+            token.dep_ in ("conj", "relcl") for token in doc
+        )
+        if has_coordination:
+            from .clause_segmenter import segment_clauses
+            segmented_clauses = segment_clauses(doc)
+            for clause in segmented_clauses:
+                if clause.subject and clause.relation and clause.obj:
+                    all_triples.append((clause.subject, clause.relation, clause.obj))
         triples = []
 
         for token in doc:
@@ -450,6 +474,16 @@ class GenericNLParser:
                             rel = f"{appos_token.text.lower()}_{prep.lemma_}"
                             triples.append((subj_text, rel, obj_text))
                             continue
+
+        # ─── Step 3: Merge with clause segmenter results ──────────
+        # Clause segmenter handles coordinated objects/subjects that
+        # the dependency-based extraction above may miss.
+        # Deduplicate: both may extract the same simple triples.
+        if all_triples:
+            existing = set((s, r, o) for s, r, o in triples)
+            for clause_triple in all_triples:
+                if clause_triple not in existing:
+                    triples.append(clause_triple)
 
         return triples
 
