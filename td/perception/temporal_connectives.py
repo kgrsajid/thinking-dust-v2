@@ -166,7 +166,7 @@ def get_time_nouns(lang: str = "en") -> frozenset:
 def register_language(lang: str,
                       connectives: dict[str, TemporalConnective],
                       conditional_markers: frozenset = None,
-                      time_nouns: frozenset = None):
+                      time_nouns: frozenset = None) -> None:
     """Register temporal connectives for a new language.
 
     Usage:

@@ -1655,6 +1655,8 @@ The "then" implies a `before` relation between events:
 **Research:**
 - **Allen's Interval Algebra (1983)** — already implemented in TD v2. 13 temporal relations (before, after, meets, overlaps, etc.)
 - **TimeML (Pustejovsky et al., 2003)** — foundational standard for temporal annotation. Defines temporal connectives ("then", "after", "before") as explicit markup. Used in TimeBank corpus.
+- **PDTB 3.0 (Webber et al., 2019)** — Penn Discourse Treebank. Comprehensive discourse relation annotation. Temporal connective classification: TEMPORAL.Asynchronous (before/after) and TEMPORAL.Synchrony (while/meanwhile).
+- **CICLING — "On the Identification of Temporal Clauses"** — Comprehensive list of English temporal subordinating connectives: after, as, as/so long as, as soon as, before, once, since, until/till, when, while.
 - **Chambers et al.** — "Unsupervised learning of temporal orderings of events" — extracts temporal orderings from text using unsupervised learning.
 - **Consistent Discourse-level TRE (EMNLP 2025)** — uses Allen's interval algebra for temporal relation extraction at discourse level. Self-reflection step for consistency.
 - **ATOMIC-2020** — common sense knowledge dataset with `isBefore` and `isAfter` relations for event ordering.
@@ -1673,6 +1675,8 @@ The parser extracts `(alice, went_to, paris)` and `(alice, invested_in, stocks)`
 **References:**
 - Allen, J.F. (1983). "Maintaining Knowledge about Temporal Intervals." CACM, 26(11): 832–843.
 - Pustejovsky, J. et al. (2003). "TimeML: Robust Specification of Event and Temporal Expressions in Text." IWCS-5.
+- Webber, B. et al. (2019). "Penn Discourse Treebank 3.0 Annotation Manual." LDC.
+- Schilder, F. "On the Identification of Temporal Clauses." CICLING.
 - Chambers, N. et al. "Unsupervised Learning of Temporal Orderings for Events."
 - Consistent Discourse-level TRE (EMNLP 2025). URL: https://aclanthology.org/2025.findings-emnlp.1010.pdf
 - ATOMIC-2020. "ATOMIC 2020: On Symbolic and Neural Commonsense Knowledge Graphs."
