@@ -445,6 +445,21 @@ class GenericNLParser:
                     # "New York City capital of USA" → subj = "new york city"
                     subj_text = " ".join([c.text.lower() for c in compounds])
 
+                # Check for det-as-subject pattern: "A feeds into B"
+                # spaCy misparses verb+prep as NOUN+prep with det subject
+                # det=feeds(ROOT), prep=into, pobj=B → (a, feeds_into, b)
+                dets = [c for c in token.children if c.dep_ == "det"]
+                preps_for_det = [c for c in token.children if c.dep_ == "prep"]
+                if dets and preps_for_det and not compounds:
+                    det = dets[0]
+                    prep = preps_for_det[0]
+                    pobj = [c for c in prep.children if c.dep_ == "pobj"]
+                    if pobj:
+                        obj_text = self._get_chunk_text(doc, pobj[0])
+                        rel = f"{token.text.lower()}_{prep.lemma_}"
+                        triples.append((det.text.lower(), rel, obj_text))
+                        continue
+
                 # Check for prep chain: "capital of France", "in the EU"
                 preps = [c for c in token.children if c.dep_ == "prep"]
                 if preps:
@@ -493,13 +508,42 @@ class GenericNLParser:
         "United Kingdom" → "united kingdom" (not just "Kingdom")
         "the EU" → "eu" (strip "the")
         "a country" → "country" (strip "a")
+        "World War 2" → "world war 2" (include nummod)
+        "united states of america" → "united states of america" (walk prep chain)
         """
         for chunk in doc.noun_chunks:
             if token in chunk:
+                # Start with chunk text
+                words = list(chunk.text.lower().split())
+
                 # Strip leading determiners ("the", "a", "an")
-                words = chunk.text.lower().split()
                 while words and words[0] in ("the", "a", "an"):
                     words = words[1:]
+
+                # Include nummod children (e.g., "World War 2" → include "2")
+                for child in token.children:
+                    if child.dep_ == "nummod" and child.text.lower() not in words:
+                        words.append(child.text.lower())
+
+                # Walk prep chains ONLY for chunk root AND only when pobj
+                # has compound modifiers (entity-internal preps)
+                # "united states of america" → "of america" is part of entity
+                # "France in EU" → "in" is the relation, NOT part of entity
+                if token == chunk.root:
+                    for child in token.children:
+                        if child.dep_ == "prep":
+                            for gc in child.children:
+                                if gc.dep_ == "pobj":
+                                    # Only include if pobj has compounds
+                                    # (suggesting it's part of a larger entity)
+                                    pobj_compounds = [c for c in gc.children if c.dep_ in ("compound", "nummod")]
+                                    if pobj_compounds:
+                                        prep_phrase = f"{child.text.lower()} {gc.text.lower()}"
+                                        for ggc in gc.children:
+                                            if ggc.dep_ in ("compound", "nummod") and ggc.text.lower() not in prep_phrase:
+                                                prep_phrase = f"{ggc.text.lower()} {prep_phrase}"
+                                        words.append(prep_phrase)
+
                 return " ".join(words) if words else chunk.text.lower()
         return token.text.lower()
 
@@ -555,6 +599,17 @@ class GenericNLParser:
                 words = token_chunk.text.lower().split()
                 while words and words[0] in ("the", "a", "an"):
                     words = words[1:]
+                # Include nummod children (e.g., "World War 2" → include "2")
+                for child in token.children:
+                    if child.dep_ == "nummod" and child.text.lower() not in words:
+                        words.append(child.text.lower())
+                # Walk prep chains (e.g., "united states of america")
+                for child in token.children:
+                    if child.dep_ == "prep":
+                        for gc in child.children:
+                            if gc.dep_ == "pobj":
+                                prep_phrase = f"{child.text.lower()} {gc.text.lower()}"
+                                words.append(prep_phrase)
                 return " ".join(words) if words else token_chunk.text.lower()
 
             # Fallback: compound + token

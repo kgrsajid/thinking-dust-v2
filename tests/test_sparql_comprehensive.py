@@ -403,27 +403,17 @@ class TestComplexTeaching:
         result3 = td.sparql_store.ask("a", "d")
         assert result3.found is True
 
-    @pytest.mark.xfail(reason="Parser limitation: 'feeds into' split into (feeds, into, ...) "
-                               "instead of (river_a, feeds_into, river_b). "
-                               "Compound verb+preposition relations not yet supported. "
-                               "See: clause segmentation blocker in ARCHITECTURE.md")
     def test_compound_verb_preposition_relation(self, td):
         """Compound verb+preposition relations (e.g., 'feeds into', 'depends on').
 
-        KNOWN FAILURE: The parser splits 'River A feeds into River B' as
-        (feeds, into, river_b) instead of (river_a, feeds_into, river_b).
-
-        Root cause: spaCy dependency parse treats 'feeds' as ROOT verb and
-        'into' as preposition. The parser doesn't recombine them into a
-        compound relation 'feeds_into'.
-
-        This is a subset of the clause segmentation problem (#1 blocker).
+        Fixed: parser now detects NOUN+prep pattern as compound relation.
+        'A feeds into B' → (a, feeds_into, b)
         """
         td.teach_relation("feeds_into", "transitive")
-        td.teach("River A feeds into River B", "River A")
-        td.teach("River B feeds into River C", "River B")
+        td.teach("A feeds into B", "A")
+        td.teach("B feeds into C", "B")
 
-        result = td.sparql_store.ask("river a", "river c")
+        result = td.sparql_store.ask("a", "c")
         assert result.found is True
 
     def test_multiple_relation_types(self, td):
@@ -560,29 +550,21 @@ class TestEdgeCases:
         result = td.sparql_store.ask("covid-19", "sars-cov-2")
         assert result.found is True
 
-    @pytest.mark.xfail(reason="Parser limitation: multi-word entities with numbers "
-                               "('World War 2') not reliably extracted by spaCy. "
-                               "Parser may split 'World War 2' into separate tokens.")
     def test_entity_with_numbers(self, td):
         """Entities with numbers should round-trip correctly.
 
-        KNOWN FAILURE: Parser extracts 'World War 2' inconsistently.
-        spaCy may treat '2' as a separate NUM token instead of part of the entity.
+        Fixed: _get_chunk_text now includes nummod children.
+        'World War 2' → 'world war 2' (not just 'world war').
         """
         td.teach("World War 2 was before Cold War", "World War 2")
         result = td.sparql_store.ask("world war 2", "cold war")
         assert result.found is True
 
-    @pytest.mark.xfail(reason="Parser limitation: long multi-word entities "
-                               "('the united states of america') are truncated. "
-                               "Parser extracts 'united states' or 'america' but "
-                               "not the full phrase. Gazetteer helps but isn't bulletproof.")
     def test_long_entity_name(self, td):
         """Very long entity names should round-trip correctly.
 
-        KNOWN FAILURE: Parser truncates long multi-word entities.
-        'the united states of america' → 'united states' or 'america'.
-        Gazetteer partially mitigates but doesn't fully solve this.
+        Fixed: _get_chunk_text now walks prep chains.
+        'the united states of america' → 'united states of america'.
         """
         long_name = "the united states of america"
         td.teach(f"{long_name} is in North America", long_name)

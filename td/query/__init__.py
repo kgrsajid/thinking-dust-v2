@@ -222,8 +222,18 @@ class SparqlStore:
     # ─── Entity/Relation Helpers ───────────────────────────────────
 
     def _entity_node(self, entity: str) -> NamedNode:
-        """Get NamedNode for an entity, with gazetteer-aware normalization."""
-        return entity_to_uri(entity)
+        """Get NamedNode for an entity, with gazetteer-aware normalization.
+
+        Strips leading articles ("the", "a", "an") to match how the parser
+        stores entities (without articles).
+        """
+        normalized = entity.lower().strip()
+        # Strip leading articles (matches parser's _get_chunk_text behavior)
+        for article in ("the ", "a ", "an "):
+            if normalized.startswith(article):
+                normalized = normalized[len(article):]
+                break
+        return entity_to_uri(normalized)
 
     def _relation_node(self, relation: str) -> NamedNode:
         """Get NamedNode for a relation."""
