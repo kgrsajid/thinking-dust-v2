@@ -51,12 +51,23 @@ def _get_conj_chain(token) -> list:
 def _get_subjects(verb) -> list:
     """Get all subjects of a verb, including coordinated subjects.
 
-    'Alice and Bob went' → [Alice, Bob]
+    For relative clauses ('which is the capital'), resolves the
+    relative pronoun to its antecedent (the noun the clause modifies).
+
+    Reference: Universal Dependencies — acl:relcl dependency
+    The relativizer can be understood as an anaphor whose antecedent
+    is the head of the relative clause.
     """
     subjects = []
     for child in verb.children:
         if child.dep_ in ("nsubj", "nsubjpass"):
-            subjects.extend(_get_conj_chain(child))
+            # Check for relative pronoun (which, who, that)
+            if child.tag_ in ("WDT", "WP") and verb.dep_ == "relcl":
+                # Resolve: the antecedent is the noun the relcl modifies
+                antecedent = verb.head
+                subjects.extend(_get_conj_chain(antecedent))
+            else:
+                subjects.extend(_get_conj_chain(child))
     return subjects
 
 

@@ -585,34 +585,105 @@ class GenericNLParser:
                         continue
 
             # ─── Verb constructions: "X evolved from Y", "X treats Y" ──
+            # Also handles passive voice: "France is known for wine"
+            # Reference: TEA Nets (arXiv, Apr 2026) — nsubjpass + agent dep
+            # Reference: Analytics Vidhya (2024) — spaCy passive detection
             if token.pos_ == "VERB" and token.dep_ == "ROOT":
                 subj = None
                 dobj = None
                 prep_chain = None
+                is_passive = False
+                agent_obj = None
 
                 for child in token.children:
-                    if child.dep_ in ("nsubj", "nsubjpass"):
+                    if child.dep_ == "nsubjpass":
                         subj = child
+                        is_passive = True
+                    elif child.dep_ == "nsubj":
+                        if subj is None:  # Don't overwrite nsubjpass
+                            subj = child
                     elif child.dep_ == "dobj":
                         dobj = child
-                    elif child.dep_ in ("prep", "agent"):
+                    elif child.dep_ == "agent":
+                        # "by Salesforce" — agent becomes the logical subject
+                        for gc in child.children:
+                            if gc.dep_ == "pobj":
+                                agent_obj = gc
+                                break
+                    elif child.dep_ in ("prep",):
                         for gc in child.children:
                             if gc.dep_ == "pobj":
                                 prep_chain = (child, gc)
                                 break
 
+                # Detect negation
+                has_neg = any(c.dep_ == "neg" for c in token.children)
+
                 if subj:
                     subj_texts = self._get_coordinated_subjects(doc, subj)
-                    if dobj:
-                        obj_text = self._get_chunk_text(doc, dobj)
-                        for subj_text in subj_texts:
-                            triples.append((subj_text, token.text.lower(), obj_text))
-                    elif prep_chain:
-                        prep, obj = prep_chain
-                        obj_text = self._get_chunk_text(doc, obj)
-                        rel = f"{token.text.lower()}_{prep.lemma_}"
-                        for subj_text in subj_texts:
-                            triples.append((subj_text, rel, obj_text))
+
+                    # Passive voice with agent: swap subject/object
+                    # "France is known for wine" → (wine, known_in, france)
+                    # "Tableau was acquired by Salesforce" → (salesforce, acquired, tableau)
+                    if is_passive and agent_obj:
+                        agent_text = self._get_chunk_text(doc, agent_obj)
+                        patient_texts = subj_texts
+                        if dobj:
+                            obj_text = self._get_chunk_text(doc, dobj)
+                            for pt in patient_texts:
+                                rel = token.text.lower()
+                                if has_neg:
+                                    rel = f"NOT_{rel}"
+                                triples.append((agent_text, rel, obj_text))
+                        elif prep_chain:
+                            prep, obj = prep_chain
+                            obj_text = self._get_chunk_text(doc, obj)
+                            rel = f"{token.text.lower()}_{prep.lemma_}"
+                            if has_neg:
+                                rel = f"NOT_{rel}"
+                            triples.append((agent_text, rel, obj_text))
+                        else:
+                            # Passive with agent but no object: "X was VERB by Y"
+                            for pt in patient_texts:
+                                rel = token.text.lower()
+                                if has_neg:
+                                    rel = f"NOT_{rel}"
+                                triples.append((agent_text, rel, pt))
+                    elif is_passive and not agent_obj:
+                        # Passive without agent: "X was VERB" → (X, VERB, ?)
+                        # Store with passive marker
+                        if dobj:
+                            obj_text = self._get_chunk_text(doc, dobj)
+                            for subj_text in subj_texts:
+                                rel = token.text.lower()
+                                if has_neg:
+                                    rel = f"NOT_{rel}"
+                                triples.append((subj_text, rel, obj_text))
+                        elif prep_chain:
+                            prep, obj = prep_chain
+                            obj_text = self._get_chunk_text(doc, obj)
+                            rel = f"{token.text.lower()}_{prep.lemma_}"
+                            if has_neg:
+                                rel = f"NOT_{rel}"
+                            for subj_text in subj_texts:
+                                triples.append((subj_text, rel, obj_text))
+                    else:
+                        # Active voice
+                        if dobj:
+                            obj_text = self._get_chunk_text(doc, dobj)
+                            for subj_text in subj_texts:
+                                rel = token.text.lower()
+                                if has_neg:
+                                    rel = f"NOT_{rel}"
+                                triples.append((subj_text, rel, obj_text))
+                        elif prep_chain:
+                            prep, obj = prep_chain
+                            obj_text = self._get_chunk_text(doc, obj)
+                            rel = f"{token.text.lower()}_{prep.lemma_}"
+                            if has_neg:
+                                rel = f"NOT_{rel}"
+                            for subj_text in subj_texts:
+                                triples.append((subj_text, rel, obj_text))
 
             # ─── Noun-based constructions (no copula) ──────────────
             # "Paris capital of France" → (paris, capital_of, france)
