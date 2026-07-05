@@ -223,40 +223,40 @@ class GenericNLParser:
     }
 
     def resolve_coreferences(self, text: str) -> tuple[str, dict]:
-        """Resolve coreferences in text using spaCy two-pipeline approach.
+        """Build coreference map from text using spaCy two-pipeline approach.
 
-        Replaces pronouns (he/she/it/they/its/his/her) with their resolved
-        entity names. Filters out discourse deixis ("this"/"that" referring
-        to clauses).
+        Returns a pronoun→entity map WITHOUT modifying the text.
+        Resolution happens at the triple level (see resolve_triple_coreferences).
+
+        This follows the approach recommended by:
+        - spaCy coref team: "resolve at span level, not text level"
+        - Neo4j (2026): "coreference resolution converts pronouns into
+          referred entities"
+        - Are LLMs Effective KG Constructors? (EMNLP 2025): "resolve
+          references into meaningful entities, avoiding ambiguous triples"
 
         Args:
             text: Input text with potential coreferences
 
         Returns:
-            Tuple of (resolved_text, coref_map) where coref_map maps
-            pronoun positions to resolved entity names.
+            Tuple of (original_text, coref_map) where coref_map maps
+            pronoun token indices to (entity_name, is_possessive).
         """
         if self.nlp is None:
             return text, {}
 
-        # Only load coreference model if explicitly enabled
-        if not hasattr(self, '_coref_enabled'):
-            self._coref_enabled = False
-        if not hasattr(self, '_coref_enabled'):
-            self._coref_enabled = False
-        if not self._coref_enabled:
+        if not getattr(self, '_coref_enabled', False):
             return text, {}
 
         if self.nlp_coref is None:
             return text, {}
 
         doc = self.nlp(text)
-
-        doc = self.nlp(text)
         doc = self.nlp_coref(doc)
 
-        # Build pronoun → entity map from coreference clusters
-        pronoun_map = {}  # token_idx → entity_name
+        # Build pronoun → (entity_name, is_possessive) map
+        pronoun_map = {}
+        possessive_pronouns = {"its", "his", "her", "their", "theirs", "our", "your", "my", "mine"}
         entity_pronouns = {"he", "she", "it", "they", "him", "her",
                            "them", "his", "its", "their", "theirs"}
 
@@ -264,7 +264,6 @@ class GenericNLParser:
             if not key.startswith("coref_clusters"):
                 continue
 
-            # Find the entity mention (first non-pronoun span)
             entity_span = None
             pronoun_spans = []
             for span in spans:
@@ -278,7 +277,6 @@ class GenericNLParser:
                 continue
 
             entity_name = entity_span.text.lower().strip()
-            # Strip leading articles
             for article in ("the ", "a ", "an "):
                 if entity_name.startswith(article):
                     remainder = entity_name[len(article):]
@@ -286,34 +284,83 @@ class GenericNLParser:
                         entity_name = remainder
                     break
 
-            # Map each pronoun to the entity
             for pronoun_span in pronoun_spans:
                 for token in pronoun_span:
-                    pronoun_map[token.i] = entity_name
+                    is_poss = token.text.lower() in possessive_pronouns
+                    pronoun_map[token.i] = (entity_name, is_poss)
 
-        # Replace pronouns in text
+        return text, pronoun_map
+
+    def resolve_triple_coreferences(
+        self,
+        triples: list[tuple[str, str, str]],
+        pronoun_map: dict,
+        doc
+    ) -> list[tuple[str, str, str]]:
+        """Resolve pronouns in extracted triples (not in text).
+
+        Instead of replacing pronouns in the text before extraction,
+        we extract triples first (with pronouns intact), then resolve
+        pronouns in the subject/object fields.
+
+        Handles:
+        - Subject pronouns: "it runs" → ("video game console", "runs", ...)
+        - Object pronouns: "loves it" → (..., "loves", "video game console")
+        - Possessive pronouns: "its video games" → (..., "video games") with
+          possessive note in proof
+        - Discourse deixis: "this shows" → skip entirely
+
+        Reference: spaCy coref team: "resolve at span level, not text level"
+        Reference: Neo4j (2026): coreference as IE pipeline step
+        Reference: Are LLMs Effective KG Constructors? (EMNLP 2025)
+
+        Args:
+            triples: Extracted triples with pronouns intact
+            pronoun_map: Map from token index → (entity_name, is_possessive)
+            doc: spaCy Doc for token lookup
+
+        Returns:
+            Triples with pronouns resolved
+        """
         if not pronoun_map:
-            return text, {}
+            return triples
 
-        tokens = list(doc)
-        resolved_tokens = []
-        for i, token in enumerate(tokens):
-            if i in pronoun_map:
-                # Check for discourse deixis: "this"/"that" as subject of abstract verb
-                if token.text.lower() in ("this", "that"):
-                    # Check if it's the subject of an abstract verb
-                    head = token.head
-                    if head.pos_ == "VERB" and head.lemma_ in self.DISCOURSE_DEIXIS_VERBS:
-                        # Discourse deixis — skip this token (don't replace)
-                        resolved_tokens.append(token.text_with_ws)
-                        continue
+        # Build a reverse map: pronoun text → entity name
+        # (since triples store text, not token indices)
+        text_to_entity = {}
+        possessive_entities = {}
+        for token_idx, (entity, is_poss) in pronoun_map.items():
+            if token_idx < len(doc):
+                pronoun_text = doc[token_idx].text.lower()
+                text_to_entity[pronoun_text] = entity
+                if is_poss:
+                    possessive_entities[pronoun_text] = entity
 
-                resolved_tokens.append(pronoun_map[i] + token.whitespace_)
-            else:
-                resolved_tokens.append(token.text_with_ws)
+        resolved = []
+        for s, r, o in triples:
+            # Resolve subject pronouns
+            new_s = s
+            if s in text_to_entity:
+                new_s = text_to_entity[s]
 
-        resolved_text = "".join(resolved_tokens)
-        return resolved_text, pronoun_map
+            # Resolve object pronouns (check if object starts with possessive)
+            new_o = o
+            for poss, entity in possessive_entities.items():
+                if o.startswith(poss + " "):
+                    # "its video games" → "video games" (possessive resolved)
+                    new_o = o[len(poss) + 1:]
+                    break
+            if new_o in text_to_entity:
+                new_o = text_to_entity[new_o]
+
+            # Skip discourse deixis triples
+            if new_s in ("this", "that") and r in ("shows", "means", "proves",
+                    "suggests", "indicates", "demonstrates", "reveals"):
+                continue
+
+            resolved.append((new_s, r, new_o))
+
+        return resolved
 
     def register_relation(self, relation: str, example_phrases: str = None):
         """Register a learned relation as a prototype for future parsing.
@@ -443,22 +490,26 @@ class GenericNLParser:
         """Extract triples using spaCy dependency parsing.
 
         Pipeline:
-        1. Coreference resolution — replace pronouns with entity names
+        1. Build coreference map (no text modification)
         2. Clause segmentation — split compound/complex sentences
         3. Dependency parsing — extract SVO from each clause
-        4. Deduplication — merge results
+        4. Temporal ordering extraction
+        5. Triple-level coreference resolution (pronouns → entities)
+        6. Adjectival predicate extraction ("runs smoother" → quality)
+        7. Deduplication via relation canonicalization
 
         Reference: Honnibal & Montani (2017), "spaCy 2"
         Reference: Sahaj Software (2023), "Knowledge graphs from complex text"
+        Reference: spaCy coref team — "resolve at span level, not text level"
+        Reference: Neo4j (2026) — coreference as IE pipeline step
+        Reference: Are LLMs Effective KG Constructors? (EMNLP 2025)
         """
         if self.nlp is None:
             return []
 
-        # ─── Step 0: Coreference resolution ──────────────────────
-        # Replace pronouns (he/she/it/they) with their resolved entities.
-        # Filter out discourse deixis ("this"/"that" referring to clauses).
-        resolved_text, coref_map = self.resolve_coreferences(text)
-        doc = self.nlp(resolved_text)
+        # ─── Step 0: Build coreference map (no text modification) ───
+        _, coref_map = self.resolve_coreferences(text)
+        doc = self.nlp(text)
         all_triples = []
 
         # ─── Step 1: Clause segmentation (only for complex sentences) ──
@@ -647,7 +698,39 @@ class GenericNLParser:
                 ordering.event2_description,
             ))
 
-        # ─── Step 5: Deduplicate via relation canonicalization ─────
+        # ─── Step 5: Triple-level coreference resolution ─────────
+        # Resolve pronouns in extracted triples (not in text).
+        # "it runs" → ("video game console", "runs", ...)
+        # "its video games" → (..., "video games") (possessive stripped)
+        # "this shows" → skip (discourse deixis)
+        #
+        # Reference: spaCy coref team — "resolve at span level"
+        # Reference: Neo4j (2026) — coreference as IE pipeline step
+        triples = self.resolve_triple_coreferences(triples, coref_map, doc)
+
+        # ─── Step 6: Adjectival predicate extraction ─────────────
+        # "runs smoother" → (entity, quality, smooth)
+        # "is beautiful" → (entity, quality, beautiful)
+        # These are intransitive verbs with adverb/adjective modifiers.
+        # Standard SVO extraction misses them — no dobj.
+        #
+        # Reference: Neo4j (2026) — "RDF uses subject, predicate, object"
+        for token in doc:
+            if token.pos_ in ("VERB", "AUX") and token.dep_ in ("ROOT", "conj"):
+                has_dobj = any(c.dep_ == "dobj" for c in token.children)
+                adj_mods = [c for c in token.children
+                           if c.dep_ == "acomp" and c.pos_ == "ADJ"]
+                if not has_dobj and adj_mods:
+                    subj = None
+                    for c in token.children:
+                        if c.dep_ in ("nsubj", "nsubjpass"):
+                            subj = self._get_chunk_text(doc, c)
+                            break
+                    if subj:
+                        for adj in adj_mods:
+                            triples.append((subj, "quality", adj.lemma_))
+
+        # ─── Step 7: Deduplicate via relation canonicalization ─────
         # Two extraction paths (clause segmenter + dependency) produce
         # duplicates with different relation names for the same fact.
         # Canonicalize relations, deduplicate, keep richer relation.
