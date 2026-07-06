@@ -95,6 +95,32 @@ DISCOURSE_DEIXIS_IT_VERBS = frozenset({
     "reveal", "confirm", "imply", "illustrate", "reflect",
 })
 
+# ── English Relation Prototypes (HDC-encoded) ─────────────────────
+# HDC-encoded phrases for constraint type detection.
+# Used for fuzzy similarity matching in the HDC layer.
+# Actual relation detection uses spaCy dependency labels.
+#
+# For a new language: translate the phrases to the target language.
+# The HDC encoding is language-specific — different words = different vectors.
+#
+# Reference: Kanerva (2009), "Hyperdimensional Computing"
+RELATION_PROTOTYPES = {
+    "different": "different distinct separate unique",
+    "before": "before earlier precedes first",
+    "after": "after later follows second",
+    "excludes": "excludes cannot together forbidden",
+    "limited": "limited bounded maximum minimum",
+    "grouped": "grouped together category partition",
+    "sum_to": "sum total adds equals",
+    "implies": "implies if then requires means",
+    "overlap": "overlap conflict cannot same time",
+    "precedence": "precedence must before chain ordered",
+    "ratio": "ratio proportional divided times",
+    "count": "count exactly at least how many",
+    "equivalent": "equivalent same equal identical",
+    "optimize": "optimize maximize minimize best",
+}
+
 # ── Register English ──────────────────────────────────────────────
 register_language(LanguageConfig(
     code="en",
@@ -105,4 +131,5 @@ register_language(LanguageConfig(
     entity_pronouns=ENTITY_PRONOUNS,
     discourse_deixis_verbs=DISCOURSE_DEIXIS_VERBS,
     discourse_deixis_it_verbs=DISCOURSE_DEIXIS_IT_VERBS,
+    relation_prototypes=RELATION_PROTOTYPES,
 ))

@@ -134,23 +134,12 @@ class GenericNLParser:
         self.stop_word_prototype = self._encode_phrase(_stop_phrase)
 
         # ─── INNATE: Relation prototypes (14 types) ──────────────────
-        # Kept for HDC encoding compatibility. Actual relation detection
-        # uses spaCy's dependency labels (token.dep_).
+        # Loaded from language registry. HDC-encoded phrases for constraint
+        # type detection. Actual relation detection uses spaCy dep labels.
+        # Reference: td/languages/en.py, td/languages/__init__.py
         self.relation_prototypes = {
-            "different": self._encode_phrase("different distinct separate unique"),
-            "before": self._encode_phrase("before earlier precedes first"),
-            "after": self._encode_phrase("after later follows second"),
-            "excludes": self._encode_phrase("excludes cannot together forbidden"),
-            "limited": self._encode_phrase("limited bounded maximum minimum"),
-            "grouped": self._encode_phrase("grouped together category partition"),
-            "sum_to": self._encode_phrase("sum total adds equals"),
-            "implies": self._encode_phrase("implies if then requires means"),
-            "overlap": self._encode_phrase("overlap conflict cannot same time"),
-            "precedence": self._encode_phrase("precedence must before chain ordered"),
-            "ratio": self._encode_phrase("ratio proportional divided times"),
-            "count": self._encode_phrase("count exactly at least how many"),
-            "equivalent": self._encode_phrase("equivalent same equal identical"),
-            "optimize": self._encode_phrase("optimize maximize minimize best"),
+            name: self._encode_phrase(phrases)
+            for name, phrases in self._lang_config.relation_prototypes.items()
         }
 
         self.constraint_signals = set(self.relation_prototypes.keys())
@@ -1518,11 +1507,9 @@ class GenericNLParser:
         if connectives:
             # Filter out pure auxiliaries/determiners, but KEEP content words
             # (e.g., "married" in "is married to" is a relation word, not noise)
-            auxiliaries = {"is", "are", "was", "were", "the", "a", "an",
-                          "be", "been", "have", "has", "had", "do", "does",
-                          "did", "will", "would", "could", "should"}
+            # Uses is_stop_word() which delegates to spaCy (language-agnostic).
             relation_words = [w for w in connectives
-                            if w not in auxiliaries and len(w) > 1]
+                            if not self.is_stop_word(w) and len(w) > 1]
 
             if relation_words:
                 conn_text = " ".join(relation_words)

@@ -38,6 +38,8 @@ class LanguageConfig:
         entity_pronouns: Personal/entity pronouns (for coreference)
         discourse_deixis_verbs: Abstract verbs for discourse deixis
         discourse_deixis_it_verbs: Subset where "it" is discourse deixis
+        relation_prototypes: HDC-encoded phrases for constraint type detection
+            (dict of relation_name -> list of synonym phrases)
     """
     code: str
     name: str
@@ -47,6 +49,7 @@ class LanguageConfig:
     entity_pronouns: FrozenSet[str] = frozenset()
     discourse_deixis_verbs: FrozenSet[str] = frozenset()
     discourse_deixis_it_verbs: FrozenSet[str] = frozenset()
+    relation_prototypes: Dict[str, str] = field(default_factory=dict)
 
 
 # ── Language Registry ─────────────────────────────────────────────
@@ -69,8 +72,20 @@ def register_language(config: LanguageConfig):
 
 
 def get_language(code: str) -> LanguageConfig:
-    """Get language configuration by code. Returns English if not found."""
-    return _REGISTRY.get(code, _REGISTRY.get("en"))
+    """Get language configuration by code. Returns English if not found.
+
+    Logs a warning when falling back to English.
+    """
+    if code in _REGISTRY:
+        return _REGISTRY[code]
+    if code != "en":
+        import warnings
+        warnings.warn(
+            f"Language '{code}' not registered in td/languages/. "
+            f"Falling back to English. Available: {get_available_languages()}",
+            stacklevel=2,
+        )
+    return _REGISTRY.get("en")
 
 
 def get_available_languages() -> list[str]:
