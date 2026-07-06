@@ -171,14 +171,19 @@ def fetch_url():
         with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
             html = resp.read().decode("utf-8", errors="ignore")
 
-        # Strip HTML tags — simple extraction
-        # Remove scripts and styles
+        # Strip HTML tags — aggressive cleanup before LLM
+        # Remove scripts, styles, nav, footer, headers
         html = regex.sub(r"<script[^>]*>.*?</script>", "", html, flags=regex.DOTALL | regex.IGNORECASE)
         html = regex.sub(r"<style[^>]*>.*?</style>", "", html, flags=regex.DOTALL | regex.IGNORECASE)
+        html = regex.sub(r"<nav[^>]*>.*?</nav>", "", html, flags=regex.DOTALL | regex.IGNORECASE)
+        html = regex.sub(r"<footer[^>]*>.*?</footer>", "", html, flags=regex.DOTALL | regex.IGNORECASE)
+        html = regex.sub(r"<header[^>]*>.*?</header>", "", html, flags=regex.DOTALL | regex.IGNORECASE)
         # Remove tags
         text = regex.sub(r"<[^>]+>", " ", html)
-        # Clean whitespace
+        # Clean whitespace and special chars
         text = regex.sub(r"\s+", " ", text).strip()
+        # Remove common wiki boilerplate
+        text = regex.sub(r"(?i)(navigation menu|personal tools|namespaces|views|search|navigation|toolbox|print/export|languages|what links here|related changes|upload file|special pages|permanent link|page information|cite this page|get shortened URL|wikidata item|download as PDF|printable version|content is available under|privacy policy|about|disclaimers)", "", text)
 
         if not text:
             return jsonify({"error": "No text content found"}), 400
