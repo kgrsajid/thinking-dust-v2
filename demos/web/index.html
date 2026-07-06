@@ -410,7 +410,7 @@ async function askWithExplanation(){
     if(r.answer&&r.answer.includes('→'))showProof(r.answer);
 
     // Step 2: LLM explains the reasoning
-    setStatus('ask-status','info','<span class="spin"></span> LLM explaining...');
+    setStatus('ask-status','info','<span class="spin"></span> Explaining in human language...');
     const explanation=await puter.ai.chat(
       `Explain this reasoning chain in plain, concise English.
 Use ONLY the information in the chain. Do NOT add facts.
@@ -441,7 +441,7 @@ function showProof(answer){
 }
 
 /* ── GRAPH ─────────────────────────────── */
-let nodes=[],edges=[],nodeMap={};
+let nodes=[],edges=[],oldNodeMap={};
 const canvas=document.getElementById('graph');
 const ctx=canvas.getContext('2d');
 let dragging=null,mouseX=0,mouseY=0,hoverNode=null;
@@ -462,36 +462,44 @@ canvas.addEventListener('mousedown',e=>{
 canvas.addEventListener('mousemove',e=>{
   const r=canvas.getBoundingClientRect();mouseX=e.clientX-r.left;mouseY=e.clientY-r.top;
   if(dragging){dragging.x=mouseX;dragging.y=mouseY;dragging.vx=0;dragging.vy=0}
-  // Hover detection
   hoverNode=null;
   for(const n of nodes){const dx=n.x-mouseX,dy=n.y-mouseY;if(dx*dx+dy*dy<(n.radius+5)**2){hoverNode=n;break}}
   canvas.style.cursor=hoverNode?'pointer':(dragging?'grabbing':'grab');
 });
 canvas.addEventListener('mouseup',()=>{dragging=null});
 canvas.addEventListener('mouseleave',()=>{dragging=null});
-
 canvas.addEventListener('click',e=>{
-  if(hoverNode){
-    // Click node → ask about it
-    document.getElementById('ask-input').value=`What is ${hoverNode.label}?`;
-  }
+  if(hoverNode){document.getElementById('ask-input').value=`What is ${hoverNode.label}?`}
 });
 
+let nodeMap={};
 async function refreshGraph(){
   try{
-    const data=await api('kg');nodes=data.nodes||[];edges=data.edges||[];nodeMap={};
+    const data=await api('kg');
+    const newNodes=data.nodes||[];
+    const newEdges=data.edges||[];
+    const newMap={};
     const w=canvas.width/2,h=canvas.height/2;
-    const existing=new Map();
-    // Keep existing positions for nodes that still exist
-    nodes.forEach(n=>{
-      const old=nodeMap[n.id];
-      if(old){n.x=old.x;n.y=old.y}else{
-        const a=Math.random()*Math.PI*2;n.x=w/2+Math.cos(a)*100;n.y=h/2+Math.sin(a)*80;
+
+    // Preserve existing positions, only add new nodes at random positions
+    newNodes.forEach(n=>{
+      const old=oldNodeMap[n.id];
+      if(old){
+        // Keep existing position and velocity
+        n.x=old.x;n.y=old.y;n.vx=old.vx;n.vy=old.vy;
+        n.pulse=old.pulse>0?old.pulse:0; // don't re-pulse existing nodes
+      }else{
+        // New node — start near center with random offset
+        const a=Math.random()*Math.PI*2;
+        n.x=w/2+Math.cos(a)*80;n.y=h/2+Math.sin(a)*60;
+        n.vx=0;n.vy=0;n.pulse=1; // pulse only new nodes
       }
-      n.vx=0;n.vy=0;n.radius=26;n.pulse=1;
+      n.radius=26;
       n.color=n.derived?'#059669':'#6366f1';
-      nodeMap[n.id]=n;
+      newMap[n.id]=n;
     });
+
+    nodes=newNodes;edges=newEdges;nodeMap=newMap;oldNodeMap=newMap;
     stats.nodes=nodes.length;stats.edges=edges.length;stats.derived=edges.filter(e=>e.derived).length;
     document.getElementById('stat-nodes').textContent=stats.nodes;
     document.getElementById('stat-edges').textContent=stats.edges;
@@ -588,7 +596,8 @@ document.getElementById('ask-input').addEventListener('keydown',e=>{if(e.key==='
 document.getElementById('url-input').addEventListener('keydown',e=>{if(e.key==='Enter')teachFromURL()});
 
 /* ── INIT ──────────────────────────────── */
-resize();render();setInterval(refreshGraph,2000);
+resize();render();refreshGraph();
+// Only refresh graph after actions, not on timer
 </script>
 </body>
 </html>

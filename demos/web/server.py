@@ -21,6 +21,14 @@ from td.memory.mhn import ModernHopfieldNetwork, MHNConfig
 
 app = Flask(__name__, static_folder=os.path.dirname(os.path.abspath(__file__)))
 
+# Enable CORS for all routes
+@app.after_request
+def after_request(response):
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+    response.headers.add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    return response
+
 # ── Initialize TD v2 ────────────────────────────────────────
 print("Initializing Thinking Dust v2...")
 vocab = build_default_vocabulary(dim=10000)
