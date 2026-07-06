@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thinking Dust — The Dust Thinks</title>
+    <style>
+        :root {
+            --bg: #f8f8fa;
+            --bg-card: #ffffff;
+            --bg-code: #f2f2f5;
+            --text: #1a1a2e;
+            --text-2: #5a5a7a;
+            --text-3: #9a9ab0;
+            --accent: #4f46e5;
+            --accent-2: #7c3aed;
+            --accent-glow: rgba(79,70,229,0.15);
+            --green: #10b981;
+            --green-glow: rgba(16,185,129,0.15);
+            --orange: #f59e0b;
+            --red: #ef4444;
+            --border: #e5e5ea;
+            --radius: 16px;
+            --radius-sm: 10px;
+            --font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+            --mono: 'SF Mono', 'Fira Code', monospace;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html { font-size: 16px; scroll-behavior: smooth; }
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            overflow-x: hidden;
+        }
+
+        /* ── HERO ──────────────────────────────────────── */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 24px;
+            position: relative;
+            overflow: hidden;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -200px; right: -200px;
+            width: 600px; height: 600px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            border-radius: 50%;
+            animation: float 8s ease-in-out infinite;
+        }
+        .hero::after {
+            content: '';
+            position: absolute;
+            bottom: -150px; left: -150px;
+            width: 500px; height: 500px;
+            background: radial-gradient(circle, var(--green-glow) 0%, transparent 70%);
+            border-radius: 50%;
+            animation: float 10s ease-in-out infinite reverse;
+        }
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(30px, -30px) scale(1.1); }
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+            max-width: 700px;
+        }
+        .hero h1 {
+            font-size: 3.5rem;
+            font-weight: 800;
+            letter-spacing: -0.04em;
+            line-height: 1.1;
+            margin-bottom: 16px;
+        }
+        .hero h1 .gradient {
+            background: linear-gradient(135deg, var(--accent), var(--accent-2), var(--green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero .subtitle {
+            font-size: 1.25rem;
+            color: var(--text-2);
+            line-height: 1.6;
+            margin-bottom: 40px;
+        }
+        .hero .subtitle em {
+            color: var(--accent);
+            font-style: normal;
+            font-weight: 600;
+        }
+
+        .hero-stats {
+            display: flex;
+            gap: 40px;
+            justify-content: center;
+            margin-bottom: 48px;
+        }
+        .hero-stat {
+            text-align: center;
+        }
+        .hero-stat .num {
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--accent);
+        }
+        .hero-stat .lbl {
+            font-size: 0.75rem;
+            color: var(--text-3);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .btn-start {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 16px 36px;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            font-family: var(--font);
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+            box-shadow: 0 4px 20px rgba(79,70,229,0.3);
+        }
+        .btn-start:hover {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 8px 30px rgba(79,70,229,0.4);
+        }
+
+        /* ── DEMO SECTION ──────────────────────────────── */
+        .demo-section {
+            min-height: 100vh;
+            padding: 60px 24px;
+            display: none;
+        }
+        .demo-section.active { display: block; }
+
+        .demo-container {
+            max-width: 1100px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 32px;
+        }
+        @media (max-width: 800px) {
+            .demo-container { grid-template-columns: 1fr; }
+        }
+
+        /* ── PANELS ────────────────────────────────────── */
+        .panel-left { display: flex; flex-direction: column; gap: 20px; }
+        .panel-right { position: sticky; top: 24px; height: fit-content; }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+            transition: all 0.3s;
+        }
+        .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+
+        .card h3 {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .card .desc {
+            font-size: 0.85rem;
+            color: var(--text-2);
+            margin-bottom: 16px;
+        }
+
+        textarea, input[type="text"] {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-family: var(--font);
+            font-size: 0.95rem;
+            color: var(--text);
+            background: var(--bg);
+            transition: all 0.2s;
+            resize: vertical;
+        }
+        textarea { min-height: 100px; line-height: 1.6; }
+        textarea:focus, input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 50px;
+            font-family: var(--font);
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #4338ca;
+            transform: translateY(-1px);
+        }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-ghost {
+            background: transparent;
+            color: var(--accent);
+            border: 1.5px solid var(--accent);
+        }
+        .btn-ghost:hover { background: var(--accent-glow); }
+        .btn-row { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+
+        /* ── LOG ────────────────────────────────────────── */
+        .log {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 20px;
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            line-height: 2;
+            max-height: 500px;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+        .log:empty::before {
+            content: 'Feed me facts. Watch me think.';
+            color: var(--text-3);
+            font-family: var(--font);
+            font-style: italic;
+        }
+        .log-line {
+            opacity: 0;
+            transform: translateY(8px);
+            animation: fadeIn 0.3s forwards;
+        }
+        @keyframes fadeIn {
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .log .fact { color: var(--text); }
+        .log .derived { color: var(--green); font-weight: 600; }
+        .log .proof { color: var(--accent); }
+        .log .separator { color: var(--text-3); }
+        .log .label {
+            display: inline-block;
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-right: 6px;
+        }
+        .log .label.teach { background: #dbeafe; color: #2563eb; }
+        .log .label.derive { background: #d1fae5; color: #059669; }
+        .log .label.query { background: #ede9fe; color: #7c3aed; }
+
+        /* ── GRAPH CANVAS ──────────────────────────────── */
+        .graph-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            position: relative;
+            height: 500px;
+        }
+        .graph-container canvas {
+            width: 100%;
+            height: 100%;
+        }
+        .graph-label {
+            position: absolute;
+            top: 16px; left: 16px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-3);
+            background: rgba(255,255,255,0.8);
+            backdrop-filter: blur(10px);
+            padding: 6px 12px;
+            border-radius: 6px;
+        }
+        .graph-legend {
+            position: absolute;
+            bottom: 16px; right: 16px;
+            font-size: 0.7rem;
+            color: var(--text-3);
+            background: rgba(255,255,255,0.9);
+            backdrop-filter: blur(10px);
+            padding: 8px 12px;
+            border-radius: 6px;
+            display: flex;
+            gap: 12px;
+        }
+        .legend-item { display: flex; align-items: center; gap: 4px; }
+        .legend-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+        }
+
+        /* ── STATUS ──────────────────────────────────────── */
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            font-weight: 500;
+            margin-top: 12px;
+        }
+        .status.hidden { display: none; }
+        .status.loading { background: #f0f0ff; color: var(--accent); }
+        .status.success { background: #ecfdf5; color: var(--green); }
+        .status.error { background: #fef2f2; color: var(--red); }
+        .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+        .dot.pulse { animation: pulse 1.2s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        /* ── PRESET BUTTONS ────────────────────────────── */
+        .presets {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+        .preset {
+            padding: 8px 16px;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 50px;
+            font-family: var(--font);
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-2);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .preset:hover {
+            background: var(--accent-glow);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* ── PROOF TRACE ANIMATION ─────────────────────── */
+        .proof-trace {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            padding: 16px;
+            background: var(--bg-code);
+            border-radius: var(--radius-sm);
+            margin-top: 12px;
+            font-family: var(--mono);
+            font-size: 0.85rem;
+        }
+        .proof-trace:empty { display: none; }
+        .proof-node {
+            padding: 4px 12px;
+            background: var(--accent);
+            color: white;
+            border-radius: 6px;
+            font-weight: 600;
+            opacity: 0;
+            transform: scale(0.8);
+            animation: popIn 0.3s forwards;
+        }
+        .proof-edge {
+            color: var(--text-3);
+            font-size: 0.75rem;
+            opacity: 0;
+            animation: fadeIn 0.2s forwards;
+        }
+        @keyframes popIn {
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        /* ── FOOTER ────────────────────────────────────── */
+        .footer {
+            text-align: center;
+            padding: 40px 24px;
+            color: var(--text-3);
+            font-size: 0.85rem;
+        }
+        .footer a { color: var(--accent); text-decoration: none; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════ HERO ═══════════════════════ -->
+<section class="hero" id="hero">
+    <div class="hero-content">
+        <h1><span class="gradient">Thinking Dust</span></h1>
+        <p class="subtitle">
+            A reasoning engine that <em>derives facts it was never taught</em>.
+            No neural network. No GPU. No pretraining.
+            Under 100,000 parameters. Runs on CPU in milliseconds.
+        </p>
+        <div class="hero-stats">
+            <div class="hero-stat">
+                <div class="num">&lt;100K</div>
+                <div class="lbl">Parameters</div>
+            </div>
+            <div class="hero-stat">
+                <div class="num">&lt;5ms</div>
+                <div class="lbl">Inference</div>
+            </div>
+            <div class="hero-stat">
+                <div class="num">0</div>
+                <div class="lbl">GPU Needed</div>
+            </div>
+        </div>
+        <button class="btn-start" onclick="startDemo()">
+            Watch it think →
+        </button>
+    </div>
+</section>
+
+<!-- ═══════════════════════ DEMO ═══════════════════════ -->
+<section class="demo-section" id="demo">
+    <div class="demo-container">
+
+        <!-- LEFT: Controls -->
+        <div class="panel-left">
+
+            <!-- Teach Card -->
+            <div class="card">
+                <h3>📚 Teach</h3>
+                <p class="desc">Feed it facts. It learns instantly.</p>
+                <div class="presets">
+                    <button class="preset" onclick="loadPreset('geo')">🌍 Geography</button>
+                    <button class="preset" onclick="loadPreset('security')">🔒 Security</button>
+                    <button class="preset" onclick="loadPreset('family')">👨‍👩‍👧 Family</button>
+                </div>
+                <textarea id="teach-input" placeholder="e.g. Paris is the capital of France"></textarea>
+                <div class="btn-row">
+                    <button class="btn btn-primary" onclick="teachFact()">Teach</button>
+                    <button class="btn btn-ghost" onclick="teachRelation()">+ Relation Property</button>
+                </div>
+                <div id="teach-status" class="status hidden"></div>
+            </div>
+
+            <!-- Ask Card -->
+            <div class="card">
+                <h3>❓ Ask</h3>
+                <p class="desc">Ask a question. It infers the answer — even if it was never taught.</p>
+                <div class="presets">
+                    <button class="preset" onclick="askPreset('eu')">Is Paris in Europe?</button>
+                    <button class="preset" onclick="askPreset('capital')">What is the capital of France?</button>
+                    <button class="preset" onclick="askPreset('same')">Are Paris and Berlin the same?</button>
+                </div>
+                <input type="text" id="ask-input" placeholder="e.g. Is Paris in Europe?">
+                <div class="btn-row">
+                    <button class="btn btn-primary" onclick="askQuestion()">Ask</button>
+                </div>
+                <div id="ask-status" class="status hidden"></div>
+                <div id="proof-trace" class="proof-trace"></div>
+            </div>
+
+            <!-- Log Card -->
+            <div class="card">
+                <h3>🧠 Thinking Log</h3>
+                <p class="desc">Every fact taught, every fact derived, every proof trace.</p>
+                <div class="log" id="log"></div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Graph -->
+        <div class="panel-right">
+            <div class="graph-container">
+                <canvas id="graph"></canvas>
+                <div class="graph-label">Knowledge Graph</div>
+                <div class="graph-legend">
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: var(--accent)"></div>
+                        Entity
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: var(--green)"></div>
+                        Derived
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: var(--text-3)"></div>
+                        Relation
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<footer class="footer">
+    <p>Thinking Dust — <a href="https://github.com/kgrsajid/thinking-dust-v2">GitHub</a> · Built by Kazi Rabbany</p>
+</footer>
+
+<script src="https://js.puter.com/v2/"></script>
+<script>
+/* ═══════════════════════════════════════════════════════
+   KNOWLEDGE GRAPH (in-memory, visual)
+   ═══════════════════════════════════════════════════════ */
+const KG = {
+    nodes: new Map(),  // id → { label, x, y, vx, vy, derived, color }
+    edges: [],         // { from, to, label, derived }
+    nodeCount: 0,
+
+    addNode(label, derived = false) {
+        const id = label.toLowerCase().replace(/\s+/g, '_');
+        if (this.nodes.has(id)) return id;
+        const angle = Math.random() * Math.PI * 2;
+        const r = 80 + Math.random() * 120;
+        this.nodes.set(id, {
+            id, label,
+            x: 400 + Math.cos(angle) * r,
+            y: 250 + Math.sin(angle) * r,
+            vx: 0, vy: 0,
+            derived,
+            color: derived ? '#10b981' : '#4f46e5',
+            radius: 28,
+            pulse: 0,
+        });
+        this.nodeCount++;
+        return id;
+    },
+
+    addEdge(fromId, toId, label, derived = false) {
+        if (this.edges.some(e => e.from === fromId && e.to === toId && e.label === label)) return;
+        this.edges.push({ from: fromId, to: toId, label, derived });
+    },
+
+    addFact(s, r, o, derived = false) {
+        const sid = this.addNode(s, derived);
+        const oid = this.addNode(o, derived);
+        this.addEdge(sid, oid, r, derived);
+        // Pulse animation
+        const sn = this.nodes.get(sid);
+        const on = this.nodes.get(oid);
+        if (sn) sn.pulse = 1;
+        if (on) on.pulse = 1;
+    },
+};
+
+/* ═══════════════════════════════════════════════════════
+   GRAPH RENDERER (Canvas)
+   ═══════════════════════════════════════════════════════ */
+const canvas = document.getElementById('graph');
+const ctx = canvas.getContext('2d');
+let animFrame;
+
+function resizeCanvas() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * 2;
+    canvas.height = rect.height * 2;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+    ctx.scale(2, 2);
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+function drawGraph() {
+    const w = canvas.width / 2;
+    const h = canvas.height / 2;
+    ctx.clearRect(0, 0, w, h);
+
+    // Physics: simple force-directed layout
+    const nodes = Array.from(KG.nodes.values());
+    const alpha = 0.3;
+
+    for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+            const a = nodes[i], b = nodes[j];
+            let dx = b.x - a.x, dy = b.y - a.y;
+            let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            let force = (80 - dist) * 0.003;
+            a.vx -= dx / dist * force;
+            a.vy -= dy / dist * force;
+            b.vx += dx / dist * force;
+            b.vy += dy / dist * force;
+        }
+    }
+
+    // Edge springs
+    for (const edge of KG.edges) {
+        const a = KG.nodes.get(edge.from);
+        const b = KG.nodes.get(edge.to);
+        if (!a || !b) continue;
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        let force = (dist - 120) * 0.005;
+        a.vx += dx / dist * force;
+        a.vy += dy / dist * force;
+        b.vx -= dx / dist * force;
+        b.vy -= dy / dist * force;
+    }
+
+    // Center gravity
+    for (const node of nodes) {
+        node.vx += (w / 2 - node.x) * 0.001;
+        node.vy += (h / 2 - node.y) * 0.001;
+        node.vx *= 0.9;
+        node.vy *= 0.9;
+        node.x += node.vx * alpha;
+        node.y += node.vy * alpha;
+        node.x = Math.max(40, Math.min(w - 40, node.x));
+        node.y = Math.max(40, Math.min(h - 40, node.y));
+        if (node.pulse > 0) node.pulse -= 0.02;
+    }
+
+    // Draw edges
+    for (const edge of KG.edges) {
+        const a = KG.nodes.get(edge.from);
+        const b = KG.nodes.get(edge.to);
+        if (!a || !b) continue;
+
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = edge.derived ? '#10b981' : '#d1d5db';
+        ctx.lineWidth = edge.derived ? 2 : 1.5;
+        if (edge.derived) ctx.setLineDash([6, 4]);
+        else ctx.setLineDash([]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Arrow
+        const angle = Math.atan2(b.y - a.y, b.x - a.x);
+        const midX = (a.x + b.x) / 2;
+        const midY = (a.y + b.y) / 2;
+        ctx.beginPath();
+        ctx.moveTo(midX, midY);
+        ctx.lineTo(midX - 8 * Math.cos(angle - 0.4), midY - 8 * Math.sin(angle - 0.4));
+        ctx.lineTo(midX - 8 * Math.cos(angle + 0.4), midY - 8 * Math.sin(angle + 0.4));
+        ctx.closePath();
+        ctx.fillStyle = edge.derived ? '#10b981' : '#d1d5db';
+        ctx.fill();
+
+        // Edge label
+        ctx.font = '10px -apple-system, sans-serif';
+        ctx.fillStyle = '#9a9ab0';
+        ctx.textAlign = 'center';
+        const lx = midX + 12 * Math.sin(angle);
+        const ly = midY - 12 * Math.cos(angle);
+        ctx.fillText(edge.label.replace(/_/g, ' '), lx, ly);
+    }
+
+    // Draw nodes
+    for (const node of nodes) {
+        const r = node.radius + (node.pulse > 0 ? node.pulse * 8 : 0);
+
+        // Glow
+        if (node.pulse > 0 || node.derived) {
+            const gradient = ctx.createRadialGradient(node.x, node.y, r, node.x, node.y, r + 15);
+            gradient.addColorStop(0, node.derived ? 'rgba(16,185,129,0.2)' : 'rgba(79,70,229,0.2)');
+            gradient.addColorStop(1, 'transparent');
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, r + 15, 0, Math.PI * 2);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+        }
+
+        // Circle
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = node.color;
+        ctx.fill();
+
+        // Label
+        ctx.font = 'bold 11px -apple-system, sans-serif';
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const words = node.label.split(' ');
+        if (words.length > 2) {
+            ctx.fillText(words.slice(0, 2).join(' '), node.x, node.y - 5);
+            ctx.fillText(words.slice(2).join(' '), node.x, node.y + 7);
+        } else {
+            ctx.fillText(node.label, node.x, node.y);
+        }
+    }
+
+    animFrame = requestAnimationFrame(drawGraph);
+}
+
+/* ═══════════════════════════════════════════════════════
+   DEMO LOGIC
+   ═══════════════════════════════════════════════════════ */
+let facts = [];
+let relations = new Map();
+let queryCount = 0;
+
+function startDemo() {
+    document.getElementById('hero').style.display = 'none';
+    document.getElementById('demo').classList.add('active');
+    drawGraph();
+}
+
+function log(html) {
+    const el = document.getElementById('log');
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = html;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(id, type, msg) {
+    const el = document.getElementById(id);
+    el.className = `status ${type}`;
+    el.innerHTML = `<span class="dot ${type === 'loading' ? 'pulse' : ''}"></span> ${msg}`;
+}
+function clearStatus(id) { document.getElementById(id).className = 'status hidden'; }
+
+function parseFact(text) {
+    // Simple parser: "X is the Y of Z" → (X, Y_of, Z)
+    // "X is in Y" → (X, in, Y)
+    // "X is part of Y" → (X, part_of, Y)
+    // "X is before Y" → (X, before, Y)
+    // "X is after Y" → (X, after, Y)
+    // "X is Y of Z" → (X, Y_of, Z)
+    const t = text.trim();
+
+    let m = t.match(/^(.+?)\s+is\s+the\s+(.+?)\s+of\s+(.+?)\.?$/i);
+    if (m) return { s: m[1].trim(), r: m[2].trim().toLowerCase().replace(/\s+/g, '_') + '_of', o: m[3].trim() };
+
+    m = t.match(/^(.+?)\s+is\s+in\s+(.+?)\.?$/i);
+    if (m) return { s: m[1].trim(), r: 'in', o: m[2].trim() };
+
+    m = t.match(/^(.+?)\s+is\s+part\s+of\s+(.+?)\.?$/i);
+    if (m) return { s: m[1].trim(), r: 'part_of', o: m[2].trim() };
+
+    m = t.match(/^(.+?)\s+is\s+before\s+(.+?)\.?$/i);
+    if (m) return { s: m[1].trim(), r: 'before', o: m[2].trim() };
+
+    m = t.match(/^(.+?)\s+is\s+after\s+(.+?)\.?$/i);
+    if (m) return { s: m[1].trim(), r: 'after', o: m[2].trim() };
+
+    m = t.match(/^(.+?)\s+is\s+(\w+)\s+of\s+(.+?)\.?$/i);
+    if (m) return { s: m[1].trim(), r: m[2].trim().toLowerCase() + '_of', o: m[3].trim() };
+
+    m = t.match(/^(.+?)\s+(\w+)\s+(.+?)\.?$/i);
+    if (m) return { s: m[1].trim(), r: m[2].trim().toLowerCase(), o: m[3].trim() };
+
+    return null;
+}
+
+function teachFact() {
+    const input = document.getElementById('teach-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const fact = parseFact(text);
+    if (!fact) {
+        setStatus('teach-status', 'error', 'Could not parse fact. Try: "X is the Y of Z"');
+        return;
+    }
+
+    facts.push(fact);
+    KG.addFact(fact.s, fact.r, fact.o, false);
+    log(`<span class="label teach">TEACH</span> <span class="fact">${fact.s} —[${fact.r.replace(/_/g, ' ')}]→ ${fact.o}</span>`);
+
+    // Check for derivations
+    derive();
+    input.value = '';
+    clearStatus('teach-status');
+}
+
+function teachRelation() {
+    const name = prompt('Relation name (e.g. north_of):');
+    const prop = prompt('Property (transitive, symmetric, functional):');
+    if (!name || !prop) return;
+    relations.set(name.trim().toLowerCase(), prop.trim().toLowerCase());
+    log(`<span class="label teach">TEACH</span> <span class="fact">${name} → ${prop}</span>`);
+}
+
+function derive() {
+    // Transitive: R(A,B) ∧ R(B,C) → R(A,C)
+    let newFacts = [];
+    for (const [rel, prop] of relations) {
+        if (prop === 'transitive') {
+            const relFacts = facts.filter(f => f.r === rel);
+            for (const f1 of relFacts) {
+                for (const f2 of relFacts) {
+                    if (f1.o.toLowerCase() === f2.s.toLowerCase() &&
+                        !facts.some(f => f.s.toLowerCase() === f1.s.toLowerCase() && f.r === rel && f.o.toLowerCase() === f2.o.toLowerCase())) {
+                        newFacts.push({ s: f1.s, r: rel, o: f2.o, derived: true });
+                    }
+                }
+            }
+        }
+    }
+
+    for (const f of newFacts) {
+        facts.push(f);
+        KG.addFact(f.s, f.r, f.o, true);
+        log(`<span class="label derive">DERIVE</span> <span class="derived">${f.s} —[${f.r.replace(/_/g, ' ')}]→ ${f.o}</span>`);
+    }
+}
+
+function askQuestion() {
+    const input = document.getElementById('ask-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    queryCount++;
+    const trace = document.getElementById('proof-trace');
+    trace.innerHTML = '';
+
+    log(`<span class="label query">ASK</span> <span class="fact">${text}</span>`);
+
+    // Parse question
+    const lower = text.toLowerCase();
+
+    // "Is X in Y?" → check transitive chain
+    let m = lower.match(/^is\s+(.+?)\s+in\s+(.+?)\??$/);
+    if (m) {
+        const entity = m[1].trim();
+        const target = m[2].trim();
+        const chain = findChain(entity, 'in', target);
+        if (chain) {
+            const answer = `YES. ${chain.map(c => c.s).join(' → ')} → ${chain[chain.length-1].o}`;
+            log(`<span class="label query">ANSWER</span> <span class="derived">${answer}</span>`);
+            animateProof(chain);
+            setStatus('ask-status', 'success', '✓ Derived!');
+        } else {
+            log(`<span class="label query">ANSWER</span> <span class="fact">I don't know. I was never taught this.</span>`);
+            setStatus('ask-status', 'loading', 'Not enough facts to derive.');
+        }
+        input.value = '';
+        return;
+    }
+
+    // "Is X part of Y?"
+    m = lower.match(/^is\s+(.+?)\s+part\s+of\s+(.+?)\??$/);
+    if (m) {
+        const entity = m[1].trim();
+        const target = m[2].trim();
+        const chain = findChain(entity, 'part_of', target);
+        if (chain) {
+            const answer = `YES. ${chain.map(c => c.s).join(' → ')} → ${chain[chain.length-1].o}`;
+            log(`<span class="label query">ANSWER</span> <span class="derived">${answer}</span>`);
+            animateProof(chain);
+            setStatus('ask-status', 'success', '✓ Derived!');
+        } else {
+            log(`<span class="label query">ANSWER</span> <span class="fact">I don't know.</span>`);
+            setStatus('ask-status', 'loading', 'Not enough facts.');
+        }
+        input.value = '';
+        return;
+    }
+
+    // "What is the capital of X?"
+    m = lower.match(/what\s+is\s+the\s+capital\s+of\s+(.+?)\??/);
+    if (m) {
+        const entity = m[1].trim();
+        const result = facts.find(f => f.r === 'capital_of' && f.o.toLowerCase().includes(entity));
+        if (result) {
+            log(`<span class="label query">ANSWER</span> <span class="derived">${result.s}</span>`);
+            setStatus('ask-status', 'success', `✓ ${result.s}`);
+        } else {
+            log(`<span class="label query">ANSWER</span> <span class="fact">I don't know the capital of ${entity}.</span>`);
+            setStatus('ask-status', 'loading', 'Not in knowledge base.');
+        }
+        input.value = '';
+        return;
+    }
+
+    // Generic: try to find any relation between entities
+    const words = lower.replace(/[?!.,]/g, '').split(/\s+/);
+    const entities = [];
+    for (const node of KG.nodes.values()) {
+        if (words.some(w => node.label.toLowerCase().includes(w))) {
+            entities.push(node);
+        }
+    }
+    if (entities.length >= 2) {
+        const chain = findChain(entities[0].label, null, entities[1].label);
+        if (chain) {
+            const answer = `YES. ${chain.map(c => c.s).join(' → ')} → ${chain[chain.length-1].o}`;
+            log(`<span class="label query">ANSWER</span> <span class="derived">${answer}</span>`);
+            animateProof(chain);
+            setStatus('ask-status', 'success', '✓ Derived!');
+        } else {
+            log(`<span class="label query">ANSWER</span> <span class="fact">I can't find a connection.</span>`);
+            setStatus('ask-status', 'loading', 'No path found.');
+        }
+    } else {
+        log(`<span class="label query">ANSWER</span> <span class="fact">I don't understand the question.</span>`);
+        setStatus('ask-status', 'loading', 'Try: "Is X in Y?"');
+    }
+    input.value = '';
+}
+
+function findChain(from, rel, to, visited = new Set(), depth = 0) {
+    if (depth > 10) return null;
+    const fromLower = from.toLowerCase();
+    const toLower = to.toLowerCase();
+
+    for (const f of facts) {
+        if (f.s.toLowerCase() === fromLower) {
+            if (f.o.toLowerCase() === toLower && (!rel || f.r === rel)) {
+                return [f];
+            }
+            if (!visited.has(f.o.toLowerCase())) {
+                visited.add(f.o.toLowerCase());
+                const chain = findChain(f.o, rel, to, visited, depth + 1);
+                if (chain) return [f, ...chain];
+            }
+        }
+    }
+    return null;
+}
+
+function animateProof(chain) {
+    const trace = document.getElementById('proof-trace');
+    trace.innerHTML = '';
+    chain.forEach((f, i) => {
+        setTimeout(() => {
+            const node = document.createElement('span');
+            node.className = 'proof-node';
+            node.textContent = f.s;
+            trace.appendChild(node);
+
+            const edge = document.createElement('span');
+            edge.className = 'proof-edge';
+            edge.textContent = ` —${f.r.replace(/_/g, ' ')}→ `;
+            trace.appendChild(edge);
+
+            if (i === chain.length - 1) {
+                setTimeout(() => {
+                    const target = document.createElement('span');
+                    target.className = 'proof-node';
+                    target.textContent = f.o;
+                    trace.appendChild(target);
+                }, 200);
+            }
+        }, i * 400);
+    });
+}
+
+/* ═══════════════════════════════════════════════════════
+   PRESETS
+   ═══════════════════════════════════════════════════════ */
+const PRESETS = {
+    geo: [
+        "Paris is the capital of France",
+        "France is in the EU",
+        "EU is part of Europe",
+        "Berlin is the capital of Germany",
+        "Germany is in the EU",
+    ],
+    security: [
+        "SQL Injection is a code injection attack",
+        "SQL Injection exploits input validation",
+        "parameterized queries prevents SQL Injection",
+        "XSS is a code injection attack",
+        "XSS exploits input validation",
+        "output encoding prevents XSS",
+    ],
+    family: [
+        "Alice is the mother of Bob",
+        "Bob is the father of Charlie",
+        "Alice is the parent of Bob",
+        "Bob is the parent of Charlie",
+    ],
+};
+
+function loadPreset(name) {
+    const facts = PRESETS[name];
+    if (!facts) return;
+    for (const fact of facts) {
+        document.getElementById('teach-input').value = fact;
+        teachFact();
+    }
+}
+
+function askPreset(name) {
+    const questions = {
+        eu: "Is Paris in Europe?",
+        capital: "What is the capital of France?",
+        same: "Are Paris and Berlin the same?",
+    };
+    document.getElementById('ask-input').value = questions[name] || '';
+    askQuestion();
+}
+
+/* ═══════════════════════════════════════════════════════
+   RELATION PROPERTIES
+   ═══════════════════════════════════════════════════════ */
+// Auto-teach common relation properties
+relations.set('in', 'transitive');
+relations.set('part_of', 'transitive');
+relations.set('before', 'transitive');
+relations.set('after', 'transitive');
+relations.set('capital_of', 'functional');
+relations.set('parent_of', 'transitive');
+</script>
+
+</body>
+</html>
