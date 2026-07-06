@@ -1554,12 +1554,16 @@ assert "united kingdom" in kg2.gazetteer
 spaCy is fully integrated into the parser and thinking engine. All hardcoded rules replaced.
 
 **What was replaced:**
-1. `_pp_words` set → `token.pos_ == "ADP"` (spaCy POS tagger)
+1. `_pp_words` set → `token.pos_ == "ADP"` (spaCy POS tagger, Universal POS)
 2. `_strip_pp()` helper → spaCy dependency parsing (PP attachment)
 3. `_merge_post_relation_entities()` → `doc.noun_chunks` (spaCy noun chunking)
 4. `difflib.SequenceMatcher` fuzzy matching → `token.lemma_` (spaCy lemmatizer)
 5. Gazetteer → `doc.ents` (spaCy NER)
 6. 12 regex patterns → `extract_triples_spacy()` (dependency tree traversal)
+7. `generic_words` stopword set → `token.pos_ == "PROPN"` (entity validation via POS)
+8. `question_words` set → `PronType=Int` morph feature + PTB tag fallback (WP/WDT/WRB)
+9. `DISCOURSE_DEIXIS_VERBS` inline tuple → `ABSTRACT_VERB_SENSE` set + syntactic check (Jauhar et al. 2015)
+10. `"quality"` relation → `"has_property"` (UD 'acomp' dependency, standard naming)
 
 **How it works:**
 ```python

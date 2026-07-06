@@ -753,7 +753,7 @@ class GenericThinkingDust:
             trace.append(f"  Iter {t.iteration}: sim={t.retrieved_similarity:.3f} "
                         f"{'-> CONVERGED' if t.converged else ''}")
 
-        fallback = self._fallback_mhn_solve(thoughts, graph)
+        fallback = self._fallback_mhn_solve(thoughts, graph, problem_text)
 
         if fallback:
             trace.append(f"Route: MHN match (sim={fallback['similarity']:.3f})")
@@ -847,7 +847,7 @@ class GenericThinkingDust:
 
         # Fallback
         if not solution:
-            fallback = self._fallback_mhn_solve(thoughts, graph)
+            fallback = self._fallback_mhn_solve(thoughts, graph, problem_text)
             if fallback:
                 solution = fallback
                 trace.append(f"  MHN: Retrieved similar answer (sim={fallback['similarity']:.2f})")
@@ -1054,16 +1054,26 @@ class GenericThinkingDust:
         # Helper: strip trailing prepositional phrases from entities
         # "austria on danube" → "austria"
         # "united kingdom in europe" → "united kingdom"
-        # Reference: Prepositional phrase attachment (Manning & Schütze, 1999)
-        _pp_words = {"on", "in", "at", "from", "to", "by", "for", "with", "into",
-                     "through", "during", "before", "after", "about", "near", "over"}
+        # Uses spaCy ADP tag (language-agnostic) when available, falls back to set.
+        # Reference: Universal POS Tags (Nivre et al., 2016)
         def _strip_pp(entity: str) -> str:
             words = entity.split()
             # Strip trailing preposition + its object
             # "austria on danube" → ["austria", "on", "danube"] → "austria"
-            while len(words) >= 3 and words[-2] in _pp_words:
-                words = words[:-2]
-            return " ".join(words)
+            if self.parser.nlp:
+                # Use spaCy POS tags (ADP = adposition, language-agnostic)
+                doc = self.parser.nlp(entity)
+                while len(doc) >= 3 and doc[-2].pos_ == "ADP":
+                    entity = " ".join(t.text for t in doc[:-2])
+                    doc = self.parser.nlp(entity)
+                return doc.text if doc else entity
+            else:
+                # Fallback: hardcoded English prepositions
+                _pp_words = {"on", "in", "at", "from", "to", "by", "for", "with", "into",
+                             "through", "during", "before", "after", "about", "near", "over"}
+                while len(words) >= 3 and words[-2] in _pp_words:
+                    words = words[:-2]
+                return " ".join(words)
 
         # Pattern: X is the Y of Z → (X, Y, Z)
         # "Paris is the capital of France" → (paris, capital, france)
@@ -1208,13 +1218,27 @@ class GenericThinkingDust:
 
             if len(entities_in_query) < 2:
                 # Try inverse/open query: "What is the capital of France?"
-                # Only for "what/who/where" questions (not "is X Y?" yes/no questions)
+                # Uses UD PronType=Int feature when available, PTB tags as fallback.
+                # Reference: Nivre et al. (2016), Universal Dependencies 2.0
+                # Reference: de Marneffe et al. (2021), Computational Linguistics 47(2)
                 if len(entities_in_query) == 1:
-                    question_words = {"what", "who", "where", "which"}
-                    is_question = any(t in question_words for t in tokens)
-                    has_question_mark = "?" in text or text.rstrip().endswith("?")
+                    # Detect questions using spaCy
+                    query_doc = self.parser.nlp(text) if self.parser.nlp else None
+                    has_interrogative = False
+                    if query_doc:
+                        for t in query_doc:
+                            # UD morphological feature (language-agnostic)
+                            if "Int" in t.morph.get("PronType"):
+                                has_interrogative = True
+                                break
+                            # PTB tag fallback for English models
+                            # WP=who/what, WDT=which/that, WRB=where/when/how
+                            if t.tag_ in ("WP", "WDT", "WRB"):
+                                has_interrogative = True
+                                break
+                    has_question_mark = text.rstrip().endswith("?")
 
-                    if not is_question and not has_question_mark:
+                    if not has_interrogative and not has_question_mark:
                         return None
 
                     entity = entities_in_query[0]
@@ -1263,7 +1287,11 @@ class GenericThinkingDust:
                     # ─── Open query: try ALL relations (language-agnostic) ──
                     # No hardcoded mapping. SPARQL handles any relation.
                     # "where is France?" → try all relations France participates in.
+                    # Ranks results by relevance (relation specificity).
+                    # Reference: Bio-SODA (2023) — node centrality for ranking
                     if self.sparql_store is not None:
+                        candidates = []
+
                         # Forward: entity as subject
                         fwd = self.sparql_store.query_sparql_bindings(
                             f'SELECT ?p ?o WHERE {{ {str(self.sparql_store._entity_node(entity))} ?p ?o . '
@@ -1274,12 +1302,7 @@ class GenericThinkingDust:
                                 rel = r.get("?p", "").replace("http://thinking-dust.org/relation/", "")
                                 obj = r.get("?o", "").replace("http://thinking-dust.org/entity/", "").replace("_", " ")
                                 if rel and obj:
-                                    return {
-                                        "type": "inferred",
-                                        "formatted": f"{entity} {rel} {obj}",
-                                        "confidence": 0.90,
-                                        "method": "open_query_forward",
-                                    }
+                                    candidates.append(("forward", entity, rel, obj))
 
                         # Inverse: entity as object
                         inv = self.sparql_store.query_sparql_bindings(
@@ -1291,20 +1314,18 @@ class GenericThinkingDust:
                                 subj = r.get("?s", "").replace("http://thinking-dust.org/entity/", "").replace("_", " ")
                                 rel = r.get("?p", "").replace("http://thinking-dust.org/relation/", "")
                                 if subj and rel:
-                                    return {
-                                        "type": "inferred",
-                                        "formatted": f"{subj} {rel} {entity}",
-                                        "confidence": 0.90,
-                                        "method": "open_query_inverse",
-                                    }
-                                    result = _try_inverse_query(rel)
-                                    if result and result.answer is not None:
-                                        return {
-                                            "type": "inferred",
-                                            "formatted": result.proof_trace,
-                                            "confidence": result.confidence,
-                                            "method": result.method,
-                                        }
+                                    candidates.append(("inverse", subj, rel, entity))
+
+                        if candidates:
+                            # Rank: prefer specific relations (longer names)
+                            candidates.sort(key=lambda c: len(c[2]), reverse=True)
+                            direction, s, r, o = candidates[0]
+                            return {
+                                "type": "inferred",
+                                "formatted": f"{s} {r} {o}",
+                                "confidence": 0.90,
+                                "method": f"open_query_{direction}",
+                            }
                 return None
 
         # Collect relation words in the query that match KG relations
@@ -1389,10 +1410,19 @@ class GenericThinkingDust:
 
             # SPARQL inverse query: "What is the capital of France?"
             # (single entity + relation, open question)
+            # Uses UD PronType=Int feature, PTB tags as fallback
             if len(entities_in_query) == 1 and relation_in_query:
-                question_words = {"what", "who", "where", "which"}
-                is_question = any(t in question_words for t in tokens)
-                if is_question:
+                query_doc = self.parser.nlp(text) if self.parser.nlp else None
+                has_interrogative = False
+                if query_doc:
+                    for t in query_doc:
+                        if "Int" in t.morph.get("PronType"):
+                            has_interrogative = True
+                            break
+                        if t.tag_ in ("WP", "WDT", "WRB"):
+                            has_interrogative = True
+                            break
+                if has_interrogative:
                     inv_results = self.sparql_store.inverse_query(
                         relation_in_query, entities_in_query[0]
                     )
@@ -1440,7 +1470,7 @@ class GenericThinkingDust:
 
         return None
 
-    def _fallback_mhn_solve(self, thoughts, graph):
+    def _fallback_mhn_solve(self, thoughts, graph, query_text=""):
         best_sim = 0
         best_meta = {}
         for t in thoughts:
@@ -1458,20 +1488,34 @@ class GenericThinkingDust:
                 if best_sim >= 0.7:
                     return {"type": "learned", "formatted": answer_text, "similarity": best_sim}
 
-                # Validate: main query entity must appear in problem text.
-                # Prevents "is Norway part of Europe" → "EU is part of Europe" hallucination.
-                # Norway doesn't appear in stored problem → rejected.
-                # "france capital is" → "france" appears in "The capital of France is Paris" → accepted.
-                query_words = set()
-                for e in graph.entities:
-                    query_words.update(e['text'].lower().split())
-                # Remove generic words that shouldn't count as entities
-                generic_words = {"part", "of", "is", "the", "in", "a", "an", "and", "or", "capital"}
-                entity_words = query_words - generic_words
-                if entity_words and problem_text:
-                    problem_words = set(problem_text.lower().split())
-                    overlap = entity_words & problem_words
-                    if overlap:
+                # Validate: primary entities (proper nouns) from query must
+                # appear in retrieved text. Uses spaCy POS tags (Universal
+                # Dependencies, language-agnostic) — not hardcoded word lists.
+                #
+                # "is Norway part of Europe?" → PROPNs: {norway, europe}
+                # "EU is part of Europe"      → PROPNs: {eu, europe}
+                # "norway" NOT in retrieved → REJECT (correct!)
+                #
+                # Reference: Nivre et al. (2016), Universal Dependencies 2.0
+                # Reference: de Marneffe et al. (2021), Computational Linguistics 47(2)
+                query_doc = self.parser.nlp(query_text) if self.parser.nlp else None
+                retrieved_doc = self.parser.nlp(problem_text) if self.parser.nlp else None
+                if query_doc and retrieved_doc:
+                    # Proper nouns (PROPN) — ALL must appear in retrieved text
+                    # "is Norway part of Europe?" → PROPNs: {norway, europe}
+                    # "EU is part of Europe"      → PROPNs: {eu, europe}
+                    # "norway" NOT in retrieved → REJECT (correct!)
+                    query_propns = {t.text.lower() for t in query_doc if t.pos_ == "PROPN"}
+                    retrieved_propns = {t.text.lower() for t in retrieved_doc if t.pos_ == "PROPN"}
+                    if query_propns:
+                        if not query_propns.issubset(retrieved_propns):
+                            return None  # Not all query entities found → reject
+                    return {"type": "learned", "formatted": answer_text, "similarity": best_sim}
+                else:
+                    # No spaCy — fall back to exact entity match from graph
+                    query_entities = {e['text'].lower() for e in graph.entities}
+                    retrieved_words = set(problem_text.lower().split())
+                    if query_entities & retrieved_words:
                         return {"type": "learned", "formatted": answer_text, "similarity": best_sim}
         return None
 

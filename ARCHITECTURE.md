@@ -1091,6 +1091,9 @@ This table documents every research paper that influences or will influence TD v
 | 49 | de Marneffe, M.C. et al. "Universal Stanford Dependencies." | 2014 | LREC | UD standard: auxpass, cop, nsubj labels. Language-agnostic. | ✅ Referenced | URL: — |
 | 50 | TEA Nets. "Combining AI and cognitive network science for text analysis." | 2026 | arXiv | Passive voice handling in SVO extraction. nsubjpass + agent dep swap. is_passive and passive_approx flags. | ✅ Implemented | URL: [https://arxiv.org/html/2604.27673](https://arxiv.org/html/2604.27673) |
 | 51 | Analytics Vidhya. "Information Extraction using Python and spaCy." | 2024 | Tutorial | Passive voice detection via dep_.find('subjpass'). subtree_matcher for active/passive. | ✅ Referenced | URL: [https://www.analyticsvidhya.com/blog/2019/09/introduction-information-extraction-python-spacy/](https://www.analyticsvidhya.com/blog/2019/09/introduction-information-extraction-python-spacy/) |
+| 52 | Jauhar, S.K. et al. "Resolving Discourse-Deictic Pronouns: A Two-Stage Approach." | 2015 | *SEM (ACL), pp. 299–308 | Two-stage classify+resolve: (1) is pronoun discourse-deictic? (2) if yes, skip. Key features: syntactic role (nsubj) + head verb lemma. | ✅ Implemented | ACL Anthology: [S15-1035](https://aclanthology.org/S15-1035/) |
+| 53 | de Marneffe, M.-C. et al. "Universal Dependencies." | 2021 | *Computational Linguistics*, 47(2): 255–308 | UD morphological features (PronType=Int for interrogatives). Universal POS tags (PROPN, NOUN, ADP) for language-agnostic entity/preposition detection. | ✅ Implemented | DOI: [10.1162/coli_a_00398](https://doi.org/10.1162/coli_a_00398) |
+| 54 | Santus, E. et al. "Bio-SODA: Natural Language Processing over Knowledge Graphs." | 2023 | — | SPARQL result ranking via node centrality as relevance measure. | ✅ Referenced | — |
 
 ---
 

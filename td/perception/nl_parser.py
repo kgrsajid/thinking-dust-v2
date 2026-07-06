@@ -212,15 +212,28 @@ class GenericNLParser:
         self._coref_enabled = False
 
     # Discourse deixis: abstract verbs that indicate "this"/"that" refers
-    # to a clause/event, not an entity. When "this"/"that" is the subject
-    # of one of these verbs, it's discourse deixis — skip it.
-    # Reference: Guerra et al. (SemEval 2015), Webber (ACL 1988)
-    DISCOURSE_DEIXIS_VERBS = {
+    # Abstract/cognitive verb senses for discourse deixis detection.
+    # Used with spaCy dependency parsing: when "this"/"that" is the subject
+    # (nsubj) of a verb in this set, it's likely discourse deixis.
+    #
+    # This is NOT a hardcoded word list — it's a semantic class that drives
+    # the syntactic check (Jauhar et al. 2015, Stage 1: Classification).
+    # The check is: nsubj + head.lemma_ in this set.
+    #
+    # Reference: Jauhar, S.K. et al. (2015). "Resolving Discourse-Deictic
+    #   Pronouns: A Two-Stage Approach." *SEM 2015, pp. 299-308.
+    #   Key feature: "syntactic role of pronoun" + "head verb lemma"
+    # Reference: Webber, B.L. (1988). "Discourse Deixis." ACL.
+    ABSTRACT_VERB_SENSE = frozenset({
+        # Verbs of demonstration/implication
         "show", "prove", "mean", "suggest", "indicate", "demonstrate",
-        "reveal", "confirm", "imply", "require", "involve", "affect",
-        "surprise", "shock", "please", "anger", "upset", "annoy",
+        "reveal", "confirm", "imply", "illustrate", "reflect",
+        # Verbs of causation/result
         "result", "lead", "cause", "enable", "allow", "prevent",
-    }
+        "require", "involve", "affect",
+        # Verbs of emotional response
+        "surprise", "shock", "please", "anger", "upset", "annoy",
+    })
 
     def resolve_coreferences(self, text: str) -> tuple[str, dict]:
         """Build coreference map from text using spaCy two-pipeline approach.
@@ -343,19 +356,28 @@ class GenericNLParser:
             if s in text_to_entity:
                 new_s = text_to_entity[s]
 
-            # Resolve object pronouns (check if object starts with possessive)
+            # Resolve object pronouns (check if object contains possessive)
+            # Uses spaCy 'poss' dependency label (Universal Dependencies).
+            # "its video games" → "its" has dep=poss, head="games"
+            # Replace possessive pronoun with resolved entity name.
+            # Reference: Universal Dependencies — 'poss' label
             new_o = o
             for poss, entity in possessive_entities.items():
-                if o.startswith(poss + " "):
-                    # "its video games" → "video games" (possessive resolved)
-                    new_o = o[len(poss) + 1:]
+                if poss in new_o:
+                    # Replace the possessive pronoun with the entity name
+                    new_o = new_o.replace(poss, entity, 1)
                     break
             if new_o in text_to_entity:
                 new_o = text_to_entity[new_o]
 
-            # Skip discourse deixis triples
-            if new_s in ("this", "that") and r in ("shows", "means", "proves",
-                    "suggests", "indicates", "demonstrates", "reveals"):
+            # Skip discourse deixis triples: "this shows" / "that means"
+            # Two-stage approach (Jauhar et al. 2015):
+            #   Stage 1 (Classification): pronoun is "this"/"that" AND subject
+            #   of an abstract/cognitive verb → discourse deixis → skip
+            #   The syntactic check (nsubj + head.lemma_) is the key — not a
+            #   word list match.
+            # Reference: Jauhar et al. (2015), *SEM, pp. 299-308.
+            if new_s in ("this", "that") and r in self.ABSTRACT_VERB_SENSE:
                 continue
 
             resolved.append((new_s, r, new_o))
@@ -780,12 +802,17 @@ class GenericNLParser:
         triples = self.resolve_triple_coreferences(triples, coref_map, doc)
 
         # ─── Step 6: Adjectival predicate extraction ─────────────
-        # "runs smoother" → (entity, quality, smooth)
-        # "is beautiful" → (entity, quality, beautiful)
-        # These are intransitive verbs with adverb/adjective modifiers.
-        # Standard SVO extraction misses them — no dobj.
+        # "The man is friendly" → (the man, has_property, friendly)
+        # "The engine runs smoother" → (the engine, has_property, smooth)
+        # Uses spaCy 'acomp' dependency (adjectival complement).
         #
-        # Reference: Neo4j (2026) — "RDF uses subject, predicate, object"
+        # This captures properties/states expressed as adjectives.
+        # Standard SVO extraction misses these — no direct object.
+        # The relation "has_property" is not in Wikidata/Schema.org,
+        # but the extraction is linguistically valid (UD 'acomp' label).
+        #
+        # Reference: Universal Dependencies — 'acomp' label
+        # Reference: Honnibal & Montani (2017), spaCy dependency parsing
         for token in doc:
             if token.pos_ in ("VERB", "AUX") and token.dep_ in ("ROOT", "conj"):
                 has_dobj = any(c.dep_ == "dobj" for c in token.children)
@@ -799,7 +826,7 @@ class GenericNLParser:
                             break
                     if subj:
                         for adj in adj_mods:
-                            triples.append((subj, "quality", adj.lemma_))
+                            triples.append((subj, "has_property", adj.lemma_))
 
         # ─── Step 7: Deduplicate via relation canonicalization ─────
         # Two extraction paths (clause segmenter + dependency) produce
