@@ -800,15 +800,15 @@ class GenericNLParser:
         triples = self.resolve_triple_coreferences(triples, coref_map, doc)
 
         # ─── Step 6: Adjectival predicate extraction ─────────────
-        # "The man is friendly" → (the man, has_property, friendly)
-        # "The engine runs smoother" → (the engine, has_property, smooth)
+        # "The man is friendly" → (the man, has_characteristic, friendly)
+        # "The engine runs smoother" → (the engine, has_characteristic, smooth)
         # Uses spaCy 'acomp' dependency (adjectival complement).
         #
-        # This captures properties/states expressed as adjectives.
-        # Standard SVO extraction misses these — no direct object.
-        # The relation "has_property" is not in Wikidata/Schema.org,
-        # but the extraction is linguistically valid (UD 'acomp' label).
+        # Maps to Wikidata P1552 "has characteristic" — "inherent or
+        # distinguishing quality or feature of the entity."
+        # This is the standard Wikidata property for entity attributes.
         #
+        # Reference: Wikidata P1552 — https://www.wikidata.org/wiki/Property:P1552
         # Reference: Universal Dependencies — 'acomp' label
         # Reference: Honnibal & Montani (2017), spaCy dependency parsing
         for token in doc:
@@ -824,7 +824,7 @@ class GenericNLParser:
                             break
                     if subj:
                         for adj in adj_mods:
-                            triples.append((subj, "has_property", adj.lemma_))
+                            triples.append((subj, "has_characteristic", adj.lemma_))
 
         # ─── Step 7: Deduplicate via relation canonicalization ─────
         # Two extraction paths (clause segmenter + dependency) produce

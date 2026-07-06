@@ -5,7 +5,7 @@ Tests for:
 2. Question detection (PronType=Int + PTB fallback)
 3. Discourse deixis (ABSTRACT_VERB_SENSE + syntactic check)
 4. Open query ranking
-5. Adjectival predicates (has_property)
+5. Adjectival predicates (has_characteristic)
 6. Possessive resolution
 7. Preposition detection (ADP POS)
 
@@ -190,7 +190,7 @@ class TestDiscourseDeixis:
         """'This car is fast' → 'this' refers to entity, NOT discourse deixis."""
         triples = td.parser.extract_triples_spacy("This car is fast.")
         # "this car" should NOT be filtered — "car" is the entity
-        # "fast" → has_property
+        # "fast" → has_characteristic
         assert len(triples) >= 1
 
     def test_that_entity_not_skip(self, td):
@@ -212,39 +212,39 @@ class TestDiscourseDeixis:
 
 
 class TestAdjectivalPredicates:
-    """Edge cases for has_property extraction.
+    """Edge cases for has_characteristic extraction.
 
     Uses spaCy 'acomp' dependency (adjectival complement).
     Reference: Universal Dependencies — 'acomp' label
     """
 
     def test_simple_adjective(self, td):
-        """'The man is friendly' → (the man, has_property, friendly)."""
+        """'The man is friendly' → (the man, has_characteristic, friendly)."""
         triples = td.parser.extract_triples_spacy("The man is friendly.")
-        assert any(r == "has_property" for _, r, _ in triples)
+        assert any(r == "has_characteristic" for _, r, _ in triples)
 
     def test_comparative_adjective(self, td):
-        """'The engine runs smoother' → (the engine, has_property, smooth)."""
+        """'The engine runs smoother' → (the engine, has_characteristic, smooth)."""
         triples = td.parser.extract_triples_spacy("The engine runs smoother.")
-        assert any(r == "has_property" for _, r, _ in triples)
+        assert any(r == "has_characteristic" for _, r, _ in triples)
 
     def test_not_adverb(self, td):
-        """'He runs quickly' → NOT has_property (quickly is ADV, not ADJ)."""
+        """'He runs quickly' → NOT has_characteristic (quickly is ADV, not ADJ)."""
         triples = td.parser.extract_triples_spacy("He runs quickly.")
         # "quickly" is ADV, not ADJ → should not be extracted
-        has_prop = [t for t in triples if t[1] == "has_property"]
+        has_prop = [t for t in triples if t[1] == "has_characteristic"]
         assert len(has_prop) == 0
 
     def test_transitive_verb_no_property(self, td):
-        """'He eats food' → NOT has_property (has dobj)."""
+        """'He eats food' → NOT has_characteristic (has dobj)."""
         triples = td.parser.extract_triples_spacy("He eats food.")
-        has_prop = [t for t in triples if t[1] == "has_property"]
+        has_prop = [t for t in triples if t[1] == "has_characteristic"]
         assert len(has_prop) == 0
 
     def test_multiple_adjectives(self, td):
-        """'The sky is blue and clear' → two has_property triples."""
+        """'The sky is blue and clear' → two has_characteristic triples."""
         triples = td.parser.extract_triples_spacy("The sky is blue and clear.")
-        has_prop = [t for t in triples if t[1] == "has_property"]
+        has_prop = [t for t in triples if t[1] == "has_characteristic"]
         assert len(has_prop) >= 1  # At least one
 
 

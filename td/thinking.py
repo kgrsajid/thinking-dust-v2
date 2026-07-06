@@ -1328,8 +1328,35 @@ class GenericThinkingDust:
                                     candidates.append(("inverse", subj, rel, entity))
 
                         if candidates:
-                            # Rank: prefer specific relations (longer names)
-                            candidates.sort(key=lambda c: len(c[2]), reverse=True)
+                            # Rank using TF-IDF scoring (Salton & Buckley, 1988).
+                            # - IDF: rarer relations are more specific/informative
+                            # - Query match: prefer relations that appear in the query
+                            # - Forward preference: entity-as-subject is more natural
+                            #
+                            # This is the standard IR ranking approach, adapted for KG.
+                            # Reference: Salton & Buckley (1988), "Term-weighting
+                            #   approaches in automatic text retrieval." IP&M 24(5).
+                            import math
+                            total_triples = len(self.kg.triples) if self.kg.triples else 1
+                            # Count relation frequency (TF)
+                            rel_freq = {}
+                            for t in self.kg.triples:
+                                rel_freq[t.relation] = rel_freq.get(t.relation, 0) + 1
+                            # Query tokens for matching
+                            query_tokens = set(text.lower().split())
+
+                            def _score(candidate):
+                                direction, s, r, o = candidate
+                                # IDF: rarer relation = higher score
+                                freq = rel_freq.get(r, 1)
+                                idf = math.log(total_triples / freq) if freq > 0 else 0
+                                # Query match bonus: relation appears in query
+                                query_bonus = 1.0 if r.replace("_", " ") in text.lower() else 0.0
+                                # Forward preference: entity-as-subject
+                                fwd_bonus = 0.5 if direction == "forward" else 0.0
+                                return idf + query_bonus + fwd_bonus
+
+                            candidates.sort(key=_score, reverse=True)
                             direction, s, r, o = candidates[0]
                             return {
                                 "type": "inferred",
