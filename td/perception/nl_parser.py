@@ -426,18 +426,23 @@ class GenericNLParser:
 
             # Skip discourse deixis triples: "this shows" / "that means" / "it proves"
             # Two-stage approach (Jauhar et al. 2015):
-            #   Stage 1 (Classification): pronoun is "this"/"that"/"it" AND subject
+            #   Stage 1 (Classification): pronoun is demonstrative AND subject
             #   of an abstract/cognitive verb → discourse deixis → skip
             #
-            # Uses language-specific verb registry (not hardcoded).
-            # "it" only triggers for purely demonstrative verbs.
+            # Uses language registry for both pronouns and verbs.
             # Reference: Jauhar et al. (2015), *SEM, pp. 299-308.
+            # Reference: td/languages/en.py — DEMONSTRATIVE_PRONOUNS
             lang = doc.lang_ if doc else "en"
             abstract_verbs = self._get_abstract_verbs(lang)
             it_verbs = self._get_it_verbs(lang)
-            if new_s in ("this", "that") and r in abstract_verbs:
+            dem_pronouns = self.lang_config.demonstrative_pronouns
+            # "this"/"that" trigger for all abstract verbs
+            # "it" only triggers for purely demonstrative verbs
+            # Reference: td/languages/en.py — DEMONSTRATIVE_PRONOUNS
+            non_it_dems = dem_pronouns - {"it"}  # this, that
+            if new_s in non_it_dems and r in abstract_verbs:
                 continue
-            if new_s == "it" and r in it_verbs:
+            if new_s in dem_pronouns and r in it_verbs:
                 continue
 
             resolved.append((new_s, r, new_o))

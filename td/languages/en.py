@@ -140,6 +140,12 @@ ARTICLES = frozenset({"the", "a", "an"})
 # When spaCy is available, use token.dep_ == "case" (language-agnostic).
 GENITIVE_MARKERS = frozenset({"of"})
 
+# ── English Demonstrative Pronouns ────────────────────────────────
+# Used for discourse deixis detection.
+# "this"/"that"/"it" as subject of abstract verb → discourse deixis.
+# Reference: Jauhar et al. (2015), *SEM — two-stage approach
+DEMONSTRATIVE_PRONOUNS = frozenset({"this", "that", "it"})
+
 # ── Register English ──────────────────────────────────────────────
 register_language(LanguageConfig(
     code="en",
@@ -154,4 +160,5 @@ register_language(LanguageConfig(
     copula_verbs=COPULA_VERBS,
     articles=ARTICLES,
     genitive_markers=GENITIVE_MARKERS,
+    demonstrative_pronouns=DEMONSTRATIVE_PRONOUNS,
 ))

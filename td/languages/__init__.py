@@ -58,6 +58,10 @@ class LanguageConfig:
     articles: FrozenSet[str] = frozenset()
     # Genitive markers (e.g., "of") — entity-internal, not a relation
     genitive_markers: FrozenSet[str] = frozenset()
+    # Demonstrative pronouns for discourse deixis detection.
+    # Used with Jauhar et al. (2015) two-stage approach.
+    # "this"/"that"/"it" as subject of abstract verb → discourse deixis.
+    demonstrative_pronouns: FrozenSet[str] = frozenset()
 
 
 # ── Language Registry ─────────────────────────────────────────────
