@@ -276,6 +276,9 @@ class TestParserIntegration:
         from td.perception.hdc import build_default_vocabulary
         from td.memory.mhn import ModernHopfieldNetwork, MHNConfig
         p = GenericNLParser.__new__(GenericNLParser)
+        from td.languages import get_language
+        p._lang_config = get_language("en")
+        p._fallback_stop_words = p._lang_config.stop_words
         p._nlp = spacy.load("en_core_web_sm")
         p._coref_enabled = False
         p.vocab = build_default_vocabulary(dim=10000)

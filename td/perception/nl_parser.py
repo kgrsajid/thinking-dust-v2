@@ -123,14 +123,14 @@ class GenericNLParser:
         # All language-specific word sets are in td/languages/{lang}.py.
         # Reference: td/languages/__init__.py
         self._lang_config = get_language("en")  # default, updated on first nlp call
-        self._fallback_stop_words = self._lang_config.stop_words
+        self._fallback_stop_words = self.lang_config.stop_words
 
         # ─── INNATE: Stop-word prototype (HDC-encoded sentence) ──────
         # HDC stop word prototype — loaded from language registry.
         # Used for HDC fuzzy similarity matching (not string lookup).
         # String-based stop word detection uses spaCy token.is_stop.
         # Reference: td/languages/en.py
-        _stop_phrase = " ".join(sorted(self._lang_config.stop_words))
+        _stop_phrase = " ".join(sorted(self.lang_config.stop_words))
         self.stop_word_prototype = self._encode_phrase(_stop_phrase)
 
         # ─── INNATE: Relation prototypes (14 types) ──────────────────
@@ -139,24 +139,34 @@ class GenericNLParser:
         # Reference: td/languages/en.py, td/languages/__init__.py
         self.relation_prototypes = {
             name: self._encode_phrase(phrases)
-            for name, phrases in self._lang_config.relation_prototypes.items()
+            for name, phrases in self.lang_config.relation_prototypes.items()
         }
 
         self.constraint_signals = set(self.relation_prototypes.keys())
 
     def is_stop_word(self, word: str) -> bool:
-        """Check if a word is a stop word using spaCy (language-agnostic).
+        """Check if a word is a stop word using language registry.
 
-        Uses spaCy token.is_stop when available (supports 20+ languages).
-        Falls back to English stop word set when spaCy is not available.
+        Uses the language-specific fallback set (fast, no spaCy call).
+        For language-agnostic detection at token level, use token.is_stop
+        directly when you have a spaCy Doc.
 
-        Reference: spaCy built-in stop word lists (per-language)
+        Reference: td/languages/en.py — STOP_WORDS
         """
-        if self.nlp:
-            doc = self.nlp(word)
-            if doc and len(doc) > 0:
-                return doc[0].is_stop
         return word.lower() in self._fallback_stop_words
+
+    @property
+    def lang_config(self):
+        """Language configuration, lazily loaded if not set.
+        
+        Ensures _lang_config is always available even when __init__
+        was bypassed (e.g., in tests using __new__).
+        """
+        if not hasattr(self, '_lang_config') or self._lang_config is None:
+            from td.languages import get_language
+            self._lang_config = get_language("en")
+            self._fallback_stop_words = self.lang_config.stop_words
+        return self._lang_config
 
     def is_function_word(self, token) -> bool:
         """Check if a spaCy token is a function word (not a content word).
@@ -328,9 +338,12 @@ class GenericNLParser:
                 continue
 
             entity_name = entity_span.text.lower().strip()
-            for article in ("the ", "a ", "an "):
-                if entity_name.startswith(article):
-                    remainder = entity_name[len(article):]
+            # Strip leading articles using language registry.
+            # Reference: td/languages/en.py — ARTICLES
+            for article in self.lang_config.articles:
+                prefix = article + " "
+                if entity_name.startswith(prefix):
+                    remainder = entity_name[len(prefix):]
                     if " " in remainder:
                         entity_name = remainder
                     break
@@ -598,7 +611,9 @@ class GenericNLParser:
 
         for token in doc:
             # ─── Copular constructions: "X is Y" ─────────────────
-            if token.dep_ == "ROOT" and token.lemma_ in ("be", "become", "seem"):
+            # Uses language registry for copula verb lemmas.
+            # Reference: td/languages/en.py — COPULA_VERBS
+            if token.dep_ == "ROOT" and token.lemma_ in self.lang_config.copula_verbs:
                 subject = None
                 for child in token.children:
                     if child.dep_ in ("nsubj", "nsubjpass"):
@@ -901,8 +916,9 @@ class GenericNLParser:
                 # Start with chunk text
                 words = list(chunk.text.lower().split())
 
-                # Strip leading determiners ("the", "a", "an")
-                while words and words[0] in ("the", "a", "an"):
+                # Strip leading determiners using language registry.
+                # Reference: td/languages/en.py — ARTICLES
+                while words and words[0] in self.lang_config.articles:
                     words = words[1:]
 
                 # Include nummod children (e.g., "World War 2" → include "2")
@@ -1055,13 +1071,14 @@ class GenericNLParser:
         if len(graph.entities) < 2:
             return
 
-        # Relation words that should NOT be merged into entities
-        relation_words = {
-            "in", "of", "to", "from", "at", "on", "by", "for",
-            "into", "through", "during", "before", "after",
-            "is", "are", "was", "were", "be", "been", "has", "have", "had",
-            "part_of", "capital_of", "born_in", "lives_in", "located_in",
-        }
+        # Relation words that should NOT be merged into entities.
+        # Loaded from language registry (prepositions, copula verbs, stop words).
+        # KG-specific relation names are added separately.
+        # Reference: td/languages/en.py
+        relation_words = set(self.lang_config.prepositions)
+        relation_words.update(self.lang_config.copula_verbs)
+        relation_words.update(self.lang_config.stop_words)
+        relation_words.update({"part_of", "capital_of", "born_in", "lives_in", "located_in"})
 
         # Find adjacent entities in token order
         merged = True
@@ -1125,12 +1142,11 @@ class GenericNLParser:
 
         Reference: Compound noun detection in NLP (Manning & Schütze, 1999)
         """
-        # Spatial/temporal relation words that precede multi-word entities
-        relation_words = {
-            "in", "of", "to", "from", "at", "on", "by", "for",
-            "into", "through", "during", "before", "after",
-            "part_of", "capital_of", "born_in", "lives_in", "located_in",
-        }
+        # Spatial/temporal relation words that precede multi-word entities.
+        # Loaded from language registry.
+        # Reference: td/languages/en.py
+        relation_words = set(self.lang_config.prepositions)
+        relation_words.update({"part_of", "capital_of", "born_in", "lives_in", "located_in"})
 
         result_spans = []
         skip_until = -1
@@ -1245,18 +1261,24 @@ class GenericNLParser:
 
             # Pattern: X is [the] Y of Z
             # "is" must appear before Y, "of" must appear after Y
-            if "is" in between and "of" in between:
+            # Uses language registry for copula verbs and genitive markers.
+            # Reference: td/languages/en.py — COPULA_VERBS, GENITIVE_MARKERS
+            copulas = self.lang_config.copula_verbs
+            genitives = self.lang_config.genitive_markers
+            has_copula = any(t in copulas for t in between)
+            has_genitive = any(t in genitives for t in between)
+            if has_copula and has_genitive:
                 y_text = e2["text"]
-                # Verify Y is between "is" and "of" in the token sequence
-                is_idx = between.index("is") if "is" in between else -1
-                of_idx = between.index("of") if "of" in between else -1
+                # Verify Y is between copula and genitive in the token sequence
+                cop_idx = next((i for i, t in enumerate(between) if t in copulas), -1)
+                gen_idx = next((i for i, t in enumerate(between) if t in genitives), -1)
                 y_idx = None
                 for j, t in enumerate(between):
                     if t == y_text.split()[0]:
                         y_idx = j
                         break
 
-                if y_idx and is_idx < y_idx < of_idx:
+                if y_idx and cop_idx < y_idx < gen_idx:
                     # Valid "X is the Y of Z" pattern
                     rel_type = f"{y_text}_of"
                     rel_hdc = self._encode_phrase(f"{e1['text']} {rel_type} {e3['text']}")
@@ -1301,6 +1323,8 @@ class GenericNLParser:
             between = tokens[e2_tok_idx:e3_tok_idx + 1]
 
             # Pattern: Y [is] to Z — "to" must appear after Y
+            # Uses language registry for prepositions.
+            # Reference: td/languages/en.py — PREPOSITIONS
             if "to" in between:
                 y_text = e2["text"]
                 to_idx = between.index("to")
@@ -1342,9 +1366,11 @@ class GenericNLParser:
 
         to_add_rels = []
 
-        # Scan tokens for "is" + relation_word pattern
+        # Scan tokens for copula + relation_word pattern
+        # Uses language registry for copula verbs.
+        # Reference: td/languages/en.py — COPULA_VERBS
         for i, tok in enumerate(tokens):
-            if tok not in ("is", "are", "was", "were"):
+            if tok not in self.lang_config.copula_verbs:
                 continue
 
             # Look for relation word after "is"

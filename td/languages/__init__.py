@@ -50,6 +50,14 @@ class LanguageConfig:
     discourse_deixis_verbs: FrozenSet[str] = frozenset()
     discourse_deixis_it_verbs: FrozenSet[str] = frozenset()
     relation_prototypes: Dict[str, str] = field(default_factory=dict)
+    # Copula verbs for pattern matching (e.g., "is", "are", "was")
+    # Used by _merge_* methods. Replace with spaCy 'cop' dep when possible.
+    copula_verbs: FrozenSet[str] = frozenset()
+    # Articles for entity name cleaning (e.g., "the", "a", "an")
+    # Used by _get_chunk_text. Replace with spaCy 'det' dep when possible.
+    articles: FrozenSet[str] = frozenset()
+    # Genitive markers (e.g., "of") — entity-internal, not a relation
+    genitive_markers: FrozenSet[str] = frozenset()
 
 
 # ── Language Registry ─────────────────────────────────────────────

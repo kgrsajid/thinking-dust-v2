@@ -121,6 +121,25 @@ RELATION_PROTOTYPES = {
     "optimize": "optimize maximize minimize best",
 }
 
+# ── English Copula Verbs ──────────────────────────────────────────
+# Used by _merge_* pattern methods for string matching.
+# When spaCy is available, use token.dep_ == "cop" (language-agnostic).
+COPULA_VERBS = frozenset({
+    "is", "are", "was", "were", "be", "been", "being",
+    "become", "became", "seem", "seemed",
+})
+
+# ── English Articles ──────────────────────────────────────────────
+# Used by _get_chunk_text for entity name cleaning.
+# When spaCy is available, use token.pos_ == "DET" (language-agnostic).
+ARTICLES = frozenset({"the", "a", "an"})
+
+# ── English Genitive Markers ──────────────────────────────────────
+# "of" is entity-internal (genitive), not a relation.
+# "capital of France" → entity: "capital of France"
+# When spaCy is available, use token.dep_ == "case" (language-agnostic).
+GENITIVE_MARKERS = frozenset({"of"})
+
 # ── Register English ──────────────────────────────────────────────
 register_language(LanguageConfig(
     code="en",
@@ -132,4 +151,7 @@ register_language(LanguageConfig(
     discourse_deixis_verbs=DISCOURSE_DEIXIS_VERBS,
     discourse_deixis_it_verbs=DISCOURSE_DEIXIS_IT_VERBS,
     relation_prototypes=RELATION_PROTOTYPES,
+    copula_verbs=COPULA_VERBS,
+    articles=ARTICLES,
+    genitive_markers=GENITIVE_MARKERS,
 ))
