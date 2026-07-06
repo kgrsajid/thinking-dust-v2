@@ -140,6 +140,40 @@ def knowledge_graph():
     })
 
 
+@app.route("/api/fetch_url", methods=["POST"])
+def fetch_url():
+    """Fetch URL content for LLM simplification."""
+    data = request.json
+    url = data.get("url", "").strip()
+
+    if not url:
+        return jsonify({"error": "No URL provided"}), 400
+
+    try:
+        import urllib.request
+        import re as regex
+
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+        # Strip HTML tags — simple extraction
+        # Remove scripts and styles
+        html = regex.sub(r"<script[^>]*>.*?</script>", "", html, flags=regex.DOTALL | regex.IGNORECASE)
+        html = regex.sub(r"<style[^>]*>.*?</style>", "", html, flags=regex.DOTALL | regex.IGNORECASE)
+        # Remove tags
+        text = regex.sub(r"<[^>]+>", " ", html)
+        # Clean whitespace
+        text = regex.sub(r"\s+", " ", text).strip()
+
+        if not text:
+            return jsonify({"error": "No text content found"}), 400
+
+        return jsonify({"text": text[:5000], "url": url})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     print("\n✦ Thinking Dust v2 — Web Server")
     print(f"  → http://localhost:5000")
