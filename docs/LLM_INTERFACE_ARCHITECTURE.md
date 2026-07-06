@@ -420,6 +420,60 @@ Answer:"""
 
 **Goal:** Interactive teaching session.
 
+**Web UI with Puter.js (free LLM API):**
+
+```html
+<!-- TD v2 Teaching UI — uses Puter.js for free LLM access -->
+<!-- https://docs.puter.com/AI/ -->
+<script src="https://js.puter.com/v2/"></script>
+
+<script>
+// Simplifier: break down book text into triples
+async function simplify(chunk) {
+    const response = await puter.ai.chat(
+        `Break down this text into simple (subject, relation, object) triples.
+         Use ONLY these relations: is_a, exploits, prevents, mitigates, enables, requires, depends_on, contains, part_of, has_property, causes, produces.
+         Output as JSON array: [{"subject":"...", "relation":"...", "object":"..."}]
+         
+         Text: ${chunk}`,
+        { model: "gpt-5.4-nano" }
+    );
+    return JSON.parse(response);
+}
+
+// Explainer: convert TD v2 proof trace to human language
+async function explain(proofTrace) {
+    const response = await puter.ai.chat(
+        `Explain this reasoning chain in plain English.
+         Use ONLY the information provided. Do NOT add facts.
+         
+         Chain: ${proofTrace}`,
+        { model: "gpt-5.4-nano" }
+    );
+    return response;
+}
+
+// Reformulator: convert question to TD v2 query
+async function reformulate(question) {
+    const response = await puter.ai.chat(
+        `Convert this question into a TD v2 query.
+         Format: ask: what [relation] [entity]?
+         Or: ask: is [entity1] [relation] [entity2]?
+         
+         Question: ${question}`,
+        { model: "gpt-5.4-nano" }
+    );
+    return response;
+}
+</script>
+```
+
+**Puter.js features used:**
+- `puter.ai.chat()` — free LLM access (GPT-5.4-nano, Claude, etc.)
+- `puter.ai.listModels()` — list available models
+- User-Pays Model — users cover their own AI costs (no API key needed)
+- Works in any browser, no backend required
+
 ```
 > teach-book Web_Application_Security_Guide.md
 
