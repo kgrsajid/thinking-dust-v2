@@ -1034,7 +1034,89 @@ cp -r data/td_store/ backups/td_store_$(date +%Y%m%d)/
 
 ---
 
-## 10. Literature Foundation
+## 10. Language Isolation Architecture
+
+### Principle
+
+**No hardcoded English words in core logic.** All language-specific word sets are isolated in `td/languages/{lang}.py` files. The core code loads from the language registry — never directly from hardcoded sets.
+
+### Structure
+
+```
+td/languages/
+├── __init__.py    # Language registry + LanguageConfig dataclass
+├── en.py          # English word sets (stop words, prepositions, pronouns, etc.)
+└── de.py          # German skeleton (extensible to any language)
+```
+
+### LanguageConfig Fields
+
+| Field | Type | Purpose | Example (English) |
+|-------|------|---------|-------------------|
+| `stop_words` | FrozenSet[str] | Fallback stop words (when spaCy unavailable) | {"the", "a", "is", "are", ...} |
+| `prepositions` | FrozenSet[str] | Fallback prepositions (when spaCy unavailable) | {"in", "on", "at", "by", ...} |
+| `possessive_pronouns` | FrozenSet[str] | Possessive pronouns for coreference | {"its", "his", "her", ...} |
+| `entity_pronouns` | FrozenSet[str] | Personal pronouns for coreference | {"he", "she", "it", ...} |
+| `copula_verbs` | FrozenSet[str] | Copula verbs for pattern matching | {"is", "are", "was", ...} |
+| `articles` | FrozenSet[str] | Articles for entity name cleaning | {"the", "a", "an"} |
+| `genitive_markers` | FrozenSet[str] | Genitive markers (entity-internal) | {"of"} |
+| `demonstrative_pronouns` | FrozenSet[str] | Demonstrative pronouns for discourse deixis | {"this", "that", "it"} |
+| `discourse_deixis_verbs` | FrozenSet[str] | Abstract verbs for discourse deixis | {"show", "prove", "mean", ...} |
+| `discourse_deixis_it_verbs` | FrozenSet[str] | Subset where "it" is discourse deixis | {"show", "prove", "mean", ...} |
+| `relation_prototypes` | Dict[str, str] | HDC phrases for constraint detection | {"before": "before earlier precedes first", ...} |
+
+### How It Works
+
+```python
+# Core code loads from registry
+from td.languages import get_language
+
+lang_config = get_language("en")  # or "de", "fr", etc.
+
+# Use in code
+if token.text.lower() in lang_config.copula_verbs:
+    # Handle copular construction
+    pass
+
+# Registry fallback with warning
+lang_config = get_language("fr")  # warns if French not registered
+```
+
+### spaCy Integration (Primary Path)
+
+When spaCy is available, the primary path uses **Universal POS tags** (language-agnostic):
+
+| Feature | spaCy UD Tag | Language-Specific? |
+|---------|-------------|-------------------|
+| Stop words | `token.is_stop` | ❌ Universal |
+| Prepositions | `token.pos_ == "ADP"` | ❌ Universal |
+| Pronouns | `token.pos_ == "PRON"` | ❌ Universal |
+| Possessive | `token.morph.get("Poss") == "Yes"` | ❌ Universal |
+| Articles | `token.pos_ == "DET"` | ❌ Universal |
+| Copula | `token.dep_ == "cop"` | ❌ Universal |
+| Interrogative | `token.morph.get("PronType") == "Int"` | ❌ Universal |
+
+The language registry is the **fallback** when spaCy is unavailable (regex path).
+
+### Adding a New Language
+
+1. Copy `td/languages/en.py` → `td/languages/xx.py`
+2. Replace all English words with target language equivalents
+3. Register in `td/languages/__init__.py`: `from . import xx`
+4. Test with: `python -c "from td.languages import get_language; print(get_language('xx'))"`
+
+### Design Principles
+
+1. **No hardcoded English in core logic** — all word sets in `td/languages/`
+2. **spaCy UD is the primary path** — language-agnostic by design
+3. **Registry is the fallback** — for regex paths when spaCy unavailable
+4. **Silent fallback with warning** — unknown language → English + warning
+5. **Frozenset for immutability** — thread-safe, no shared-state bugs
+6. **Lazy initialization** — `lang_config` property with `__new__` safety
+
+---
+
+## 11. Literature Foundation
 
 This table documents every research paper that influences or will influence TD v2's architecture. "Status" indicates whether the paper's technique is currently implemented.
 
