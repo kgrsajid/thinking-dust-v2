@@ -1593,6 +1593,138 @@ def extract_triples_spacy(self, text: str) -> list[tuple[str, str, str]]:
 
 **Reference:** Honnibal & Montani (2017), "spaCy 2: Natural language understanding with Bloom embeddings."
 
+---
+
+### ⚠️ Known Caveats & Multilingual Fallback Guide
+
+This section documents every place where the code falls back to English-specific logic, and what to do for other languages.
+
+#### Caveat 1: Question Detection — PTB Tag Fallback
+
+**What happens:** spaCy's `en_core_web_sm` does NOT populate the UD morphological feature `PronType=Int` for interrogative words. The code falls back to Penn Treebank tags (`WP`, `WDT`, `WRB`).
+
+**Why:** spaCy's English models use a statistical morphologizer that doesn't set `PronType=Int` in the `token.morph` attribute. The PTB tags are set by the tagger and are reliable for English.
+
+**Impact:** The question detection is English-specific. For other languages:
+- **German:** `de_core_news_sm` DOES populate `PronType=Int` → UD path works
+- **French:** `fr_core_news_sm` DOES populate `PronType=Int` → UD path works
+- **Korean:** `ko_core_news_sm` sets `PronType=Int` → UD path works
+
+**What to do for a new language:**
+```python
+# 1. Check if the language model populates PronType=Int
+import spacy
+nlp = spacy.load("xx_core_news_sm")  # replace with target language
+doc = nlp("Who is the president?")    # use target language question
+for t in doc:
+    print(f"{t.text}: PronType={t.morph.get('PronType')}, tag={t.tag_}")
+
+# 2. If PronType=Int is populated → UD path works automatically
+# 3. If NOT populated → add language-specific PTB tag mapping:
+#    In td/thinking.py, the fallback checks t.tag_ in ("WP", "WDT", "WRB")
+#    For other languages, add the equivalent POS tags:
+#    German:  PW (was/who), PWS (which), PAV (where/when)
+#    French:  PRO (qui/que), DET (quel)
+```
+
+**Where the code is:** `td/thinking.py` — two places checking `t.tag_ in ("WP", "WDT", "WRB")`
+
+---
+
+#### Caveat 2: Entity Validation — PROPN/NOUN POS Tags
+
+**What happens:** Entity validation uses `token.pos_ == "PROPN"` (proper noun) to identify entities. This is a Universal POS tag and works across all languages.
+
+**Why it works:** Universal POS tags are language-agnostic by design. `PROPN` = proper noun in English, German, French, Korean, Turkish, etc.
+
+**Impact:** ✅ No English fallback needed. Works for any language with spaCy support.
+
+**What to do for a new language:** Nothing — UD PROPN is universal. Just ensure the language model is installed.
+
+---
+
+#### Caveat 3: Preposition Detection — ADP POS Tag
+
+**What happens:** The main path uses `token.pos_ == "ADP"` (adposition) for preposition detection. The regex fallback path uses a hardcoded English set.
+
+**Why:** `ADP` is a Universal POS tag. It covers prepositions (English), postpositions (Japanese, Korean, Turkish), and circumpositions (German).
+
+**Impact:** ✅ Main path is language-agnostic. ⚠️ Regex fallback is English-only.
+
+**What to do for a new language:** The spaCy path handles it automatically. If spaCy is not available, add language-specific prepositions to the `_pp_words` fallback set:
+```python
+# German: _pp_words |= {"auf", "aus", "bei", "mit", "nach", "seit", "von", "zu"}
+# French: _pp_words |= {"à", "de", "dans", "par", "pour", "sur", "avec"}
+# Turkish: postpositions, not prepositions — ADP tag handles this
+```
+
+**Where the code is:** `td/thinking.py` — `_strip_pp()` function in regex fallback
+
+---
+
+#### Caveat 4: Discourse Deixis — Abstract Verb Sense Set
+
+**What happens:** The `ABSTRACT_VERB_SENSE` set contains English verb lemmas (show, prove, mean, suggest, ...). The syntactic check (`nsubj` + head.lemma_) is language-agnostic, but the verb set is English.
+
+**Why:** The Jauhar et al. (2015) approach is language-agnostic in principle (syntactic role + head verb), but the verb lemmas are language-specific.
+
+**Impact:** ⚠️ English-only verb set. Other languages need their own abstract verb lemmas.
+
+**What to do for a new language:**
+```python
+# Add language-specific abstract verbs to ABSTRACT_VERB_SENSE
+# German: zeigen, beweisen, bedeuten, andeuten, enthüllen, ...
+# French: montrer, prouver, signifier, suggérer, indiquer, ...
+# Korean: 보여주다, 증명하다, 의미하다, 암시하다, ...
+
+# In td/perception/nl_parser.py, extend the set:
+GenericNLParser.ABSTRACT_VERB_SENSE |= {"zeigen", "beweisen", "bedeuten"}
+```
+
+**Where the code is:** `td/perception/nl_parser.py` — `ABSTRACT_VERB_SENSE` frozenset
+
+---
+
+#### Caveat 5: Adjectival Predicate Relation — "has_property"
+
+**What happens:** Adjectival predicates ("The man is friendly") are extracted as `(subject, has_property, adjective)`. The relation name `"has_property"` is not in any standard ontology (Wikidata, Schema.org).
+
+**Why:** Standard KG ontologies don't have a generic "property" relation for adjectival predicates. Wikidata has `P1552` (has quality) but it's for physical/observable qualities, not arbitrary adjectives.
+
+**Impact:** ⚠️ Non-standard relation. Won't interoperate with Wikidata/Schema.org data.
+
+**What to do if you need standard compliance:**
+```python
+# Option A: Map to Wikidata P1552 (has quality) — for physical qualities
+# Option B: Map to Schema.org additionalProperty — generic
+# Option C: Keep "has_property" as a custom relation (simplest)
+# Option D: Drop adjectival predicates entirely (loses information)
+```
+
+**Where the code is:** `td/perception/nl_parser.py` — Step 6 in `extract_triples_spacy()`
+
+---
+
+#### Caveat 6: Open Query Ranking — Relation Specificity Heuristic
+
+**What happens:** SPARQL open query results are ranked by relation name length (longer = more specific). This is a simple heuristic, not a learned ranking model.
+
+**Why:** A proper ranking model would require training data (question-query pairs). The heuristic is a reasonable default.
+
+**Impact:** ⚠️ May not always pick the most relevant result. Example: "where is France?" returns `france in eu` (2 letters) over `france capital_of paris` (10 letters) — both are valid, but the ranking prefers the longer relation name.
+
+**What to do for better ranking:**
+```python
+# Option A: Use Bio-SODA (2023) — node centrality as relevance
+# Option B: Use Q²Forge (2025) — competency question matching
+# Option C: Train a small classifier on question-query pairs
+# Option D: Keep the heuristic (good enough for most cases)
+```
+
+**Where the code is:** `td/thinking.py` — open query section in `_query_knowledge_graph()`
+
+---
+
 ### Prepositional Phrase Attachment — "of" Hardcoding
 
 The parser treats "of" differently from other prepositions when building entity names from noun chunks. This is a deliberate design decision.
