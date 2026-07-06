@@ -1068,9 +1068,10 @@ class GenericThinkingDust:
                     doc = self.parser.nlp(entity)
                 return doc.text if doc else entity
             else:
-                # Fallback: hardcoded English prepositions
-                _pp_words = {"on", "in", "at", "from", "to", "by", "for", "with", "into",
-                             "through", "during", "before", "after", "about", "near", "over"}
+                # Fallback: load prepositions from language registry
+                from td.languages import get_language
+                lang_config = get_language("en")  # default to English
+                _pp_words = lang_config.prepositions
                 while len(words) >= 3 and words[-2] in _pp_words:
                     words = words[:-2]
                 return " ".join(words)

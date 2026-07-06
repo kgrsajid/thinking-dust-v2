@@ -81,17 +81,25 @@ class GenericEntityGraph:
         self.constraints.append({"type_vec": type_vec, "subjects": subjects, "params": params or {}})
 
 
+from td.languages import get_language, LanguageConfig
+
 class GenericNLParser:
     """spaCy-powered parser. Uses dependency parsing for extraction.
 
-    Replaces hardcoded rules with spaCy NLP:
-    - stop_words → token.is_stop (language-agnostic)
-    - relation_prototypes → token.dep_ (dependency labels)
-    - _merge_*_pattern → doc.noun_chunks (compound noun detection)
-    - _pp_words → token.pos_ == "ADP" (preposition detection)
-    - _strip_pp → token.head (PP attachment via dependency tree)
-    - regex patterns → dependency tree traversal
+    All language-specific word sets are loaded from td/languages/.
+    No hardcoded English words in this class -- only spaCy UD features
+    and language registry lookups.
 
+    Replaces hardcoded rules with spaCy NLP:
+    - stop_words -> token.is_stop (language-agnostic)
+    - relation_prototypes -> token.dep_ (dependency labels)
+    - _merge_*_pattern -> doc.noun_chunks (compound noun detection)
+    - _pp_words -> token.pos_ == "ADP" (preposition detection)
+    - _strip_pp -> token.head (PP attachment via dependency tree)
+    - regex patterns -> dependency tree traversal
+
+    Reference: Universal Dependencies (Nivre et al., 2016)
+    Reference: spaCy multilingual support (20+ languages)
     Reference: Honnibal & Montani (2017), "spaCy 2"
     """
 
@@ -111,18 +119,19 @@ class GenericNLParser:
         # ─── spaCy NLP pipeline (lazy load) ──────────────────────────
         self._nlp = None
 
+        # ─── Language configuration (loaded from registry) ───────────
+        # All language-specific word sets are in td/languages/{lang}.py.
+        # Reference: td/languages/__init__.py
+        self._lang_config = get_language("en")  # default, updated on first nlp call
+        self._fallback_stop_words = self._lang_config.stop_words
+
         # ─── INNATE: Stop-word prototype (HDC-encoded sentence) ──────
-        # Kept for HDC encoding compatibility. Actual stop word detection
-        # uses spaCy's token.is_stop (language-agnostic).
-        self.stop_word_prototype = self._encode_phrase(
-            "the a an and or is are was were be been have has had do does did "
-            "will would could should may might must can shall it its "
-            "this that these those there their they them of to in for on with at by from "
-            "as into through during before after above below between under again "
-            "further then once here why how all any both each few more most other "
-            "some such no nor not only own same so than too very just but because "
-            "until while about against down out off over under"
-        )
+        # HDC stop word prototype — loaded from language registry.
+        # Used for HDC fuzzy similarity matching (not string lookup).
+        # String-based stop word detection uses spaCy token.is_stop.
+        # Reference: td/languages/en.py
+        _stop_phrase = " ".join(sorted(self._lang_config.stop_words))
+        self.stop_word_prototype = self._encode_phrase(_stop_phrase)
 
         # ─── INNATE: Relation prototypes (14 types) ──────────────────
         # Kept for HDC encoding compatibility. Actual relation detection
@@ -145,24 +154,6 @@ class GenericNLParser:
         }
 
         self.constraint_signals = set(self.relation_prototypes.keys())
-
-        # Stop words — fallback for non-spaCy paths only.
-        # When spaCy is available, use token.is_stop (language-agnostic).
-        # This set is only used when self.nlp is None.
-        # Reference: spaCy built-in stop word lists (per-language)
-        self._fallback_stop_words = {
-            "the", "a", "an", "and", "or", "is", "are", "was", "were", "be", "been",
-            "have", "has", "had", "do", "does", "did", "will", "would", "could",
-            "should", "may", "might", "must", "can", "shall", "it", "its", "this",
-            "that", "these", "those", "there", "their", "they", "them", "of", "to",
-            "in", "for", "on", "with", "at", "by", "from", "as", "into", "through",
-            "during", "above", "below", "between", "under",
-            "again", "further", "then", "once", "here", "all", "any",
-            "both", "each", "few", "more", "most", "other", "some", "such", "no",
-            "nor", "not", "only", "own", "same", "so", "than", "too", "very", "just",
-            "but", "because", "until", "while", "about", "against", "down",
-            "out", "off", "over",
-        }
 
     def is_stop_word(self, word: str) -> bool:
         """Check if a word is a stop word using spaCy (language-agnostic).
@@ -252,56 +243,25 @@ class GenericNLParser:
     #
     # Reference: Jauhar, S.K. et al. (2015). "Resolving Discourse-Deictic
     #   Pronouns: A Two-Stage Approach." *SEM 2015, pp. 299-308.
-    # ── Discourse Deixis Configuration ──────────────────────────────
-    # Language-specific abstract verb sets for discourse deixis detection.
-    # Used with the Jauhar et al. (2015) two-stage approach:
-    #   Stage 1: Is pronoun "this"/"that"/"it" the subject (nsubj) of a
-    #            verb in the abstract verb set? → discourse deixis → skip
-    #
+    # ── Discourse Deixis — Loaded from Language Registry ─────────
+    # All verb sets are in td/languages/{lang}.py — not hardcoded here.
     # The syntactic check (dep=nsubj) is language-agnostic (Universal
-    # Dependencies). The verb set is language-specific.
+    # Dependencies). The verb sets are language-specific.
     #
-    # To add a new language:
-    #   1. Identify abstract/cognitive verbs in the target language
-    #   2. Add to DISCOURSE_DEIXIS_REGISTRY below
-    #   3. See DEVELOPMENT.md "Caveat 4" for detailed guide
-    #
+    # To add a new language: see td/languages/de.py for example.
     # Reference: Jauhar et al. (2015), *SEM, pp. 299-308.
-    # Reference: Universal Dependencies — 'nsubj' label
-
-    DISCOURSE_DEIXIS_REGISTRY = {
-        # English — demonstration/implication verbs
-        "en": frozenset({
-            "show", "prove", "mean", "suggest", "indicate", "demonstrate",
-            "reveal", "confirm", "imply", "illustrate", "reflect",
-            "result", "lead", "cause", "enable", "allow", "prevent",
-            "require", "involve", "affect",
-            "surprise", "shock", "please", "anger", "upset", "annoy",
-        }),
-        # Add more languages as needed:
-        # "de": frozenset({"zeigen", "beweisen", "bedeuten", ...}),
-        # "fr": frozenset({"montrer", "prouver", "signifier", ...}),
-        # "ko": frozenset({"보여주다", "증명하다", "의미하다", ...}),
-    }
-
-    # Subset for "it" — only purely demonstrative verbs.
-    # "It shows X" → discourse deixis. "It surprises me" → NOT deixis.
-    DISCOURSE_DEIXIS_IT_REGISTRY = {
-        "en": frozenset({
-            "show", "prove", "mean", "suggest", "indicate", "demonstrate",
-            "reveal", "confirm", "imply", "illustrate", "reflect",
-        }),
-    }
 
     @classmethod
     def _get_abstract_verbs(cls, lang: str = "en") -> frozenset:
         """Get abstract verb set for discourse deixis in the given language."""
-        return cls.DISCOURSE_DEIXIS_REGISTRY.get(lang, frozenset())
+        config = get_language(lang)
+        return config.discourse_deixis_verbs if config else frozenset()
 
     @classmethod
     def _get_it_verbs(cls, lang: str = "en") -> frozenset:
         """Get verb set where 'it' is likely discourse deixis."""
-        return cls.DISCOURSE_DEIXIS_IT_REGISTRY.get(lang, frozenset())
+        config = get_language(lang)
+        return config.discourse_deixis_it_verbs if config else frozenset()
 
     @classmethod
     def register_discourse_deixis(cls, lang: str, verbs: set[str],
@@ -310,12 +270,15 @@ class GenericNLParser:
 
         Example:
             GenericNLParser.register_discourse_deixis("de", {
-                "zeigen", "beweisen", "bedeuten", "andeuten",
+                "zeigen", "beweisen", "bedeuten",
             }, {"zeigen", "beweisen"})
         """
-        cls.DISCOURSE_DEIXIS_REGISTRY[lang] = frozenset(verbs)
-        if it_verbs:
-            cls.DISCOURSE_DEIXIS_IT_REGISTRY[lang] = frozenset(it_verbs)
+        from .languages import _REGISTRY
+        if lang in _REGISTRY:
+            config = _REGISTRY[lang]
+            config.discourse_deixis_verbs = frozenset(verbs)
+            if it_verbs:
+                config.discourse_deixis_it_verbs = frozenset(it_verbs)
 
     def resolve_coreferences(self, text: str) -> tuple[str, dict]:
         """Build coreference map from text using spaCy two-pipeline approach.
