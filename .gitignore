@@ -41,3 +41,6 @@ env/
 htmlcov/
 venv-arm64/
 venv/
+
+# RDF store (runtime data)
+data/td_store/
