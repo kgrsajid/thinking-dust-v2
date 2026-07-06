@@ -140,8 +140,8 @@ textarea.input{min-height:52px;max-height:100px;resize:vertical;line-height:1.5}
 .legend-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:1px}
 
 /* PROOF */
-.proof{position:absolute;bottom:14px;left:14px;right:14px;background:rgba(255,255,255,.95);backdrop-filter:blur(12px);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:12px 16px;box-shadow:0 4px 24px rgba(0,0,0,.06);display:none}
-.proof.show{display:block;animation:slideUp .3s}
+.proof{position:absolute;bottom:14px;left:14px;right:14px;background:rgba(255,255,255,.95);backdrop-filter:blur(12px);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:12px 16px;box-shadow:0 4px 24px rgba(0,0,0,.06);opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .3s,transform .3s}
+.proof.show{opacity:1;transform:translateY(0);pointer-events:all}
 .proof__label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#059669;margin-bottom:5px}
 .proof__chain{display:flex;align-items:center;gap:3px;flex-wrap:wrap}
 .proof__node{padding:3px 9px;background:var(--color-text);color:#fff;border-radius:4px;font-size:12px;font-weight:600;opacity:0;transform:scale(.8);animation:pop .25s forwards}
@@ -153,6 +153,12 @@ textarea.input{min-height:52px;max-height:100px;resize:vertical;line-height:1.5}
 .explain.show{display:block;animation:slideUp .3s}
 .explain__label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--color-primary);margin-bottom:6px}
 .explain__text{font-size:14px;line-height:1.6;color:var(--color-text);white-space:pre-wrap}
+
+/* LOADING OVERLAY */
+.loading-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,.7);backdrop-filter:blur(6px);z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;opacity:0;pointer-events:none;transition:opacity .2s}
+.loading-overlay.show{opacity:1;pointer-events:all}
+.loading-spinner{width:40px;height:40px;border:3px solid var(--color-border);border-top-color:var(--color-primary);border-radius:50%;animation:spin .7s linear infinite}
+.loading-text{font-family:var(--font-display);font-size:15px;font-weight:600;color:var(--color-text-secondary)}
 
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--color-border-light);border-radius:3px}
@@ -289,6 +295,12 @@ textarea.input{min-height:52px;max-height:100px;resize:vertical;line-height:1.5}
   </main>
 </section>
 
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loading-overlay">
+  <div class="loading-spinner"></div>
+  <div class="loading-text" id="loading-text">Thinking...</div>
+</div>
+
 <!-- Puter.js -->
 <script src="https://js.puter.com/v2/"></script>
 <script>
@@ -307,17 +319,26 @@ function clearStatus(id){document.getElementById(id).className='status hidden'}
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function log(type,html){const e=document.getElementById('log');const r=document.createElement('div');r.className='lr';r.innerHTML=`<span class="tag ${type}">${type}</span>${html}`;e.appendChild(r);e.scrollTop=e.scrollHeight}
 
+/* ── LOADING OVERLAY ──────────────────── */
+function showLoading(text){
+  document.getElementById('loading-text').textContent=text||'Thinking...';
+  document.getElementById('loading-overlay').classList.add('show');
+}
+function hideLoading(){
+  document.getElementById('loading-overlay').classList.remove('show');
+}
+
 /* ── TEACH ─────────────────────────────── */
 async function teach(){
   const inp=document.getElementById('teach-input');const t=inp.value.trim();if(!t)return;
   const btn=document.getElementById('teach-btn');btn.disabled=true;
-  setStatus('teach-status','info','<span class="spin"></span> Teaching...');
+  showLoading('Teaching...');
   try{
     const r=await api('teach',{text:t});
-    if(r.error){setStatus('teach-status','err','✕ '+r.error);return}
+    if(r.error){setStatus('teach-status','err','✕ '+r.error);hideLoading();return}
     setStatus('teach-status','ok','✓ Stored');log('teach',esc(t));inp.value='';refreshGraph();
   }catch(e){setStatus('teach-status','err','✕ '+e.message)}
-  finally{btn.disabled=false;setTimeout(()=>clearStatus('teach-status'),2000)}
+  finally{btn.disabled=false;hideLoading();setTimeout(()=>clearStatus('teach-status'),2000)}
 }
 
 async function teachRel(){
@@ -329,17 +350,16 @@ async function teachRel(){
 async function teachFromURL(){
   const url=document.getElementById('url-input').value.trim();if(!url)return;
   const btn=document.getElementById('url-btn');btn.disabled=true;
-  setStatus('url-status','info','<span class="spin"></span> Fetching & simplifying...');
+  showLoading('Fetching page...');
 
   try{
     // Step 1: Fetch the URL content (via our server to avoid CORS)
-    setStatus('url-status','info','<span class="spin"></span> Fetching page...');
     const pageRes = await api('fetch_url',{url});
-    if(pageRes.error){setStatus('url-status','err','✕ '+pageRes.error);return}
+    if(pageRes.error){setStatus('url-status','err','✕ '+pageRes.error);hideLoading();return}
     const text = pageRes.text.substring(0, 4000); // LLM context limit
 
     // Step 2: Simplify with LLM (Puter.js)
-    setStatus('url-status','info','<span class="spin"></span> LLM simplifying into triples...');
+    showLoading('LLM simplifying into triples...');
     const llmResponse = await puter.ai.chat(
       `You are a knowledge extractor. Extract simple facts from the text below.
 
@@ -397,7 +417,7 @@ ${text}`,
     }
 
     // Step 3: Teach validated triples to TD v2
-    setStatus('url-status','info',`<span class="spin"></span> Teaching ${triples.length} facts...`);
+    showLoading(`Teaching ${triples.length} facts...`);
     const teachResult = await api('teach_triples', {triples});
 
     // Show what was taught
@@ -415,6 +435,7 @@ ${text}`,
     setStatus('url-status','err','✕ '+e.message);
   }finally{
     btn.disabled=false;
+    hideLoading();
     setTimeout(()=>clearStatus('url-status'),4000);
   }
 }
@@ -423,25 +444,24 @@ ${text}`,
 async function ask(){
   const inp=document.getElementById('ask-input');const t=inp.value.trim();if(!t)return;
   const btn=document.getElementById('ask-btn');btn.disabled=true;
-  setStatus('ask-status','info','<span class="spin"></span> Thinking...');
+  showLoading('Thinking...');
   document.getElementById('proof').classList.remove('show');
+  document.getElementById('explain').classList.remove('show');
   try{
     const r=await api('ask',{text:t});
-    if(r.error){setStatus('ask-status','err','✕ '+r.error);return}
+    if(r.error){setStatus('ask-status','err','✕ '+r.error);hideLoading();return}
     if(r.type==='unknown'||r.type==='None'){
       setStatus('ask-status','info',"I don't know — teach me more");
       log('ask',`${esc(t)} → <span style="color:var(--color-text-muted)">unknown</span>`);
-      document.getElementById('proof').classList.remove('show');
     }else{
       const c=r.confidence?` (${Math.round(r.confidence*100)}%)`:'';
       setStatus('ask-status','ok','✓ '+r.answer+c);
       log('ask',`${esc(t)} → <span style="color:#059669;font-weight:600">${esc(r.answer)}</span>`);
-      if(r.answer&&r.answer.includes('→'))showProof(r.answer);
-      else document.getElementById('proof').classList.remove('show');
+      if(r.answer&&r.answer.includes('→')){showProof(r.answer)}
     }
     inp.value='';
   }catch(e){setStatus('ask-status','err','✕ '+e.message)}
-  finally{btn.disabled=false;setTimeout(()=>clearStatus('ask-status'),4000)}
+  finally{btn.disabled=false;hideLoading();setTimeout(()=>clearStatus('ask-status'),4000)}
 }
 
 /* ── ASK WITH LLM EXPLANATION ──────────── */
@@ -494,10 +514,11 @@ Answer:`,
 function showProof(answer){
   const el=document.getElementById('proof');
   const chain=document.getElementById('proof-chain');
-  // Fully reset — remove show, clear children, force reflow
-  el.style.display='none';
+  // Fully reset
+  el.classList.remove('show');
   chain.innerHTML='';
-  void el.offsetWidth; // force reflow so animation restarts
+  // Force reflow so animation restarts
+  void el.offsetWidth;
 
   const parts=answer.split('→').map(s=>s.trim()).filter(s=>s.length>0);
   if(parts.length<2)return;
@@ -508,8 +529,8 @@ function showProof(answer){
       if(i<parts.length-1){setTimeout(()=>{const r=document.createElement('span');r.className='proof__rel';r.textContent=' → ';chain.appendChild(r)},120)}
     },i*250)
   });
-  // Show after a tiny delay so the browser registers the reflow
-  setTimeout(()=>{el.style.display='block'},10);
+  // Show with delay so nodes animate in first
+  setTimeout(()=>{el.classList.add('show')},100);
 }
 
 /* ── GRAPH ─────────────────────────────── */
