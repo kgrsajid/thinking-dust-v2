@@ -1448,25 +1448,31 @@ class GenericThinkingDust:
                 best_sim = t.retrieved_similarity
                 best_meta = t.retrieved_metadata
         if best_sim > 0.3 and best_meta:
-            text = (best_meta.get("description") or
-                    best_meta.get("solution_text") or
-                    best_meta.get("problem", ""))
-            if text and text != "I don't know this one yet.":
-                # Entity validation for medium-similarity cases to prevent hallucinations.
-                # High similarity (>=0.7) = near-perfect match, trust it.
-                # Low similarity (<=0.3) = already filtered by sim threshold.
-                # Medium similarity (0.3-0.7) = validate entity overlap.
+            # Use problem text for validation (contains query entities)
+            problem_text = best_meta.get("problem", "")
+            # Use answer text for display
+            answer_text = (best_meta.get("description") or
+                           best_meta.get("solution_text") or
+                           problem_text)
+            if answer_text and answer_text != "I don't know this one yet.":
                 if best_sim >= 0.7:
-                    return {"type": "learned", "formatted": text, "similarity": best_sim}
+                    return {"type": "learned", "formatted": answer_text, "similarity": best_sim}
 
-                # Validate: ALL query entities must appear in the answer.
+                # Validate: main query entity must appear in problem text.
                 # Prevents "is Norway part of Europe" → "EU is part of Europe" hallucination.
-                # Norway is in the query but not in the answer → reject.
-                query_entities = {e['text'].lower() for e in graph.entities}
-                retrieved_words = set(text.lower().split())
-                matched = query_entities & retrieved_words
-                if matched == query_entities:
-                    return {"type": "learned", "formatted": text, "similarity": best_sim}
+                # Norway doesn't appear in stored problem → rejected.
+                # "france capital is" → "france" appears in "The capital of France is Paris" → accepted.
+                query_words = set()
+                for e in graph.entities:
+                    query_words.update(e['text'].lower().split())
+                # Remove generic words that shouldn't count as entities
+                generic_words = {"part", "of", "is", "the", "in", "a", "an", "and", "or", "capital"}
+                entity_words = query_words - generic_words
+                if entity_words and problem_text:
+                    problem_words = set(problem_text.lower().split())
+                    overlap = entity_words & problem_words
+                    if overlap:
+                        return {"type": "learned", "formatted": answer_text, "similarity": best_sim}
         return None
 
     def _compute_confidence(self, solution, thoughts, sub_problems):
