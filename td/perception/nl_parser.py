@@ -998,7 +998,7 @@ class GenericNLParser:
 
                 # Otherwise use the full chunk
                 words = token_chunk.text.lower().split()
-                while words and words[0] in ("the", "a", "an"):
+                while words and words[0] in self.lang_config.articles:
                     words = words[1:]
                 # Include nummod children (e.g., "World War 2" → include "2")
                 for child in token.children:
@@ -1011,7 +1011,7 @@ class GenericNLParser:
                     if child.dep_ == "prep":
                         for gc in child.children:
                             if gc.dep_ == "pobj":
-                                if child.text.lower() == "of":
+                                if child.text.lower() in self.lang_config.genitive_markers:
                                     # "of" is entity-internal, always include
                                     prep_phrase = f"of {gc.text.lower()}"
                                     for ggc in gc.children:
@@ -1325,9 +1325,11 @@ class GenericNLParser:
             # Pattern: Y [is] to Z — "to" must appear after Y
             # Uses language registry for prepositions.
             # Reference: td/languages/en.py — PREPOSITIONS
-            if "to" in between:
+            dative_markers = self.lang_config.prepositions  # "to" is in prepositions
+            has_dative = any(t in dative_markers for t in between)
+            if has_dative:
                 y_text = e2["text"]
-                to_idx = between.index("to")
+                to_idx = next(i for i, t in enumerate(between) if t in dative_markers)
                 y_idx = None
                 for j, t in enumerate(between):
                     if t == y_text.split()[0]:

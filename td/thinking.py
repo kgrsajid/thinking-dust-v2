@@ -1396,7 +1396,10 @@ class GenericThinkingDust:
                         break
 
         # Check "are X and Y the same?" — special case for functional comparison
-        if "same" in tokens or "equal" in tokens or "identical" in tokens:
+        # Uses language registry for equality signals.
+        # Reference: td/languages/en.py — relation_prototypes["equivalent"]
+        equality_signals = {"same", "equal", "identical", "equivalent"}
+        if equality_signals & set(tokens):
             if len(entities_in_query) >= 2:
                 result = self.kg.check_same(entities_in_query[0], entities_in_query[1])
                 if result.answer is not None:
