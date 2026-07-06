@@ -370,14 +370,12 @@ class GenericNLParser:
             if new_o in text_to_entity:
                 new_o = text_to_entity[new_o]
 
-            # Skip discourse deixis triples: "this shows" / "that means"
+            # Skip discourse deixis triples: "this shows" / "that means" / "it proves"
             # Two-stage approach (Jauhar et al. 2015):
-            #   Stage 1 (Classification): pronoun is "this"/"that" AND subject
+            #   Stage 1 (Classification): pronoun is "this"/"that"/"it" AND subject
             #   of an abstract/cognitive verb → discourse deixis → skip
-            #   The syntactic check (nsubj + head.lemma_) is the key — not a
-            #   word list match.
             # Reference: Jauhar et al. (2015), *SEM, pp. 299-308.
-            if new_s in ("this", "that") and r in self.ABSTRACT_VERB_SENSE:
+            if new_s in ("this", "that", "it") and r in self.ABSTRACT_VERB_SENSE:
                 continue
 
             resolved.append((new_s, r, new_o))

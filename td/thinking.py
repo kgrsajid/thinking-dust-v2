@@ -1177,6 +1177,29 @@ class GenericThinkingDust:
 
         return triples
 
+    def _is_interrogative(self, text: str) -> bool:
+        """Detect if text is a question using UD features + PTB fallback.
+
+        Uses UD PronType=Int morphological feature when available.
+        Falls back to Penn Treebank tags (WP/WDT/WRB) for English models
+        where spaCy doesn't populate PronType=Int.
+
+        Reference: Nivre et al. (2016), Universal Dependencies 2.0
+        Reference: de Marneffe et al. (2021), Computational Linguistics 47(2)
+        """
+        if not self.parser.nlp:
+            return text.rstrip().endswith("?")
+        doc = self.parser.nlp(text)
+        for t in doc:
+            # UD morphological feature (language-agnostic)
+            pron_type = t.morph.get("PronType")
+            if pron_type and pron_type == "Int":
+                return True
+            # PTB tag fallback for English models
+            if t.tag_ in ("WP", "WDT", "WRB"):
+                return True
+        return False
+
     def _query_knowledge_graph(self, text: str) -> dict | None:
         """Query the knowledge graph for inferred answers.
 
@@ -1222,20 +1245,8 @@ class GenericThinkingDust:
                 # Reference: Nivre et al. (2016), Universal Dependencies 2.0
                 # Reference: de Marneffe et al. (2021), Computational Linguistics 47(2)
                 if len(entities_in_query) == 1:
-                    # Detect questions using spaCy
-                    query_doc = self.parser.nlp(text) if self.parser.nlp else None
-                    has_interrogative = False
-                    if query_doc:
-                        for t in query_doc:
-                            # UD morphological feature (language-agnostic)
-                            if "Int" in t.morph.get("PronType"):
-                                has_interrogative = True
-                                break
-                            # PTB tag fallback for English models
-                            # WP=who/what, WDT=which/that, WRB=where/when/how
-                            if t.tag_ in ("WP", "WDT", "WRB"):
-                                has_interrogative = True
-                                break
+                    # Detect questions using shared method
+                    has_interrogative = self._is_interrogative(text)
                     has_question_mark = text.rstrip().endswith("?")
 
                     if not has_interrogative and not has_question_mark:
@@ -1410,19 +1421,9 @@ class GenericThinkingDust:
 
             # SPARQL inverse query: "What is the capital of France?"
             # (single entity + relation, open question)
-            # Uses UD PronType=Int feature, PTB tags as fallback
+            # Uses shared _is_interrogative method (UD + PTB fallback)
             if len(entities_in_query) == 1 and relation_in_query:
-                query_doc = self.parser.nlp(text) if self.parser.nlp else None
-                has_interrogative = False
-                if query_doc:
-                    for t in query_doc:
-                        if "Int" in t.morph.get("PronType"):
-                            has_interrogative = True
-                            break
-                        if t.tag_ in ("WP", "WDT", "WRB"):
-                            has_interrogative = True
-                            break
-                if has_interrogative:
+                if self._is_interrogative(text):
                     inv_results = self.sparql_store.inverse_query(
                         relation_in_query, entities_in_query[0]
                     )
@@ -1501,15 +1502,31 @@ class GenericThinkingDust:
                 query_doc = self.parser.nlp(query_text) if self.parser.nlp else None
                 retrieved_doc = self.parser.nlp(problem_text) if self.parser.nlp else None
                 if query_doc and retrieved_doc:
-                    # Proper nouns (PROPN) — ALL must appear in retrieved text
-                    # "is Norway part of Europe?" → PROPNs: {norway, europe}
-                    # "EU is part of Europe"      → PROPNs: {eu, europe}
-                    # "norway" NOT in retrieved → REJECT (correct!)
+                    # Extract entities using both POS tags and NER
+                    # NER catches lowercase proper nouns ("norway") that POS
+                    # might miss (spaCy tags lowercase as NOUN, not PROPN).
+                    # Reference: Honnibal & Montani (2017), spaCy NER
+                    query_ner = {e.text.lower() for e in query_doc.ents}
+                    retrieved_ner = {e.text.lower() for e in retrieved_doc.ents}
                     query_propns = {t.text.lower() for t in query_doc if t.pos_ == "PROPN"}
                     retrieved_propns = {t.text.lower() for t in retrieved_doc if t.pos_ == "PROPN"}
-                    if query_propns:
-                        if not query_propns.issubset(retrieved_propns):
+
+                    # Merge NER + POS for broader entity coverage
+                    query_entities = query_ner | query_propns
+                    retrieved_entities = retrieved_ner | retrieved_propns
+
+                    if query_entities:
+                        # ALL query entities must appear in retrieved text
+                        if not query_entities.issubset(retrieved_entities):
                             return None  # Not all query entities found → reject
+                    else:
+                        # No entities found — fall back to noun overlap
+                        query_nouns = {t.text.lower() for t in query_doc
+                                       if t.pos_ in ("NOUN", "PROPN")}
+                        retrieved_nouns = {t.text.lower() for t in retrieved_doc
+                                           if t.pos_ in ("NOUN", "PROPN")}
+                        if query_nouns and not query_nouns.issubset(retrieved_nouns):
+                            return None
                     return {"type": "learned", "formatted": answer_text, "similarity": best_sim}
                 else:
                     # No spaCy — fall back to exact entity match from graph
