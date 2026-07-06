@@ -341,20 +341,29 @@ async function teachFromURL(){
     // Step 2: Simplify with LLM (Puter.js)
     setStatus('url-status','info','<span class="spin"></span> LLM simplifying into triples...');
     const llmResponse = await puter.ai.chat(
-      `You are a knowledge extractor. Break down the following text into simple facts.
+      `You are a knowledge extractor. Extract simple facts from the text below.
 
-RULES:
-1. Each fact MUST be: {"subject":"...", "relation":"...", "object":"..."}
-2. Output ONLY a valid JSON array. No other text. No explanation. No markdown.
-3. Use ONLY these relations: is_a, exploits, prevents, mitigates, enables, requires, depends_on, contains, part_of, causes, produces
-4. Subject and object MUST be short noun phrases (1-3 words max)
-5. Skip navigation text, headers, footers, "see also", "references", disclaimers, table of contents
-6. Skip sentences that don't contain a clear factual claim
-7. Skip meta-text like "this article discusses", "the following section"
-8. Only extract facts that would be useful for answering questions later
+OUTPUT FORMAT — valid JSON array ONLY:
+[{"subject":"SQL Injection","relation":"is_a","object":"code injection attack"}]
 
-BAD output: "Here are the facts: [{...}]"
-GOOD output: [{"subject":"SQL Injection","relation":"is_a","relation":"code injection attack"}]
+STRICT RULES:
+1. subject and object: 1-3 words. Proper nouns preferred. NO full sentences.
+2. relation: ONE of these ONLY — is_a, exploits, prevents, mitigates, enables, requires, contains, part_of, causes, produces, depends_on
+3. Each fact must be a clear, atomic claim. NOT a description.
+4. DO NOT extract: navigation, headers, footers, "see also", disclaimers, meta-text
+5. DO NOT extract: "X is a technique that..." — split into: X is_a technique
+6. DO NOT use multi-word relations like "depends_on" for things that aren't dependencies
+7. Output ONLY the JSON array. No explanation. No markdown. No extra text.
+
+EXAMPLES OF GOOD FACTS:
+{"subject":"SQL Injection","relation":"is_a","object":"code injection attack"}
+{"subject":"parameterized queries","relation":"prevents","object":"SQL Injection"}
+{"subject":"DNA","relation":"part_of","object":"genes"}
+
+EXAMPLES OF BAD FACTS (DO NOT DO THIS):
+{"subject":"escaping context","relation":"depends_on","object":"HTML"}  ← too vague
+{"subject":"eval","relation":"prevents","object":"use"}  ← meaningless
+{"subject":"XSS","relation":"mitigates","object":"unescaped dynamic content"}  ← too long
 
 Text:
 ${text}`,
@@ -387,17 +396,20 @@ ${text}`,
       return;
     }
 
-    // Step 3: Teach each triple to TD v2
+    // Step 3: Teach validated triples to TD v2
     setStatus('url-status','info',`<span class="spin"></span> Teaching ${triples.length} facts...`);
-    let taught=0;
+    const teachResult = await api('teach_triples', {triples});
+
+    // Show what was taught
     for(const t of triples){
-      const fact=`${t.subject} ${t.relation.replace(/_/g,' ')} ${t.object}`;
-      await api('teach',{text:fact});
       log('teach',`<span style="color:var(--color-primary)">${esc(t.subject)}</span> —[${esc(t.relation)}]→ ${esc(t.object)}`);
-      taught++;
     }
 
-    setStatus('url-status','ok',`✓ ${taught} facts taught from URL`);
+    if(teachResult.skipped>0){
+      setStatus('url-status','ok',`✓ ${teachResult.taught} taught, ${teachResult.skipped} skipped (too long/garbage)`);
+    }else{
+      setStatus('url-status','ok',`✓ ${teachResult.taught} facts taught from URL`);
+    }
     refreshGraph();
   }catch(e){
     setStatus('url-status','err','✕ '+e.message);

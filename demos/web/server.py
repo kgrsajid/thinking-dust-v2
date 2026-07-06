@@ -34,7 +34,22 @@ print("Initializing Thinking Dust v2...")
 vocab = build_default_vocabulary(dim=10000)
 mhn = ModernHopfieldNetwork(MHNConfig(dim=10000, min_similarity=0.01))
 td = GenericThinkingDust(vocab=vocab, mhn=mhn, dim=10000, pure_mode=True)
-print(f"Ready. {len(td.kg.triples)} triples loaded.")
+
+# Load existing knowledge from RDF store
+store_path = os.path.join(PROJECT_ROOT, "data", "td_store")
+if os.path.exists(store_path):
+    td.kg.load(store_path)
+    print(f"Loaded {len(td.kg.triples)} triples from RDF store.")
+else:
+    print("No existing store found. Starting fresh.")
+
+
+def save_kg():
+    """Save KG to RDF store after teaching."""
+    try:
+        td.kg.save(store_path)
+    except Exception as e:
+        print(f"Warning: Could not save KG: {e}")
 
 
 @app.route("/")
@@ -54,6 +69,7 @@ def teach():
 
     try:
         result = td.teach(text, answer or text)
+        save_kg()  # Persist after teaching
         return jsonify({
             "success": True,
             "message": result.get("message", "Taught"),
@@ -87,7 +103,56 @@ def ask():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/teach_relation", methods=["POST"])
+@app.route("/api/teach_triples", methods=["POST"])
+def teach_triples():
+    """Teach validated triples from LLM output."""
+    data = request.json
+    triples = data.get("triples", [])
+
+    if not triples:
+        return jsonify({"error": "No triples provided"}), 400
+
+    taught = 0
+    skipped = 0
+    errors = []
+
+    for t in triples:
+        s = str(t.get("subject", "")).strip()
+        r = str(t.get("relation", "")).strip().lower().replace(" ", "_")
+        o = str(t.get("object", "")).strip()
+
+        # Validate: subject and object must be 1-5 words, non-empty
+        if not s or not o or not r:
+            skipped += 1
+            continue
+        if len(s.split()) > 5 or len(o.split()) > 5:
+            skipped += 1
+            continue
+        # Skip if subject == object
+        if s.lower() == o.lower():
+            skipped += 1
+            continue
+        # Skip garbage relations
+        if len(r) < 2:
+            skipped += 1
+            continue
+
+        try:
+            fact = f"{s} {r.replace('_', ' ')} {o}"
+            td.teach(fact, fact)
+            taught += 1
+        except Exception as e:
+            errors.append(f"{s} {r} {o}: {str(e)[:50]}")
+
+    save_kg()
+
+    return jsonify({
+        "success": True,
+        "taught": taught,
+        "skipped": skipped,
+        "errors": errors[:5],
+        "total_triples": len(td.kg.triples),
+    })
 def teach_relation():
     """Teach a relation property."""
     data = request.json
@@ -99,6 +164,7 @@ def teach_relation():
 
     try:
         td.teach_relation(name, prop)
+        save_kg()  # Persist after teaching
         return jsonify({"success": True, "message": f"{name} → {prop}"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
