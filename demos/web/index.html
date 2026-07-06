@@ -148,6 +148,12 @@ textarea.input{min-height:52px;max-height:100px;resize:vertical;line-height:1.5}
 @keyframes pop{to{opacity:1;transform:scale(1)}}
 .proof__rel{font-size:11px;color:var(--color-text-muted);padding:0 2px}
 
+/* EXPLAIN PANEL */
+.explain{position:absolute;bottom:70px;left:14px;right:14px;background:rgba(255,255,255,.95);backdrop-filter:blur(12px);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:14px 18px;box-shadow:0 4px 24px rgba(0,0,0,.06);display:none;max-height:160px;overflow-y:auto}
+.explain.show{display:block;animation:slideUp .3s}
+.explain__label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--color-primary);margin-bottom:6px}
+.explain__text{font-size:14px;line-height:1.6;color:var(--color-text);white-space:pre-wrap}
+
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--color-border-light);border-radius:3px}
 </style>
@@ -275,6 +281,10 @@ textarea.input{min-height:52px;max-height:100px;resize:vertical;line-height:1.5}
         <div class="proof__label">✓ Derived — never taught this</div>
         <div class="proof__chain" id="proof-chain"></div>
       </div>
+      <div class="explain" id="explain">
+        <div class="explain__label">Human language explanation</div>
+        <div class="explain__text" id="explain-text"></div>
+      </div>
     </div>
   </main>
 </section>
@@ -354,8 +364,11 @@ ${text}`,
     // Parse triples — try multiple strategies
     let triples;
     try{
+      // Puter.js may return an object or string
+      const raw = typeof llmResponse === 'string' ? llmResponse : 
+                  (llmResponse?.message?.content || llmResponse?.content || llmResponse?.text || JSON.stringify(llmResponse));
       // Strategy 1: find JSON array in response
-      const m=llmResponse.match(/\[[\s\S]*\]/);
+      const m=raw.match(/\[[\s\S]*\]/);
       if(m){
         // Clean common LLM mistakes: trailing commas, comments
         let json=m[0].replace(/,\s*]/g,']').replace(/,\s*}/g,'}');
@@ -365,7 +378,7 @@ ${text}`,
       }
     }catch(e){
       setStatus('url-status','err','✕ LLM did not return valid JSON. Try a shorter text.');
-      log('err','LLM output: '+esc(llmResponse.substring(0,200)));
+      log('err','LLM parse error: '+esc(String(e).substring(0,200)));
       return;
     }
 
@@ -423,19 +436,26 @@ async function ask(){
 async function askWithExplanation(){
   const inp=document.getElementById('ask-input');const t=inp.value.trim();if(!t)return;
   const btn=document.getElementById('explain-btn');btn.disabled=true;
-  setStatus('ask-status','info','<span class="spin"></span> Thinking + explaining...');
-  document.getElementById('proof').classList.remove('show');
+  setStatus('ask-status','info','<span class="spin"></span> Thinking...');
+  document.getElementById('proof').style.display='none';
+  document.getElementById('explain').classList.remove('show');
+
   try{
     // Step 1: Ask TD v2
     const r=await api('ask',{text:t});
-    if(r.error||r.type==='unknown'){setStatus('ask-status','info',"I don't know — teach me more");return}
+    if(r.error||r.type==='unknown'){
+      setStatus('ask-status','info',"I don't know — teach me more");
+      return;
+    }
 
     log('ask',`${esc(t)} → <span style="color:#059669;font-weight:600">${esc(r.answer)}</span>`);
     if(r.answer&&r.answer.includes('→'))showProof(r.answer);
 
     // Step 2: LLM explains the reasoning
     setStatus('ask-status','info','<span class="spin"></span> Explaining in human language...');
-    const explanation=await puter.ai.chat(
+
+    // Puter.js returns object — extract text
+    const llmRaw = await puter.ai.chat(
       `Explain this reasoning chain in plain, concise English.
 Use ONLY the information in the chain. Do NOT add facts.
 If the chain is insufficient, say "Based on what I've been taught..."
@@ -446,19 +466,26 @@ TD v2 reasoning: ${r.answer}
 Answer:`,
       {model:"gpt-5.4-nano"}
     );
-    setStatus('ask-status','ok','✓ '+explanation);
+    const explanation = typeof llmRaw === 'string' ? llmRaw :
+                        (llmRaw?.message?.content || llmRaw?.content || llmRaw?.text || String(llmRaw));
+
+    // Show in big panel
+    document.getElementById('explain-text').textContent = explanation;
+    document.getElementById('explain').classList.add('show');
+    setStatus('ask-status','ok','✓ Explanation ready');
+
   }catch(e){setStatus('ask-status','err','✕ '+e.message)}
-  finally{btn.disabled=false;setTimeout(()=>clearStatus('ask-status'),6000)}
+  finally{btn.disabled=false}
 }
 
 /* ── PROOF TRACE ───────────────────────── */
 function showProof(answer){
   const el=document.getElementById('proof');
   const chain=document.getElementById('proof-chain');
-  // Reset completely
-  el.classList.remove('show');
-  void el.offsetWidth; // force reflow
+  // Fully reset — remove show, clear children, force reflow
+  el.style.display='none';
   chain.innerHTML='';
+  void el.offsetWidth; // force reflow so animation restarts
 
   const parts=answer.split('→').map(s=>s.trim()).filter(s=>s.length>0);
   if(parts.length<2)return;
@@ -469,7 +496,8 @@ function showProof(answer){
       if(i<parts.length-1){setTimeout(()=>{const r=document.createElement('span');r.className='proof__rel';r.textContent=' → ';chain.appendChild(r)},120)}
     },i*250)
   });
-  el.classList.add('show');
+  // Show after a tiny delay so the browser registers the reflow
+  setTimeout(()=>{el.style.display='block'},10);
 }
 
 /* ── GRAPH ─────────────────────────────── */
