@@ -1214,48 +1214,13 @@ class GenericThinkingDust:
                     is_question = any(t in question_words for t in tokens)
                     has_question_mark = "?" in text or text.rstrip().endswith("?")
 
-                    # Only use question pattern for actual questions
-                    # "where is X" → question word present
-                    # "capital of X?" → has question mark
-                    # "is Norway part of Europe" → neither, normal KG query
                     if not is_question and not has_question_mark:
                         return None
 
-                    kg_relations = set(t.relation for t in self.kg.triples)
-                    kg_relations.update(self.kg.relation_properties.keys())
                     entity = entities_in_query[0]
 
-                    # ─── Question pattern → relation mapping ────────
-                    if is_question:
-                        question_relation_map = {
-                            "where": ["in", "located_in", "part_of", "lives_in"],
-                            "who": ["married_to", "loves", "created_by", "founded_by", "mother_of", "father_of"],
-                            "when": ["born_in", "happened_in", "started_in"],
-                        }
-                        qword = None
-                        for t in tokens:
-                            if t in question_relation_map:
-                                qword = t
-                                break
-                        if qword:
-                            for rel in question_relation_map[qword]:
-                                if rel in kg_relations:
-                                    inv_results = self.sparql_store.inverse_query(rel, entity) if self.sparql_store else []
-                                    if inv_results:
-                                        return {
-                                            "type": "inferred",
-                                            "formatted": f"{', '.join(inv_results)} {rel} {entity}",
-                                            "confidence": 0.90,
-                                            "method": "question_pattern_inverse",
-                                        }
-                                    fwd_results = self.sparql_store.query_relation(entity, rel) if self.sparql_store else []
-                                    if fwd_results:
-                                        return {
-                                            "type": "inferred",
-                                            "formatted": f"{entity} {rel} {', '.join(fwd_results)}",
-                                            "confidence": 0.90,
-                                            "method": "question_pattern_forward",
-                                        }
+                    kg_relations = set(t.relation for t in self.kg.triples)
+                    kg_relations.update(self.kg.relation_properties.keys())
 
                     def _try_inverse_query(rel):
                         """Try entity as subject first, then as object."""
@@ -1269,6 +1234,7 @@ class GenericThinkingDust:
                                 return self.kg.query(t.subject, rel, entity)
                         return None
 
+                    # Try matching tokens to KG relations first
                     for token in tokens:
                         if token in kg_relations:
                             result = _try_inverse_query(token)
@@ -1279,12 +1245,58 @@ class GenericThinkingDust:
                                     "confidence": result.confidence,
                                     "method": result.method,
                                 }
-                    # Also check compound relations
+                    # Check compound relations
                     for i, token in enumerate(tokens):
                         for rel in kg_relations:
                             parts = rel.split("_")
                             if len(parts) == 2 and i + 1 < len(tokens):
                                 if token == parts[0] and tokens[i + 1] == parts[1]:
+                                    result = _try_inverse_query(rel)
+                                    if result and result.answer is not None:
+                                        return {
+                                            "type": "inferred",
+                                            "formatted": result.proof_trace,
+                                            "confidence": result.confidence,
+                                            "method": result.method,
+                                        }
+
+                    # ─── Open query: try ALL relations (language-agnostic) ──
+                    # No hardcoded mapping. SPARQL handles any relation.
+                    # "where is France?" → try all relations France participates in.
+                    if self.sparql_store is not None:
+                        # Forward: entity as subject
+                        fwd = self.sparql_store.query_sparql_bindings(
+                            f'SELECT ?p ?o WHERE {{ {str(self.sparql_store._entity_node(entity))} ?p ?o . '
+                            f'FILTER(STRSTARTS(STR(?p), "http://thinking-dust.org/relation/")) }}'
+                        )
+                        if fwd:
+                            for r in fwd:
+                                rel = r.get("?p", "").replace("http://thinking-dust.org/relation/", "")
+                                obj = r.get("?o", "").replace("http://thinking-dust.org/entity/", "").replace("_", " ")
+                                if rel and obj:
+                                    return {
+                                        "type": "inferred",
+                                        "formatted": f"{entity} {rel} {obj}",
+                                        "confidence": 0.90,
+                                        "method": "open_query_forward",
+                                    }
+
+                        # Inverse: entity as object
+                        inv = self.sparql_store.query_sparql_bindings(
+                            f'SELECT ?s ?p WHERE {{ ?s ?p {str(self.sparql_store._entity_node(entity))} . '
+                            f'FILTER(STRSTARTS(STR(?p), "http://thinking-dust.org/relation/")) }}'
+                        )
+                        if inv:
+                            for r in inv:
+                                subj = r.get("?s", "").replace("http://thinking-dust.org/entity/", "").replace("_", " ")
+                                rel = r.get("?p", "").replace("http://thinking-dust.org/relation/", "")
+                                if subj and rel:
+                                    return {
+                                        "type": "inferred",
+                                        "formatted": f"{subj} {rel} {entity}",
+                                        "confidence": 0.90,
+                                        "method": "open_query_inverse",
+                                    }
                                     result = _try_inverse_query(rel)
                                     if result and result.answer is not None:
                                         return {
