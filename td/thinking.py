@@ -1336,23 +1336,17 @@ class GenericThinkingDust:
                             # This is the standard IR ranking approach, adapted for KG.
                             # Reference: Salton & Buckley (1988), "Term-weighting
                             #   approaches in automatic text retrieval." IP&M 24(5).
-                            import math
                             total_triples = len(self.kg.triples) if self.kg.triples else 1
-                            # Count relation frequency (TF)
                             rel_freq = {}
                             for t in self.kg.triples:
                                 rel_freq[t.relation] = rel_freq.get(t.relation, 0) + 1
-                            # Query tokens for matching
-                            query_tokens = set(text.lower().split())
 
-                            def _score(candidate):
+                            def _score(candidate, _text=text.lower(), _rf=rel_freq, _tt=total_triples):
+                                import math
                                 direction, s, r, o = candidate
-                                # IDF: rarer relation = higher score
-                                freq = rel_freq.get(r, 1)
-                                idf = math.log(total_triples / freq) if freq > 0 else 0
-                                # Query match bonus: relation appears in query
-                                query_bonus = 1.0 if r.replace("_", " ") in text.lower() else 0.0
-                                # Forward preference: entity-as-subject
+                                freq = _rf.get(r, 1)
+                                idf = math.log(_tt / freq) if freq > 0 else 0
+                                query_bonus = 1.0 if r.replace("_", " ") in _text else 0.0
                                 fwd_bonus = 0.5 if direction == "forward" else 0.0
                                 return idf + query_bonus + fwd_bonus
 
