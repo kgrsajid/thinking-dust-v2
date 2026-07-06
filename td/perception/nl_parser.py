@@ -222,27 +222,70 @@ class GenericNLParser:
     #
     # Reference: Jauhar, S.K. et al. (2015). "Resolving Discourse-Deictic
     #   Pronouns: A Two-Stage Approach." *SEM 2015, pp. 299-308.
-    #   Key feature: "syntactic role of pronoun" + "head verb lemma"
-    # Reference: Webber, B.L. (1988). "Discourse Deixis." ACL.
-    ABSTRACT_VERB_SENSE = frozenset({
-        # Verbs of demonstration/implication
-        "show", "prove", "mean", "suggest", "indicate", "demonstrate",
-        "reveal", "confirm", "imply", "illustrate", "reflect",
-        # Verbs of causation/result
-        "result", "lead", "cause", "enable", "allow", "prevent",
-        "require", "involve", "affect",
-        # Verbs of emotional response
-        "surprise", "shock", "please", "anger", "upset", "annoy",
-    })
+    # ── Discourse Deixis Configuration ──────────────────────────────
+    # Language-specific abstract verb sets for discourse deixis detection.
+    # Used with the Jauhar et al. (2015) two-stage approach:
+    #   Stage 1: Is pronoun "this"/"that"/"it" the subject (nsubj) of a
+    #            verb in the abstract verb set? → discourse deixis → skip
+    #
+    # The syntactic check (dep=nsubj) is language-agnostic (Universal
+    # Dependencies). The verb set is language-specific.
+    #
+    # To add a new language:
+    #   1. Identify abstract/cognitive verbs in the target language
+    #   2. Add to DISCOURSE_DEIXIS_REGISTRY below
+    #   3. See DEVELOPMENT.md "Caveat 4" for detailed guide
+    #
+    # Reference: Jauhar et al. (2015), *SEM, pp. 299-308.
+    # Reference: Universal Dependencies — 'nsubj' label
 
-    # Subset: verbs where "it" is likely discourse deixis.
-    # "It shows X", "It proves X" → "it" refers to a clause.
-    # "It surprises me", "It affects X" → "it" has a real referent (NOT deixis).
-    # Only "this"/"that" trigger the full set; "it" only triggers this subset.
-    DISCOURSE_DEIXIS_VERBS_FOR_IT = frozenset({
-        "show", "prove", "mean", "suggest", "indicate", "demonstrate",
-        "reveal", "confirm", "imply", "illustrate", "reflect",
-    })
+    DISCOURSE_DEIXIS_REGISTRY = {
+        # English — demonstration/implication verbs
+        "en": frozenset({
+            "show", "prove", "mean", "suggest", "indicate", "demonstrate",
+            "reveal", "confirm", "imply", "illustrate", "reflect",
+            "result", "lead", "cause", "enable", "allow", "prevent",
+            "require", "involve", "affect",
+            "surprise", "shock", "please", "anger", "upset", "annoy",
+        }),
+        # Add more languages as needed:
+        # "de": frozenset({"zeigen", "beweisen", "bedeuten", ...}),
+        # "fr": frozenset({"montrer", "prouver", "signifier", ...}),
+        # "ko": frozenset({"보여주다", "증명하다", "의미하다", ...}),
+    }
+
+    # Subset for "it" — only purely demonstrative verbs.
+    # "It shows X" → discourse deixis. "It surprises me" → NOT deixis.
+    DISCOURSE_DEIXIS_IT_REGISTRY = {
+        "en": frozenset({
+            "show", "prove", "mean", "suggest", "indicate", "demonstrate",
+            "reveal", "confirm", "imply", "illustrate", "reflect",
+        }),
+    }
+
+    @classmethod
+    def _get_abstract_verbs(cls, lang: str = "en") -> frozenset:
+        """Get abstract verb set for discourse deixis in the given language."""
+        return cls.DISCOURSE_DEIXIS_REGISTRY.get(lang, frozenset())
+
+    @classmethod
+    def _get_it_verbs(cls, lang: str = "en") -> frozenset:
+        """Get verb set where 'it' is likely discourse deixis."""
+        return cls.DISCOURSE_DEIXIS_IT_REGISTRY.get(lang, frozenset())
+
+    @classmethod
+    def register_discourse_deixis(cls, lang: str, verbs: set[str],
+                                   it_verbs: set[str] = None):
+        """Register abstract verbs for a new language.
+
+        Example:
+            GenericNLParser.register_discourse_deixis("de", {
+                "zeigen", "beweisen", "bedeuten", "andeuten",
+            }, {"zeigen", "beweisen"})
+        """
+        cls.DISCOURSE_DEIXIS_REGISTRY[lang] = frozenset(verbs)
+        if it_verbs:
+            cls.DISCOURSE_DEIXIS_IT_REGISTRY[lang] = frozenset(it_verbs)
 
     def resolve_coreferences(self, text: str) -> tuple[str, dict]:
         """Build coreference map from text using spaCy two-pipeline approach.
@@ -384,13 +427,15 @@ class GenericNLParser:
             #   Stage 1 (Classification): pronoun is "this"/"that"/"it" AND subject
             #   of an abstract/cognitive verb → discourse deixis → skip
             #
-            # "it" is only filtered for purely demonstrative verbs (show, prove,
-            # mean, ...). For causation/emotional verbs (surprise, affect, require),
-            # "it" has a real referent and should NOT be filtered.
+            # Uses language-specific verb registry (not hardcoded).
+            # "it" only triggers for purely demonstrative verbs.
             # Reference: Jauhar et al. (2015), *SEM, pp. 299-308.
-            if new_s in ("this", "that") and r in self.ABSTRACT_VERB_SENSE:
+            lang = doc.lang_ if doc else "en"
+            abstract_verbs = self._get_abstract_verbs(lang)
+            it_verbs = self._get_it_verbs(lang)
+            if new_s in ("this", "that") and r in abstract_verbs:
                 continue
-            if new_s == "it" and r in self.DISCOURSE_DEIXIS_VERBS_FOR_IT:
+            if new_s == "it" and r in it_verbs:
                 continue
 
             resolved.append((new_s, r, new_o))

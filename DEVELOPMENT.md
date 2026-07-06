@@ -1823,27 +1823,28 @@ ABSTRACT_VERB_SENSE_KO = {
 **Step 3: Register the language in the parser**
 
 ```python
-# In td/perception/nl_parser.py, extend ABSTRACT_VERB_SENSE:
+# In td/perception/nl_parser.py, use the registry method:
 
-# Option A: Extend the existing set (simple)
-GenericNLParser.ABSTRACT_VERB_SENSE |= ABSTRACT_VERB_SENSE_DE
+# Option A: Call the class method (recommended)
+GenericNLParser.register_discourse_deixis(
+    lang="de",
+    verbs={"zeigen", "beweisen", "bedeuten", "andeuten", "enthüllen",
+           "bestätigen", "implizieren", "veranschaulichen", "widerspiegeln",
+           "ergeben", "führen", "verursachen", "ermöglichen", "erlauben",
+           "verhindern", "erfordern", "betreffen", "beeinflussen",
+           "überraschen", "schockieren", "erfreuen", "ärgern", "aufregen"},
+    it_verbs={"zeigen", "beweisen", "bedeuten", "andeuten", "enthüllen",
+              "bestätigen", "implizieren", "veranschaulichen", "widerspiegeln"},
+)
 
-# Option B: Language-specific registry (cleaner)
-ABSTRACT_VERB_SENSE_BY_LANG = {
-    "en": GenericNLParser.ABSTRACT_VERB_SENSE,
-    "de": ABSTRACT_VERB_SENSE_DE,
-    "fr": ABSTRACT_VERB_SENSE_FR,
-    "ko": ABSTRACT_VERB_SENSE_KO,
-}
-
-# In resolve_triple_coreferences():
-def _is_discourse_deictic(self, subject: str, relation: str, doc) -> bool:
-    """Check if a triple is discourse deixis."""
-    if subject not in ("this", "that", "it"):
-        return False
-    lang = doc.lang_ if doc else "en"
-    verb_set = ABSTRACT_VERB_SENSE_BY_LANG.get(lang, ABSTRACT_VERB_SENSE_BY_LANG["en"])
-    return relation in verb_set
+# Option B: Add to DISCOURSE_DEIXIS_REGISTRY dict directly
+GenericNLParser.DISCOURSE_DEIXIS_REGISTRY["fr"] = frozenset({
+    "montrer", "prouver", "signifier", "suggérer", "indiquer",
+    "démontrer", "révéler", "confirmer", "impliquer", "illustrer",
+    "résulter", "entraîner", "causer", "permettre", "autoriser",
+    "empêcher", "exiger", "concerner", "influencer",
+    "surprendre", "choquer", "plaire", "irriter",
+})
 ```
 
 **Step 4: Test with language-specific examples**
