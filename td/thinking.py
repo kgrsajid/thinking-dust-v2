@@ -1192,8 +1192,9 @@ class GenericThinkingDust:
         doc = self.parser.nlp(text)
         for t in doc:
             # UD morphological feature (language-agnostic)
+            # Note: t.morph.get() returns a list, not a string
             pron_type = t.morph.get("PronType")
-            if pron_type and pron_type == "Int":
+            if pron_type and "Int" in pron_type:
                 return True
             # PTB tag fallback for English models
             if t.tag_ in ("WP", "WDT", "WRB"):

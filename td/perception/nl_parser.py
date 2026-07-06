@@ -235,6 +235,15 @@ class GenericNLParser:
         "surprise", "shock", "please", "anger", "upset", "annoy",
     })
 
+    # Subset: verbs where "it" is likely discourse deixis.
+    # "It shows X", "It proves X" → "it" refers to a clause.
+    # "It surprises me", "It affects X" → "it" has a real referent (NOT deixis).
+    # Only "this"/"that" trigger the full set; "it" only triggers this subset.
+    DISCOURSE_DEIXIS_VERBS_FOR_IT = frozenset({
+        "show", "prove", "mean", "suggest", "indicate", "demonstrate",
+        "reveal", "confirm", "imply", "illustrate", "reflect",
+    })
+
     def resolve_coreferences(self, text: str) -> tuple[str, dict]:
         """Build coreference map from text using spaCy two-pipeline approach.
 
@@ -374,8 +383,14 @@ class GenericNLParser:
             # Two-stage approach (Jauhar et al. 2015):
             #   Stage 1 (Classification): pronoun is "this"/"that"/"it" AND subject
             #   of an abstract/cognitive verb → discourse deixis → skip
+            #
+            # "it" is only filtered for purely demonstrative verbs (show, prove,
+            # mean, ...). For causation/emotional verbs (surprise, affect, require),
+            # "it" has a real referent and should NOT be filtered.
             # Reference: Jauhar et al. (2015), *SEM, pp. 299-308.
-            if new_s in ("this", "that", "it") and r in self.ABSTRACT_VERB_SENSE:
+            if new_s in ("this", "that") and r in self.ABSTRACT_VERB_SENSE:
+                continue
+            if new_s == "it" and r in self.DISCOURSE_DEIXIS_VERBS_FOR_IT:
                 continue
 
             resolved.append((new_s, r, new_o))

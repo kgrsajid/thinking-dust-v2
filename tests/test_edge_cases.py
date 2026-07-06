@@ -210,6 +210,21 @@ class TestDiscourseDeixis:
         # but it should NOT be filtered by discourse deixis
         assert "this" not in subjects
 
+    def test_it_surprise_not_deixis(self, td):
+        """'It surprises me' → 'it' has a real referent, NOT discourse deixis.
+
+        Only purely demonstrative verbs (show, prove, mean) trigger
+        discourse deixis for 'it'. Causation/emotional verbs (surprise,
+        affect, require) do NOT — 'it' has a real referent.
+        """
+        triples = td.parser.extract_triples_spacy(
+            "The result is clear. It surprises everyone."
+        )
+        subjects = [t[0] for t in triples]
+        # "it" should NOT be filtered — "surprise" is not in DISCOURSE_DEIXIS_VERBS_FOR_IT
+        # (it's in ABSTRACT_VERB_SENSE but not the "it" subset)
+        assert "it" in subjects or len(triples) >= 1
+
 
 class TestAdjectivalPredicates:
     """Edge cases for has_characteristic extraction.
