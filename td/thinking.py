@@ -1159,20 +1159,12 @@ class GenericThinkingDust:
 
         # Fallback: X relation Y (no "is" — e.g., "RiverA feeds_into RiverB")
         # Only match if relation is not a common stop word.
+        # Uses parser.is_stop_word() when spaCy available, English fallback.
         if not triples:
-            stop_words = {
-                'the', 'a', 'an', 'and', 'or', 'is', 'are', 'was', 'were',
-                'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did',
-                'will', 'would', 'could', 'should', 'may', 'might', 'must',
-                'can', 'shall', 'it', 'its', 'this', 'that', 'these', 'those',
-                'there', 'their', 'they', 'them', 'of', 'to', 'in', 'for',
-                'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through',
-                'during', 'before', 'after', 'above', 'below', 'between',
-            }
             m = re.search(r'(\w+)\s+([a-z_]+)\s+(\w+)', text)
             if m:
                 s, r, o = m.group(1), m.group(2), m.group(3)
-                if r not in stop_words and len(r) > 1:
+                if not self.parser.is_stop_word(r) and len(r) > 1:
                     triples.append((s, _lemmatize(r), o))
 
         return triples

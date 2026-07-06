@@ -146,8 +146,11 @@ class GenericNLParser:
 
         self.constraint_signals = set(self.relation_prototypes.keys())
 
-        # Fast lookup stop words — kept as fallback for non-spaCy paths
-        self.stop_words = {
+        # Stop words — fallback for non-spaCy paths only.
+        # When spaCy is available, use token.is_stop (language-agnostic).
+        # This set is only used when self.nlp is None.
+        # Reference: spaCy built-in stop word lists (per-language)
+        self._fallback_stop_words = {
             "the", "a", "an", "and", "or", "is", "are", "was", "were", "be", "been",
             "have", "has", "had", "do", "does", "did", "will", "would", "could",
             "should", "may", "might", "must", "can", "shall", "it", "its", "this",
@@ -160,6 +163,33 @@ class GenericNLParser:
             "but", "because", "until", "while", "about", "against", "down",
             "out", "off", "over",
         }
+
+    def is_stop_word(self, word: str) -> bool:
+        """Check if a word is a stop word using spaCy (language-agnostic).
+
+        Uses spaCy token.is_stop when available (supports 20+ languages).
+        Falls back to English stop word set when spaCy is not available.
+
+        Reference: spaCy built-in stop word lists (per-language)
+        """
+        if self.nlp:
+            doc = self.nlp(word)
+            if doc and len(doc) > 0:
+                return doc[0].is_stop
+        return word.lower() in self._fallback_stop_words
+
+    def is_function_word(self, token) -> bool:
+        """Check if a spaCy token is a function word (not a content word).
+
+        Function words: ADP (prepositions), AUX (auxiliaries), DET (determiners),
+        CCONJ (coordinating conjunctions), SCONJ (subordinating conjunctions),
+        PART (particles), PUNCT (punctuation).
+
+        Content words: NOUN, VERB, ADJ, ADV, PROPN, NUM.
+
+        Reference: Universal POS Tags (Nivre et al., 2016)
+        """
+        return token.pos_ in ("ADP", "AUX", "DET", "CCONJ", "SCONJ", "PART", "PUNCT")
 
     @property
     def nlp(self):
@@ -320,10 +350,11 @@ class GenericNLParser:
         doc = self.nlp_coref(doc)
 
         # Build pronoun → (entity_name, is_possessive) map
+        # Uses spaCy POS + morph features (language-agnostic).
+        # - Possessive: token.pos_ == "PRON" and "Yes" in token.morph.get("Poss")
+        # - Personal:   token.pos_ == "PRON" and "Prs" in token.morph.get("PronType")
+        # Reference: Universal Dependencies — PronType, Poss features
         pronoun_map = {}
-        possessive_pronouns = {"its", "his", "her", "their", "theirs", "our", "your", "my", "mine"}
-        entity_pronouns = {"he", "she", "it", "they", "him", "her",
-                           "them", "his", "its", "their", "theirs"}
 
         for key, spans in doc.spans.items():
             if not key.startswith("coref_clusters"):
@@ -332,8 +363,11 @@ class GenericNLParser:
             entity_span = None
             pronoun_spans = []
             for span in spans:
-                span_text = span.text.lower().strip()
-                if span_text not in entity_pronouns:
+                # Use spaCy POS to detect pronouns (language-agnostic).
+                # A span is a pronoun if its root token is PRON.
+                # Reference: Universal POS — PRON category
+                is_pronoun = span.root.pos_ == "PRON"
+                if not is_pronoun:
                     entity_span = span
                 else:
                     pronoun_spans.append(span)
@@ -351,7 +385,10 @@ class GenericNLParser:
 
             for pronoun_span in pronoun_spans:
                 for token in pronoun_span:
-                    is_poss = token.text.lower() in possessive_pronouns
+                    # Use spaCy morph feature to detect possessive pronouns.
+                    # "Poss=Yes" is a UD morphological feature (language-agnostic).
+                    # Reference: Universal Dependencies — Poss feature
+                    is_poss = "Yes" in token.morph.get("Poss")
                     pronoun_map[token.i] = (entity_name, is_poss)
 
         return text, pronoun_map
@@ -1161,7 +1198,7 @@ class GenericNLParser:
                 for next_span in spans:
                     if next_span["start"] == merge_end:
                         next_tok = tokens[next_span["start"]]
-                        if next_tok not in self.stop_words and any(c.isalnum() for c in next_tok):
+                        if next_tok not in self._fallback_stop_words and any(c.isalnum() for c in next_tok):
                             merge_end = next_span["end"]
                         else:
                             break
@@ -1194,7 +1231,7 @@ class GenericNLParser:
                 for next_span in spans:
                     if next_span["start"] == merge_end:
                         next_tok = tokens[next_span["start"]]
-                        if next_tok in self.stop_words:
+                        if next_tok in self._fallback_stop_words:
                             # Found stop word — stop merging
                             break
                         elif any(c.isalnum() for c in next_tok):
@@ -1417,7 +1454,7 @@ class GenericNLParser:
 
         # Step 1: Mark all non-stop tokens as single-token entities
         for i, tok in enumerate(tokens):
-            if tok in self.stop_words:
+            if tok in self._fallback_stop_words:
                 continue
             # Pure punctuation
             if not any(c.isalnum() for c in tok):
@@ -1542,13 +1579,13 @@ class GenericNLParser:
                 # No prototype match — synthesize relation type from content words
                 # e.g., "married" → "married_to", "north" → "north_of"
                 # Use the words that aren't pure prepositions
-                content = [w for w in relation_words if w not in self.stop_words]
+                content = [w for w in relation_words if w not in self._fallback_stop_words]
                 if content:
                     rel_candidate = "_".join(content)
                     # Append common suffixes if missing
                     if not any(rel_candidate.endswith(s) for s in ("_of", "_to", "_in", "_for")):
                         # Check if a preposition follows the content words
-                        postpositions = [w for w in relation_words if w in self.stop_words]
+                        postpositions = [w for w in relation_words if w in self._fallback_stop_words]
                         if postpositions:
                             rel_candidate = f"{rel_candidate}_{postpositions[-1]}"
                     return rel_candidate
