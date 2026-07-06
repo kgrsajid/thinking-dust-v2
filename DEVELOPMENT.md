@@ -1619,24 +1619,98 @@ The PTB tags (`WP`=who/what, `WDT`=which/that, `WRB`=where/when/how) are set by 
 - **French:** `fr_core_news_sm` DOES populate `PronType=Int` → UD path works
 - **Korean:** `ko_core_news_sm` sets `PronType=Int` → UD path works
 
-**What to do for a new language:**
-```python
-# 1. Check if the language model populates PronType=Int
-import spacy
-nlp = spacy.load("xx_core_news_sm")  # replace with target language
-doc = nlp("Who is the president?")    # use target language question
-for t in doc:
-    print(f"{t.text}: PronType={t.morph.get('PronType')}, tag={t.tag_}")
+---
 
-# 2. If PronType=Int is populated → UD path works automatically
-# 3. If NOT populated → add language-specific PTB tag mapping:
-#    In td/thinking.py, the fallback checks t.tag_ in ("WP", "WDT", "WRB")
-#    For other languages, add the equivalent POS tags:
-#    German:  PW (was/who), PWS (which), PAV (where/when)
-#    French:  PRO (qui/que), DET (quel)
+##### 🔧 How to Extend Question Detection for a New Language
+
+**Step 1: Check if PronType=Int is populated**
+
+```python
+import spacy
+
+# Load the target language model
+nlp = spacy.load("xx_core_news_sm")  # replace xx with language code
+
+# Test with a question in the target language
+# German: "Wer ist der Präsident?"
+# French: "Qui est le président ?"
+# Korean: "대통령은 누구입니까?"
+doc = nlp("Who is the president?")  # use target language
+
+for t in doc:
+    pron_type = t.morph.get("PronType")
+    print(f"{t.text:15s} pos={t.pos_:6s} tag={t.tag_:6s} PronType={pron_type}")
 ```
 
-**Where the code is:** `td/thinking.py` — two places checking `t.tag_ in ("WP", "WDT", "WRB")`
+**Step 2a: If PronType=Int IS populated → UD path works automatically**
+
+No code changes needed. The `_is_interrogative()` method checks `t.morph.get("PronType") == "Int"` first.
+
+Languages where PronType=Int is populated:
+- German (`de_core_news_sm`) — wer, was, wo, welcher, wann, wie, warum
+- French (`fr_core_news_sm`) — qui, que, où, quel, quand, comment, pourquoi
+- Korean (`ko_core_news_sm`) — 누구(nugu), 무엇(mueot), 어디(eodi)
+- Spanish (`es_core_news_sm`) — quién, qué, dónde, cuándo, cómo, por qué
+- Italian (`it_core_news_sm`) — chi, che, dove, quando, come, perché
+- Portuguese (`pt_core_news_sm`) — quem, que, onde, quando, como, por que
+- Dutch (`nl_core_news_sm`) — wie, wat, waar, wanneer, hoe, waarom
+
+**Step 2b: If PronType=Int is NOT populated → add language-specific tags**
+
+In `td/thinking.py`, the `_is_interrogative()` method falls back to `t.tag_ in ("WP", "WDT", "WRB")`. For other languages, add the equivalent POS tags:
+
+```python
+# In td/thinking.py, _is_interrogative() method:
+
+# English (default)
+if t.tag_ in ("WP", "WDT", "WRB"):
+    return True
+
+# German: add these tags
+# PW  = interrogative pronoun (wer/was/welcher)
+# PWS = interrogative adverb (wo/wann/wie/warum)
+# PAV = interrogative pronominal adverb (wovon/womit)
+if t.tag_ in ("PW", "PWS", "PAV"):
+    return True
+
+# French: add these tags
+# PRO = pronoun (qui/que/où)
+# DET:int = interrogative determiner (quel)
+if t.tag_ in ("PRO", "DET:int"):
+    return True
+
+# Korean: PronType=Int is populated, no fallback needed
+```
+
+**Step 3: Register the language (optional)**
+
+For cleaner code, register language-specific tag sets:
+
+```python
+# In td/thinking.py:
+INTERROGATIVE_TAGS = {
+    "en": {"WP", "WDT", "WRB"},           # Penn Treebank
+    "de": {"PW", "PWS", "PAV"},            # Stuttgart-Tübingen Tagset (STTS)
+    "fr": {"PRO", "DET:int"},              # French Treebank
+    # Add more languages as needed
+}
+
+def _is_interrogative(self, text: str) -> bool:
+    if not self.parser.nlp:
+        return text.rstrip().endswith("?")
+    doc = self.parser.nlp(text)
+    lang = doc.lang_  # spaCy language code
+    for t in doc:
+        if t.morph.get("PronType") == "Int":
+            return True
+        if t.tag_ in self.INTERROGATIVE_TAGS.get(lang, set()):
+            return True
+    return False
+```
+
+**Where the code is:** `td/thinking.py` — `_is_interrogative()` method
+
+**Reference:** Universal POS Tags (Nivre et al., 2016); Penn Treebank (Santorini, 1990); STTS (Schiller et al., 1999)
 
 ---
 
@@ -1679,18 +1753,115 @@ for t in doc:
 
 **Impact:** ⚠️ English-only verb set. Other languages need their own abstract verb lemmas.
 
-**What to do for a new language:**
-```python
-# Add language-specific abstract verbs to ABSTRACT_VERB_SENSE
-# German: zeigen, beweisen, bedeuten, andeuten, enthüllen, ...
-# French: montrer, prouver, signifier, suggérer, indiquer, ...
-# Korean: 보여주다, 증명하다, 의미하다, 암시하다, ...
+---
 
-# In td/perception/nl_parser.py, extend the set:
-GenericNLParser.ABSTRACT_VERB_SENSE |= {"zeigen", "beweisen", "bedeuten"}
+##### 🔧 How to Extend Discourse Deixis for a New Language
+
+The Jauhar et al. (2015) two-stage approach has two components:
+
+1. **Syntactic check** (language-agnostic): Is the pronoun `nsubj` of a verb?
+2. **Semantic check** (language-specific): Is the verb an abstract/cognitive verb?
+
+The syntactic check works for any language with spaCy dependency parsing. The semantic check needs language-specific verb lemmas.
+
+**Step 1: Understand the semantic classes**
+
+The `ABSTRACT_VERB_SENSE` set contains three semantic classes of verbs:
+
+| Class | English Examples | What They Signal |
+|-------|-----------------|------------------|
+| **Demonstration/Implication** | show, prove, mean, suggest, indicate, demonstrate, reveal, confirm, imply | "This shows that X" → "this" refers to a clause |
+| **Causation/Result** | result, lead, cause, enable, allow, prevent, require, involve, affect | "This causes X" → "this" refers to a clause |
+| **Emotional Response** | surprise, shock, please, anger, upset, annoy | "This surprises me" → "this" refers to a clause |
+
+**Step 2: Identify equivalent verbs in the target language**
+
+For each semantic class, find the equivalent verbs in the target language. Use a bilingual dictionary or ask a native speaker.
+
+**German (de):**
+```python
+ABSTRACT_VERB_SENSE_DE = {
+    # Demonstration/Implication
+    "zeigen", "beweisen", "bedeuten", "andeuten", "enthüllen",
+    "bestätigen", "implizieren", "veranschaulichen", "widerspiegeln",
+    # Causation/Result
+    "ergeben", "führen", "verursachen", "ermöglichen", "erlauben",
+    "verhindern", "erfordern", "betreffen", "beeinflussen",
+    # Emotional Response
+    "überraschen", "schockieren", "erfreuen", "ärgern", "aufregen",
+}
+```
+
+**French (fr):**
+```python
+ABSTRACT_VERB_SENSE_FR = {
+    # Demonstration/Implication
+    "montrer", "prouver", "signifier", "suggérer", "indiquer",
+    "démontrer", "révéler", "confirmer", "impliquer", "illustrer",
+    # Causation/Result
+    "résulter", "entraîner", "causer", "permettre", "autoriser",
+    "empêcher", "exiger", "concerner", "influencer",
+    # Emotional Response
+    "surprendre", "choquer", "plaire", "irriter", " contrarier",
+}
+```
+
+**Korean (ko):**
+```python
+ABSTRACT_VERB_SENSE_KO = {
+    # Demonstration/Implication
+    "보여주다", "증명하다", "의미하다", "암시하다", "나타내다",
+    "확인하다", "함축하다", "반영하다",
+    # Causation/Result
+    "초래하다", "야기하다", "가능하게하다", "허용하다", "막다",
+    "요구하다", "관련하다", "영향을미치다",
+    # Emotional Response
+    "놀라게하다", "충격을주다", "기쁘게하다", "화나게하다",
+}
+```
+
+**Step 3: Register the language in the parser**
+
+```python
+# In td/perception/nl_parser.py, extend ABSTRACT_VERB_SENSE:
+
+# Option A: Extend the existing set (simple)
+GenericNLParser.ABSTRACT_VERB_SENSE |= ABSTRACT_VERB_SENSE_DE
+
+# Option B: Language-specific registry (cleaner)
+ABSTRACT_VERB_SENSE_BY_LANG = {
+    "en": GenericNLParser.ABSTRACT_VERB_SENSE,
+    "de": ABSTRACT_VERB_SENSE_DE,
+    "fr": ABSTRACT_VERB_SENSE_FR,
+    "ko": ABSTRACT_VERB_SENSE_KO,
+}
+
+# In resolve_triple_coreferences():
+def _is_discourse_deictic(self, subject: str, relation: str, doc) -> bool:
+    """Check if a triple is discourse deixis."""
+    if subject not in ("this", "that", "it"):
+        return False
+    lang = doc.lang_ if doc else "en"
+    verb_set = ABSTRACT_VERB_SENSE_BY_LANG.get(lang, ABSTRACT_VERB_SENSE_BY_LANG["en"])
+    return relation in verb_set
+```
+
+**Step 4: Test with language-specific examples**
+
+```python
+# German: "Das zeigt, dass die Methode funktioniert."
+# → "Das zeigt" should be filtered (discourse deixis)
+
+# French: "Cela montre que la méthode fonctionne."
+# → "Cela montre" should be filtered
+
+# Korean: "이것은 방법이 작동한다는 것을 보여줍니다."
+# → "이것은 보여줍니다" should be filtered
 ```
 
 **Where the code is:** `td/perception/nl_parser.py` — `ABSTRACT_VERB_SENSE` frozenset
+
+**Reference:** Jauhar, S.K. et al. (2015). "Resolving Discourse-Deictic Pronouns: A Two-Stage Approach." *SEM 2015, pp. 299–308. ACL Anthology: S15-1035
 
 ---
 
