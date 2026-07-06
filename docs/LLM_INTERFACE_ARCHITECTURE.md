@@ -107,15 +107,41 @@ exploits input validation weaknesses."
 
 ## Research Papers to Cite
 
+### Core Architecture
+
 | # | Paper | Year | Relevance |
 |---|-------|------|-----------|
-| 1 | Zhang & Soh, "Extract-Define-Canonicalize" | 2024 | EDC pattern for entity/relation canonicalization |
-| 2 | KGGen (Mo et al.) | 2025 | Iterative LM-guided clustering for KG refinement |
-| 3 | Min et al., "Towards Practical GraphRAG" | 2025 | Dependency parsing = 94% of LLM KG extraction |
-| 4 | Lewis et al., "Toolformer" | 2023 | LLM learns to use tools (symbolic reasoning) |
-| 5 | Schick et al., "Toolformer" | 2023 | LLM + tool use pattern |
-| 6 | Khot et al., "Decomposed Prompting" | 2022 | Breaking complex tasks into subtasks |
-| 7 | Press et al., "Measuring and Narrowing the Compositionality Gap" | 2023 | Self-Ask: decomposing multi-hop questions |
+| 1 | Pan et al., "Unifying Large Language Models and Knowledge Graphs: A Roadmap" | 2023 | Foundational survey. Maps our architecture: LLMs for KG construction, KGs for LLM reasoning |
+| 2 | Zhang & Soh, "Extract-Define-Canonicalize" | 2024 | EDC pattern for entity/relation canonicalization |
+| 3 | KGGen (Mo et al.) | 2025 | Iterative LM-guided clustering for KG refinement |
+| 4 | Min et al., "Towards Practical GraphRAG" | 2025 | Dependency parsing = 94% of LLM KG extraction |
+| 5 | Karpas et al., "MRKL Systems" | 2022 | LLM as router/interface for symbolic reasoning engines |
+| 6 | Microsoft Research, "GraphRAG: Local and Global Understanding" | 2024 | LLMs extracting entity KGs from complex documents |
+
+### Neuro-Symbolic Reasoning
+
+| # | Paper | Year | Relevance |
+|---|-------|------|-----------|
+| 7 | Hitzler et al., "Neuro-Symbolic AI: The State of the Art" | 2022 | Taxonomy. Our system = "decoupled neuro-symbolic with structured interface" |
+| 8 | Sun et al., "Think-on-Graph 2.0" | 2024 | LLM as agent iteratively reasoning over KG |
+| 9 | Lewis et al., "Toolformer" | 2023 | LLM learns to use tools (symbolic reasoning) |
+| 10 | Khot et al., "Decomposed Prompting" | 2022 | Breaking complex tasks into subtasks |
+
+### Entity Resolution
+
+| # | Paper | Year | Relevance |
+|---|-------|------|-----------|
+| 11 | Ding et al., "EntGPT" | 2025 | Two-phase entity alignment |
+| 12 | Wang et al., "COMEM" | 2024 | Cascaded small+large LLM pipeline for entity fusion |
+| 13 | arXiv:2510.20345, "LLM-empowered KG Construction: A Survey" | 2025 | Most recent comprehensive survey |
+
+### KG Reasoning
+
+| # | Paper | Year | Relevance |
+|---|-------|------|-----------|
+| 14 | Press et al., "Measuring and Narrowing the Compositionality Gap" | 2023 | Self-Ask: decomposing multi-hop questions |
+| 15 | Yasunaga et al., "QA-GNN" | 2021 | Joint LLM+GNN reasoning |
+| 16 | arXiv:2510.21425, "Advancing Symbolic Integration in LLMs" | 2025 | Survey of symbolic-integrated LLMs |
 
 ---
 
@@ -125,15 +151,23 @@ exploits input validation weaknesses."
 
 **Goal:** LLM breaks down book text into simple triples.
 
+**Key design decisions (GLM 5.2 review):**
+- **JSON schema enforcement** for LLM output (structured outputs / function calling)
+- **Chunk overlap** (2+ sentences) to handle coreference at boundaries
+- **Constrained relation vocabulary** (20-30 allowed relations max)
+- **3-8 triples per paragraph** (not per sentence)
+- **Log every triple** with source (page/chunk) for provenance tracking
+
 ```python
 SIMPLIFIER_PROMPT = """Break down the following text into simple facts.
 Each fact must be: (subject, relation, object)
 
 Rules:
-- Use only these relations: is_a, exploits, prevents, mitigates, enables, requires, depends_on, contains, part_of
+- Use ONLY these relations: is_a, exploits, prevents, mitigates, enables, requires, depends_on, contains, part_of, has_property, causes, produces, derives_from, contradicts
 - Each fact must be a single sentence
 - No pronouns — use full entity names
 - No conjunctions — split into separate facts
+- Output as JSON: [{"subject": "...", "relation": "...", "object": "..."}]
 
 Text: {chunk}
 
@@ -164,19 +198,29 @@ Group them by canonical name. Output JSON:
 
 **Goal:** LLM reformulates questions + explains answers.
 
+**Key design decisions (GLM 5.2 review):**
+- **Retry loop** — if TD v2 returns parse error, feed back to Reformulator with error message (max 3 retries)
+- **Grounded explainer** — "Answer using ONLY the provided data. If insufficient, say 'I don't know based on what I've been taught.'"
+- **Provenance** — include source text chunk in explainer context (RAG-style enrichment)
+
 ```python
 REFORMULATOR_PROMPT = """Convert this question into a TD v2 query.
-Available relations: is_a, exploits, prevents, mitigates, enables, requires
+Available relations: is_a, exploits, prevents, mitigates, enables, requires, depends_on, contains, part_of, has_property, causes, produces, derives_from, contradicts
 Format: ask: what [relation] [entity]?
 Or: ask: is [entity1] [relation] [entity2]?
 
 Question: {question}
 Query:"""
 
-EXPLAINER_PROMPT = """Explain this reasoning chain in plain English:
-{proof_trace}
+EXPLAINER_PROMPT = """Explain this reasoning chain in plain English.
+You MUST use ONLY the information provided. Do NOT add any facts, 
+examples, or context not explicitly stated in the chain.
+If the chain is insufficient to fully answer, say "Based on what 
+I've been taught, I can only tell you..."
 
-Be concise. Don't add information not in the chain."""
+Reasoning chain: {proof_trace}
+
+Answer:"""
 ```
 
 ### Phase 4: Teaching UI (Week 4)
