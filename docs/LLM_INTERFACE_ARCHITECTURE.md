@@ -105,43 +105,236 @@ exploits input validation weaknesses."
 
 ---
 
-## Research Papers to Cite
+## Research Papers — Sorted by Implementation Priority
 
-### Core Architecture
+### 🔴 Implement Now
 
-| # | Paper | Year | Relevance |
-|---|-------|------|-----------|
-| 1 | Pan et al., "Unifying Large Language Models and Knowledge Graphs: A Roadmap" | 2023 | Foundational survey. Maps our architecture: LLMs for KG construction, KGs for LLM reasoning |
-| 2 | Zhang & Soh, "Extract-Define-Canonicalize" | 2024 | EDC pattern for entity/relation canonicalization |
-| 3 | KGGen (Mo et al.) | 2025 | Iterative LM-guided clustering for KG refinement |
-| 4 | Min et al., "Towards Practical GraphRAG" | 2025 | Dependency parsing = 94% of LLM KG extraction |
-| 5 | Karpas et al., "MRKL Systems" | 2022 | LLM as router/interface for symbolic reasoning engines |
-| 6 | Microsoft Research, "GraphRAG: Local and Global Understanding" | 2024 | LLMs extracting entity KGs from complex documents |
+#### 1. EDC: Extract, Define, Canonicalize (Zhang & Soh, 2024)
+**arXiv:2404.03868 | EMNLP 2024**
 
-### Neuro-Symbolic Reasoning
+**What it does:** Three-phase KG construction from text:
+1. **Extract** — Open IE, LLM freely extracts S-P-O triples via few-shot prompting
+2. **Define** — LLM generates natural-language definitions for each relation type it extracted
+3. **Canonicalize** — Vector similarity finds semantically equivalent relations, LLM verifies before merging
 
-| # | Paper | Year | Relevance |
-|---|-------|------|-----------|
-| 7 | Hitzler et al., "Neuro-Symbolic AI: The State of the Art" | 2022 | Taxonomy. Our system = "decoupled neuro-symbolic with structured interface" |
-| 8 | Sun et al., "Think-on-Graph 2.0" | 2024 | LLM as agent iteratively reasoning over KG |
-| 9 | Lewis et al., "Toolformer" | 2023 | LLM learns to use tools (symbolic reasoning) |
-| 10 | Khot et al., "Decomposed Prompting" | 2022 | Breaking complex tasks into subtasks |
+**Key results:** Outperforms SOTA on WebNLG, REBEL, Wiki-NRE. Works without predefined schema (self-canonicalization) OR with a target schema (target alignment). No parameter tuning needed.
 
-### Entity Resolution
+**TD v2 relevance: ★★★★★ CRITICAL**
 
-| # | Paper | Year | Relevance |
-|---|-------|------|-----------|
-| 11 | Ding et al., "EntGPT" | 2025 | Two-phase entity alignment |
-| 12 | Wang et al., "COMEM" | 2024 | Cascaded small+large LLM pipeline for entity fusion |
-| 13 | arXiv:2510.20345, "LLM-empowered KG Construction: A Survey" | 2025 | Most recent comprehensive survey |
+**What to steal:**
+- The `Define` phase — creates a self-documenting schema. We didn't have this. LLM generates definitions for each predicate, making the schema auditable.
+- Vector similarity + LLM verification pattern for canonicalization (not just clustering)
+- `EDC+R` refinement loop — re-run extraction with previous triples as context
+- **Code:** github.com/clear-nus/edc — study their prompts
 
-### KG Reasoning
+**How to implement:**
+```python
+# Phase 1: Extract (our existing simplifier)
+triples = llm_extract(chunk)
 
-| # | Paper | Year | Relevance |
-|---|-------|------|-----------|
-| 14 | Press et al., "Measuring and Narrowing the Compositionality Gap" | 2023 | Self-Ask: decomposing multi-hop questions |
-| 15 | Yasunaga et al., "QA-GNN" | 2021 | Joint LLM+GNN reasoning |
-| 16 | arXiv:2510.21425, "Advancing Symbolic Integration in LLMs" | 2025 | Survey of symbolic-integrated LLMs |
+# Phase 2: Define (NEW — from EDC)
+definitions = llm_define(triples)  # "capital_of means X is the capital city of Y"
+
+# Phase 3: Canonicalize (NEW — from EDC)
+canonical_triples = canonicalize(triples, definitions)  # merge "SQLi" ↔ "SQL Injection"
+```
+
+---
+
+#### 2. KGGen: Extracting KGs from Plain Text (Mo et al., 2025)
+**arXiv:2502.09956**
+
+**What it does:** Two-step extraction (entities first, then relations) + iterative LM-based entity clustering. Decomposes extraction into two sequential LLM calls to reduce cognitive load and error propagation.
+
+**Key results:** Produces far denser, less redundant KGs than single-pass extraction. Entity clustering normalizes variations in tense, plurality, stemming, capitalization.
+
+**TD v2 relevance: ★★★★☆ HIGH**
+
+**What to steal:**
+- **Two-step extraction pattern:** First extract all entities, then extract relations between those specific entities. Forces the LLM to be consistent about entity names.
+- **Iterative clustering:** After extraction, LLM examines all nodes and edges to merge variants
+
+**How to implement:**
+```python
+# Step 1: Extract entities only
+entities = llm_extract_entities(chunk)
+# → ["SQL Injection", "parameterized queries", "input validation"]
+
+# Step 2: Extract relations between known entities
+relations = llm_extract_relations(chunk, entities)
+# → [("SQL Injection", "exploits", "input validation")]
+
+# Step 3: Cluster entity variants
+canonical_entities = llm_cluster_entities(entities)
+# → {"SQL Injection": ["SQL Injection", "SQLi", "SQL injection attacks"]}
+```
+
+---
+
+#### 3. MRKL Systems (Karpas et al., 2022)
+**arXiv:2205.00445 | AI21 Labs**
+
+**What it does:** Modular neuro-symbolic architecture: LLM + external knowledge sources + discrete reasoning modules. LLM = language interface. External modules = knowledge + reasoning.
+
+**Key insight:** "LMs are inherently limited in a number of ways. We discuss these limitations and how they can be avoided by adopting a systems approach."
+
+**TD v2 relevance: ★★★★★ CRITICAL (architecture precedent)**
+
+**What to steal:**
+- The architectural pattern: LLM routes to specialized modules, never reasons itself
+- The "systems approach" philosophy — don't try to make one model do everything
+- Our architecture IS a MRKL system. TD v2 = the discrete reasoning module
+
+---
+
+#### 4. Unifying LLMs and KGs: A Roadmap (Pan et al., 2023)
+**arXiv:2306.08302 | IEEE TKDE**
+
+**What it does:** Three frameworks: KG-enhanced LLMs, LLM-augmented KGs, Synergized LLMs+KGs.
+
+**Key insight:** "KGs are difficult to construct and evolving by nature. It is complementary to unify LLMs and KGs together."
+
+**TD v2 relevance: ★★★★★ CRITICAL (theoretical foundation)**
+
+**What to steal:**
+- We're in the "LLM-augmented KGs" category — LLMs help construct KGs
+- The roadmap validates our approach: LLM for extraction, KG for reasoning
+- The "Synergized" framework is our future: bidirectional reasoning
+
+---
+
+#### 5. LLM-empowered KG Construction Survey (Bian et al., 2025)
+**arXiv:2510.20345**
+
+**What it does:** Comprehensive survey of how LLMs reshape KG construction. Schema-based vs schema-free paradigms.
+
+**Key insight:** Schema-based = constrained, consistent, but rigid. Schema-free = flexible, but needs post-hoc canonicalization. Our approach = hybrid (constrained relation vocabulary + EDC canonicalization).
+
+**TD v2 relevance: ★★★★☆ HIGH (architecture validation)**
+
+**What to steal:**
+- The hybrid approach: constrained relations (schema-based) + entity flexibility (schema-free)
+- The "dynamic knowledge memory for agentic systems" future direction
+
+---
+
+### 🟡 Next Feature
+
+#### 6. Think-on-Graph 2.0 (Ma et al., 2024)
+**arXiv:2407.10805**
+
+**What it does:** Hybrid RAG: tight-couples KG-based and text-based retrieval. Iterative: graph retrieval → context retrieval → LLM reasoning.
+
+**Key results:** SOTA on 6/7 knowledge-intensive datasets with GPT-3.5. Elevates Llama-2-13B to GPT-3.5 level. Training-free, plug-and-play.
+
+**TD v2 relevance: ★★★★☆ HIGH (query pipeline enhancement)**
+
+**What to steal:**
+- **Tight-coupling pattern:** KG triples guide text retrieval, text enriches KG context
+- **Iterative retrieval:** Don't stop at first result — keep retrieving until sufficient
+- **Entity context:** Store rich descriptions alongside triples, not just S-P-O
+
+**How to implement (Phase 3):**
+```python
+# Current: single-pass KG query
+answer = td.query(question)
+
+# ToG-2 style: iterative KG + text retrieval
+for iteration in range(max_iterations):
+    kg_triples = td.query(question)  # graph retrieval
+    text_context = retrieve_docs(kg_triples)  # context retrieval
+    answer = llm_reason(question, kg_triples, text_context)
+    if answer.confident:
+        break
+```
+
+---
+
+#### 7. GraphRAG: From Local to Global (Edge et al., Microsoft Research, 2024)
+**arXiv:2404.16130**
+
+**What it does:** LLM builds entity KG from documents, partitions into communities via graph algorithms, generates hierarchical community summaries, answers queries via map-reduce over summaries.
+
+**Key results:** Substantial improvements over vector RAG for "global sensemaking" questions. At 1M token scale, community summaries used 26-33% fewer tokens with <7% quality drop.
+
+**TD v2 relevance: ★★★★★ CRITICAL (future feature)**
+
+**What to steal:**
+- **Community detection** over the knowledge graph — group related entities into clusters
+- **Hierarchical summaries** — generate summaries at multiple levels of abstraction
+- **Map-reduce query answering** — each community generates a partial answer, then synthesize
+
+**How to implement (Phase 4):**
+```python
+# After teaching TD v2 from a book:
+communities = detect_communities(td.kg)  # graph algorithm
+for community in communities:
+    community.summary = llm_summarize(community.entities)
+
+# Query: "What are the main security vulnerabilities?"
+answers = [c.summary for c in communities if c.relevant_to(query)]
+final_answer = llm_synthesize(answers)
+```
+
+---
+
+#### 8. QA-GNN (Yasunaga et al., 2021)
+**arXiv:2104.06378 | NAACL 2021**
+
+**What it does:** Joint reasoning: LLM scores KG node relevance, GNN updates representations. Connects QA context and KG into a joint graph.
+
+**Key results:** Outperforms LM and LM+KG models on CommonsenseQA, OpenBookQA. Handles negation in questions.
+
+**TD v2 relevance: ★★★☆☆ MEDIUM (relevance scoring)**
+
+**What to steal:**
+- **Relevance scoring:** Use LLM to estimate importance of KG nodes before querying. Could improve our open query ranking (currently TF-IDF).
+- **Joint graph approach:** Connect query entities with KG subgraph, propagate relevance
+
+---
+
+### 🟢 Future
+
+#### 9. AutoKG (Zhu et al., 2023)
+**arXiv:2305.13168 | WWW Journal**
+
+**What it does:** Multi-agent LLM + external sources for KG construction. VINE dataset for virtual knowledge extraction.
+
+**Key finding:** "LLMs are more suited as inference assistants rather than few-shot information extractors." GPT-4 excels at reasoning tasks, surpassing fine-tuned models in certain cases.
+
+**TD v2 relevance: ★★★☆☆ MEDIUM (benchmarking)**
+
+**What to steal:**
+- **VINE dataset** — benchmark for virtual knowledge extraction
+- **AutoKG multi-agent pattern** — multiple LLMs collaborating on KG construction
+- The finding validates our architecture: LLM extracts, TD v2 reasons
+
+---
+
+#### 10. Neuro-Symbolic AI: The State of the Art (Hitzler et al., 2022)
+
+**What it does:** Taxonomy of neuro-symbolic approaches.
+
+**TD v2 relevance: ★★☆☆☆ LOW (theoretical classification)**
+
+**What to steal:**
+- Our system = "decoupled neuro-symbolic with structured interface"
+- Use this classification in papers/documentation
+
+---
+
+## Summary: What to Steal
+
+| Paper | Key Steal | Implementation Phase |
+|-------|-----------|---------------------|
+| EDC | Define phase + EDC+R refinement | **Now** (teaching pipeline) |
+| KGGen | Two-step extraction (entities → relations) | **Now** (teaching pipeline) |
+| MRKL | Architecture precedent | **Now** (documentation) |
+| Pan et al. | Theoretical foundation | **Now** (documentation) |
+| ToG-2 | Iterative KG + text retrieval | **Next** (query pipeline) |
+| GraphRAG | Community detection + map-reduce | **Next** (global queries) |
+| QA-GNN | Relevance scoring for KG nodes | **Next** (ranking) |
+| AutoKG | VINE benchmark + multi-agent | **Future** (benchmarking) |
 
 ---
 
