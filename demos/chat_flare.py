@@ -444,51 +444,12 @@ def main():
                 td.teach(rest, rest)
                 print(f"\n  {C['green']}✓ Fact stored.{C['reset']}")
 
-            # Check if any NEW relation was taught that has no properties
-            import re
-            taught_text = rest.lower()
+            # Check if any NEW relation was taught that has no properties.
+            # Uses the engine's KG — no hardcoded patterns needed.
             new_relations = set()
-            for pattern_name, pattern_re in [
-                ("X is the Y of Z", r'(\w+(?:\s+\w+)*)\s+is\s+(?:the\s+)?(\w+)\s+of'),
-                ("X is in Y", r'(\w+(?:\s+\w+)*)\s+is\s+in'),
-                ("X is part of Y", r'(\w+(?:\s+\w+)*)\s+is\s+part\s+of'),
-                ("X is before Y", r'(\w+(?:\s+\w+)*)\s+is\s+before'),
-                ("X is after Y", r'(\w+(?:\s+\w+)*)\s+is\s+after'),
-                ("X means Y", r'(\w+(?:\s+\w+)*)\s+means'),
-            ]:
-                m = re.search(pattern_re, taught_text)
-                if m:
-                    # Extract relation from the match
-                    if "of" in pattern_name and len(m.groups()) >= 2:
-                        rel = f"{m.group(2)}_of"
-                    elif "part of" in pattern_name:
-                        rel = "part_of"
-                    elif "in" in pattern_name:
-                        rel = "in"
-                    elif "before" in pattern_name:
-                        rel = "before"
-                    elif "after" in pattern_name:
-                        rel = "after"
-                    elif "means" in pattern_name:
-                        rel = "means"
-                    else:
-                        rel = m.group(2) if len(m.groups()) >= 2 else None
-                    if rel and rel not in td.kg.relation_properties:
-                        new_relations.add(rel)
-
-            # Also check for custom patterns like "X is north of Y"
-            custom_m = re.search(r'(\w+)\s+is\s+(\w+)\s+of\s+(\w+)', taught_text)
-            if custom_m:
-                rel = f"{custom_m.group(2)}_of"
-                if rel not in td.kg.relation_properties and rel not in new_relations:
-                    new_relations.add(rel)
-
-            # Check for "X is Y to Z" patterns (e.g., "is married to", "is related to")
-            to_m = re.search(r'(\w+)\s+is\s+(\w+)\s+to\s+(\w+)', taught_text)
-            if to_m:
-                rel = f"{to_m.group(2)}_to"
-                if rel not in td.kg.relation_properties and rel not in new_relations:
-                    new_relations.add(rel)
+            for t in td.kg.triples:
+                if t.relation not in td.kg.relation_properties:
+                    new_relations.add(t.relation)
 
             # Ask about unknown relation properties
             for rel in new_relations:
