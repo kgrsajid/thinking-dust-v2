@@ -1,6 +1,6 @@
 # Thinking Dust v2 — System Architecture
 
-_Last updated: 2026-07-05 GMT+5_
+_Last updated: 2026-07-07 GMT+5_
 
 ---
 
@@ -603,6 +603,309 @@ TD v2 handles three extraction patterns beyond basic SVO:
 
 ---
 
+## 5.9 Contradiction Detection — Lightweight Ontological Type Guard (LOTG)
+
+**Problem addressed:** TD v2's `add_fact()` previously stored any triple without consistency checking. A user could teach "Paris is a country" after teaching "Paris is the capital of France" — the system would accept both without flagging the contradiction.
+
+**Solution:** A pre-commit hook in `add_fact()` that infers entity types from relations, tracks them, and checks for type contradictions against a disjointness table. Warns but never rejects — the user is the authority.
+
+### Three Data Structures
+
+#### A. Relation Schema Registry (Domain/Range Constraints)
+
+Each relation declares what types its subject (domain) and object (range) should have. `None` = unconstrained.
+
+```python
+RELATION_SCHEMA = {
+    "capital_of":   {"domain": "city",          "range": "country"},
+    "born_in":      {"domain": "person",        "range": "place"},
+    "married_to":   {"domain": "person",        "range": "person"},
+    "made_by":      {"domain": "product",       "range": "organization"},
+    "in":           {"domain": None,            "range": None},  # too broad
+    "is_a":         {"domain": None,            "range": None},  # type declaration
+}
+```
+
+**Research backing:**
+- **OWL 2 `rdfs:domain` and `rdfs:range`** (W3C Recommendation, 2009) — standard ontology property constraints. Every OWL reasoner implements these.
+- **Wikidata property constraints** — production system with "suggestions, not hard constraints" approach. URL: https://www.wikidata.org/wiki/Wikidata:Database_reports/Constraint_violations
+- **DBpedia ontology** — domain/range inference from properties is standard practice in knowledge graph construction.
+- **NELL (Never-Ending Language Learner)** (CMU, Carlson et al., 2010) — learns entity types from relation patterns. "If X born_in Y, then X is a person and Y is a place."
+
+#### B. Type Disjointness Table
+
+Sets of mutually exclusive types. An entity cannot belong to two types in the same set.
+
+```python
+DISJOINT_TYPES = {
+    frozenset({"city", "country", "continent", "state"}),
+    frozenset({"person", "organization"}),
+    frozenset({"animal", "plant"}),
+    frozenset({"living", "non_living"}),
+    frozenset({"product", "invention", "discovery", "artwork", "film", "composition"}),
+}
+```
+
+**Research backing:**
+- **OWL 2 `owl:disjointWith`** (W3C Recommendation, 2009) — fundamental ontology axiom. "Two classes are disjoint if they have no instances in common."
+- **Description Logic** (Baader et al., "The Description Logic Handbook", Cambridge University Press, 2003) — disjointness is a fundamental DL axiom. Every DL reasoner (HermiT, Pellet, Fact++) implements consistency checking against disjointness axioms.
+- **Protégé** (Stanford, 2000s+) — battle-tested ontology editor with built-in disjointness validation.
+
+#### C. Type Hierarchy (Minimal Subsumption)
+
+Subtype → supertype mapping. Enables: "Paris is a city" AND "Paris is a place" = no conflict, because city ⊑ place.
+
+```python
+TYPE_HIERARCHY = {
+    "city":          {"settlement", "place"},
+    "country":       {"place", "geopolitical_entity"},
+    "person":        {"living", "entity"},
+    "organization":  {"entity"},
+    "film":          {"entity", "artwork"},
+    # ...
+}
+```
+
+**Research backing:**
+- **OWL 2 `rdfs:subClassOf`** (W3C Recommendation, 2009) — standard class hierarchy axiom.
+- **RDFS Semantics** (W3C, 2004) — subsumption is the foundation of ontological reasoning.
+- **Wikidata `instance_of` / `subclass_of`** — production type hierarchy with 100M+ entities.
+- **WordNet** (Miller, 1995) — synset hierarchies for lexical type disambiguation.
+
+### Algorithm
+
+```
+check_consistency(subject, relation, object) → list[Warning]
+
+1. If relation == "is_a":
+     new_type = object
+     For each existing_type in entity_types[subject]:
+       If disjoint(new_type, existing_type) AND NOT subsumes(new_type, existing_type):
+         → WARNING: "{subject} was {existing_type}, now {new_type}"
+     Record type: entity_types[subject].add(new_type)
+
+2. If relation has schema:
+     For subject: inferred_type = schema.domain → check + record
+     For object:  inferred_type = schema.range  → check + record
+
+3. Return warnings (empty list = no conflicts)
+```
+
+**Performance:** dict lookup + set intersection = O(1) amortized. <1ms per check. No Z3 on teach path.
+
+### Conflict Policy
+
+| Action | Behavior |
+|--------|----------|
+| **Store** | ✅ Always store the triple. User is the authority. |
+| **Warn** | ⚠️ Return warning with proof trace |
+| **Annotate** | 📝 Triple gets `metadata: {"contradictions": [...]}` |
+| **Reject** | ❌ Never. Warn-don't-reject is the design principle. |
+
+**Research backing:**
+- **Wikidata constraint violations** — "suggestions, not hard constraints" (Wikidata Help:Constraint)
+- **Open World Assumption** (OWL) — absence of a fact ≠ negation of a fact. A contradiction is a warning, not an error.
+- **Collaborative KG systems** (YAGO, Freebase) — soft constraints with human override.
+
+### Example
+
+```
+teach: Paris is the capital of France
+  → paris inferred as 'city' (domain of capital_of)
+  → france inferred as 'country' (range of capital_of)
+  ✓ Fact stored.
+
+teach: Paris is a country
+  → ⚠️ Contradiction for 'paris': previously inferred as 'city'
+    (from capital_of), now identified as 'country'. These types
+    are mutually exclusive.
+  ✓ Fact stored. (User is authority — we warn, never reject.)
+```
+
+### Integration
+
+```
+add_fact(subject, relation, obj):
+  warnings = self.detector.check(subject, relation, obj)  ← LOTG hook
+  if warnings:
+    triple.metadata = {"contradictions": [str(w) for w in warnings]}
+  self.triples.append(triple)  ← always store
+  return triple
+```
+
+### Files
+- `td/reasoning/contradiction_detector.py` — standalone module, ~180 lines
+- `td/kg/__init__.py` — LOTG hook in `add_fact()`
+- `td/thinking.py` — `teach()` surfaces warnings
+- `tests/test_contradiction_detector.py` — 59 tests
+
+### References
+
+| # | Paper/Standard | Year | Venue | Relevance |
+|---|---------------|------|-------|-----------|
+| 1 | OWL 2 Web Ontology Language (W3C) | 2009 | W3C Recommendation | `rdfs:domain`, `rdfs:range`, `owl:disjointWith`, `rdfs:subClassOf` |
+| 2 | RDFS Semantics (W3C) | 2004 | W3C Recommendation | Type hierarchy, subsumption reasoning |
+| 3 | Wikidata Constraint Violations | ongoing | Wikidata | Soft constraints as warnings, not hard blocks |
+| 4 | Baader et al., "The Description Logic Handbook" | 2003 | Cambridge University Press | Disjointness as fundamental DL axiom |
+| 5 | Carlson et al., "Toward an Architecture for Never-Ending Language Learning" | 2010 | AAAI | Entity type inference from relation patterns (NELL) |
+| 6 | OWL 2 — Open World Assumption | 2009 | W3C | Absence of fact ≠ negation of fact |
+| 7 | Wikidata `instance_of` / `subclass_of` | 2012+ | Wikidata | Production entity typing system |
+
+---
+
+## 6. Word Sense Disambiguation — The "Cell" Problem
+
+**The problem:** The same surface form can refer to different concepts in different contexts. "Cell" means:
+- **Biology:** a biological cell (organelle, membrane, nucleus)
+- **Prison:** a prison cell (room, confinement)
+- **Phone:** a cell phone (mobile device, communication)
+- **Electricity:** a battery cell (voltage, electrochemistry)
+- **Spreadsheet:** a table cell (data, row, column)
+
+In a knowledge graph, should these be the **same node** or **different nodes**?
+
+### Current TD v2 Behavior (Naive)
+
+TD v2 uses raw entity names as-is. "Cell" is always `cell` — one node:
+
+```
+teach: cell is_a organelle           → (cell, is_a, organelle)    [biology]
+teach: cell has_screen               → (cell, has_screen, ...)    [phone]
+teach: cell is part of prison        → (cell, part_of, prison)    [prison]
+
+Result: One node "cell" with mixed types from different domains.
+LOTG would flag: "cell was inferred as 'organelle' (biology), now 'product' (phone)"
+```
+
+**This is a fundamental limitation.** LOTG catches the type conflict, but doesn't resolve the underlying ambiguity.
+
+### Why Domain Is the Key
+
+The **domain of a relation** provides context for disambiguation. When "cell" appears as the subject of different relations, the relation's domain tells us which "cell" is meant:
+
+| Relation | Domain | Inferred Sense |
+|----------|--------|----------------|
+| `cell is_a organelle` | biology | cell_biology |
+| `cell has_screen` | product | cell_phone |
+| `cell is part of prison` | location | cell_prison |
+| `cell generates_voltage` | device | cell_battery |
+
+**The insight:** Domain constraints from LOTG aren't just for contradiction detection — they're a **word sense disambiguation signal**. If two facts about "cell" have different domains, they likely refer to different senses.
+
+### Research Foundation
+
+Word Sense Disambiguation (WSD) is one of the oldest NLP problems. The key approaches:
+
+| Approach | Paper | Year | Technique | Relevance to TD v2 |
+|----------|-------|------|-----------|-------------------|
+| **Dictionary overlap** | Lesk, "Automatic Sense Disambiguation" | 1986 | Overlap of word definitions in context | Could use relation context to match senses |
+| **WordNet synsets** | Miller, "WordNet: A Lexical Database" | 1995 | Hierarchical sense inventory | Type hierarchy already maps to synset-like structures |
+| **BabelNet** | Navigli & Ponzetto, "BabelNet" | 2012 | Multilingual sense inventory + graph | Entity linking to sense IDs |
+| **Wikidata QIDs** | Wikidata | 2012+ | `Paris Q90` (city) vs `Paris Q123456` (person) | Production solution: unique IDs per sense |
+| **YAGO** | Suchanek et al. | 2007 | WordNet synsets for entity typing | Type-aware entity nodes |
+| **Context2Vec** | Melamud et al. | 2016 | Context-dependent embeddings | BEAGLE context vectors could serve this role |
+| **Entity Linking** | Ji & Grishman | 2011 | Linking mentions to KB entities | Standard NER + disambiguation pipeline |
+
+### The Wikidata Solution (Production Standard)
+
+Wikidata solves this with **unique identifiers per sense**:
+- `Q90` = Paris (capital of France)
+- `Q123456` = Paris (person from Greek mythology)
+- `Q219776` = Paris (Texas city)
+
+Every entity has a **unique QID**. The surface form "Paris" is just a label — the QID is the true identity.
+
+### TD v2's Path: Domain-Aware Entity Namespacing
+
+The proposed solution leverages LOTG's domain inference to **automatically namespace entities** when ambiguity is detected:
+
+**Phase 1: Current (Implemented)**
+- LOTG detects type conflicts: "cell was biology, now product"
+- Warning tells the user about the ambiguity
+- User can manually disambiguate: `cell_biology`, `cell_phone`
+
+**Phase 2: Domain-Aware Disambiguation (Future)**
+- When the same entity appears in facts with **different inferred domains**, automatically create separate nodes: `cell[bio]`, `cell[phone]`, `cell[prison]`
+- Domain is inferred from the relation's schema (already implemented in LOTG)
+- BEAGLE context vectors provide additional disambiguation signal
+
+```
+teach: cell is_a organelle
+  → domain: biology → node: cell[bio]
+
+teach: cell has_screen
+  → domain: product → node: cell[phone] (NEW node, separate from cell[bio])
+
+ask: what is cell made of?
+  → Which cell? → check context domain → answer from the right node
+```
+
+**Phase 3: Automatic WSD via Context (Future)**
+- Use BEAGLE context vectors (already trained on 10K sentences) to compute similarity between the query context and each sense's typical context
+- If "cell" appears in a sentence with "organism", "membrane", "nucleus" → biology sense
+- If "cell" appears with "call", "number", "signal" → phone sense
+
+**Research backing for context-based WSD:**
+- **Context2Vec** (Melamud et al., 2016, ACL) — context-dependent embeddings for WSD
+- **BEAGLE** (Jones & Mewhort, 2007) — already implemented in TD v2. Context vectors accumulate co-occurrence information that can distinguish senses.
+- **GlossBERT** (Huang et al., 2019) — uses definition context for WSD (BERT-based, but the principle applies)
+
+### Formal Model: Entity = (Surface Form, Domain)
+
+```python
+# Current: entity is just a string
+entity = "cell"
+
+# Proposed: entity is (surface_form, domain) tuple
+entity = ("cell", "biology")  # cell_biology
+entity = ("cell", "phone")    # cell_phone
+
+# In the KG:
+(cell_biology, is_a, organelle)
+(cell_phone, has_screen, lcd_display)
+(cell_biology, part_of, organism)
+
+# Query resolution:
+"What is cell made of?"
+  → domain inference from context → cell_biology → answer from biology node
+```
+
+### Why Not Just Use Wikidata QIDs?
+
+Wikidata QIDs require a **pre-existing sense inventory**. TD v2 starts from zero — it builds knowledge from scratch. The domain-aware approach:
+- **No pre-existing ontology needed** — senses emerge from teaching
+- **Language-agnostic** — domain is inferred from relation patterns, not language-specific dictionaries
+- **Interpretable** — `cell[bio]` is human-readable, `Q123456` is not
+- **Compatible with LOTG** — uses the same domain/range infrastructure already built
+
+### Current Status
+
+| Component | Status |
+|-----------|--------|
+| LOTG type conflict detection | ✅ Implemented |
+| Domain inference from relations | ✅ Implemented |
+| User warning on ambiguity | ✅ Implemented |
+| Automatic entity namespacing | 🔲 Future (Phase 2) |
+| Context-based WSD via BEAGLE | 🔲 Future (Phase 3) |
+| Cross-domain entity linking | 🔲 Future (Phase 3) |
+
+### References
+
+| # | Paper | Year | Venue | Relevance |
+|---|-------|------|-------|-----------|
+| 1 | Lesk, "Automatic Sense Disambiguation Using Machine Readable Dictionaries" | 1986 | *SIGDOC* | Foundation of WSD — dictionary definition overlap |
+| 2 | Miller, "WordNet: A Lexical Database for English" | 1995 | *CACM* | Sense inventory with hierarchical synsets |
+| 3 | Navigli & Ponzetto, "BabelNet: The Automatic Construction, Evaluation and Application of a Wide-Coverage Multilingual Semantic Network" | 2012 | *AI Journal* | Multilingual sense inventory + graph-based WSD |
+| 4 | Suchanek et al., "YAGO: A Core of Semantic Knowledge" | 2007 | *WWW* | WordNet synsets for entity typing in KGs |
+| 5 | Wikidata — Unique Entity Identifiers | 2012+ | Wikidata | Production solution: QIDs per sense |
+| 6 | Melamud et al., "context2vec: Learning Generic Context Embedding with Bidirectional LSTM" | 2016 | *ACL* | Context-dependent embeddings for WSD |
+| 7 | Ji & Grishman, "Knowledge Base Population: Successful Approaches and Challenges" | 2011 | *ACL* | Entity linking pipeline (NER + disambiguation) |
+| 8 | Huang et al., "GlossBERT: BERT for Word Sense Disambiguation with Gloss Knowledge" | 2019 | *EMNLP* | Definition-based WSD |
+| 9 | Jones & Mewhort, "Representing Word Meaning and Order Information in a Composite Holographic Lexicon" | 2007 | *Psychological Review* | BEAGLE context vectors (already in TD v2) |
+| 10 | Pustejovsky, "The Generative Lexicon" | 1991 | *Computational Linguistics* | Type coercion and sense extension |
+
+---
+
 ## 7. Future Architecture (TD v2.5)
 
 TD v2.5 extends the current four-layer architecture with five additional layers. Each layer addresses a specific limitation of the current system. The core philosophy remains: **small, interpretable, provably correct**.
@@ -782,6 +1085,10 @@ The parser adapts by using dependency relations (which are largely word-order in
 9. **Relation property learning is manual.** The user must explicitly teach whether a relation is transitive, symmetric, or functional. Automatic Rule Discovery (ILP) is planned but not implemented.
 
 10. **No graph kernel ranking.** When multiple paths exist between two entities, the system returns the first-found path rather than the most structurally relevant one.
+
+11. **No word sense disambiguation.** The same surface form (e.g., "cell") maps to one node regardless of context. LOTG detects type conflicts across senses, but automatic entity namespacing (cell[bio] vs cell[phone]) is not yet implemented. See Section 6.
+
+12. **Contradiction detection is type-level only.** LOTG catches type contradictions (Paris can't be both city and country) but not factual contradictions (Paris is in France vs Paris is in Germany). Factual contradiction requires Z3 constraint solving, planned for future work.
 
 ---
 

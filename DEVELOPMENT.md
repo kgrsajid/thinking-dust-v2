@@ -1,6 +1,6 @@
 # Thinking Dust v2 — Developer Guide
 
-_Last updated: 2026-07-02 GMT+5_
+_Last updated: 2026-07-07 GMT+5_
 
 This guide covers everything you need to set up, extend, and debug TD v2.
 
@@ -355,6 +355,82 @@ Then add the property to the relation:
 ```python
 kg.set_relation_property("parent_of", "asymmetric")
 ```
+
+### 4.4 Contradiction Detection (LOTG)
+
+TD v2 includes a **Lightweight Ontological Type Guard** that detects type contradictions before facts are stored. It runs automatically in `add_fact()` — no configuration needed.
+
+#### How It Works
+
+When you add a fact, LOTG:
+1. **Infers entity types** from the relation's domain/range constraints
+2. **Tracks inferred types** per entity
+3. **Checks for contradictions** against a disjointness table
+4. **Warns** (never rejects) when conflicts are found
+
+```python
+kg.add_fact("paris", "capital_of", "france")
+# LOTG infers: paris → city, france → country
+
+kg.add_fact("paris", "is_a", "country")
+# LOTG warns: ⚠️ paris was 'city', now 'country' — mutually exclusive
+# Triple is STILL stored (user is authority)
+```
+
+#### Accessing Warnings
+
+```python
+# After add_fact(), check last_warnings
+triple = kg.add_fact("paris", "is_a", "country")
+if kg.last_warnings:
+    for w in kg.last_warnings:
+        print(w)  # Human-readable warning with proof trace
+
+# Warnings are also attached to the triple
+if triple.metadata and "contradictions" in triple.metadata:
+    print(triple.metadata["contradictions"])
+```
+
+#### From teach()
+
+```python
+result = td.teach("Paris is a country", "country")
+if "warnings" in result:
+    for w in result["warnings"]:
+        print(w)  # Contradiction warning
+```
+
+#### Adding Type Constraints for New Relations
+
+Edit `RELATION_SCHEMA` in `td/reasoning/contradiction_detector.py`:
+
+```python
+RELATION_SCHEMA["my_new_relation"] = {"domain": "entity_type", "range": "entity_type"}
+```
+
+Or add to `DISJOINT_TYPES` for new type conflicts:
+
+```python
+DISJOINT_TYPES.add(frozenset({"my_type_a", "my_type_b"}))
+```
+
+#### Adding New Type Hierarchies
+
+Edit `TYPE_HIERARCHY` in `td/reasoning/contradiction_detector.py`:
+
+```python
+TYPE_HIERARCHY["my_subtype"] = {"my_supertype", "entity"}
+```
+
+This prevents false positives: "X is my_subtype" and "X is my_supertype" = no conflict.
+
+#### Performance
+
+LOTG runs in <1ms per `add_fact()` call. It uses only dict lookups and set intersections — no Z3, no ML, no external dependencies.
+
+#### File
+
+`td/reasoning/contradiction_detector.py` — standalone module, ~180 lines
 
 ---
 
