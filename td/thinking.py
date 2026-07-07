@@ -908,17 +908,25 @@ class GenericThinkingDust:
 
         # Try to extract knowledge graph triples
         triples = self._extract_triples(problem_text, solution_text)
+        contradictions = []
         for (s, r, o) in triples:
             self.kg.add_fact(s, r, o)
+            # Capture any contradiction warnings from the type guard
+            if self.kg.last_warnings:
+                contradictions.extend(self.kg.last_warnings)
             # Sync to SPARQL store (if available)
             if self.sparql_store is not None:
                 self.sparql_store.add_fact(s, r, o, source="user")
 
-        return {
+        result = {
             "status": "learned", "problem": problem_text[:80],
             "solution": solution_text[:80], "memory_size": len(self.mhn.patterns),
             "message": "Got it. I'll remember this for next time.",
         }
+        if contradictions:
+            result["warnings"] = [str(w) for w in contradictions]
+            result["warning_objects"] = contradictions
+        return result
 
     def teach_relation(self, relation: str, *properties: str) -> dict:
         """Teach logical properties of a relation.

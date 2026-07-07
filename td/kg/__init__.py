@@ -25,6 +25,12 @@ from dataclasses import dataclass, field
 from typing import Optional
 from collections import defaultdict
 
+# Contradiction detection — Lightweight Ontological Type Guard (LOTG)
+from td.reasoning.contradiction_detector import (
+    ContradictionDetector,
+    ContradictionWarning,
+)
+
 # Temporal reasoning — Allen's interval algebra (lazy import to avoid circular deps)
 # Allen, J.F. (1983). "Maintaining Knowledge about Temporal Intervals." CACM, 26(11).
 # Used locally in temporal reasoning methods only.
@@ -93,6 +99,7 @@ class Triple:
     proof: str = ""                # derivation chain for derived facts
     temporal_start: Optional[int] = None  # Year/start of interval (None = open start)
     temporal_end: Optional[int] = None    # Year/end of interval (None = open end)
+    metadata: Optional[dict] = None       # Contradiction warnings, annotations, etc.
 
     def __repr__(self):
         base = f"({self.subject}, {self.relation}, {self.object})"
@@ -147,6 +154,10 @@ class KnowledgeGraph:
         # Gazetteer: learned multi-word entity dictionary
         self.gazetteer: set[str] = set()
 
+        # Contradiction detector — Lightweight Ontological Type Guard
+        self.detector = ContradictionDetector()
+        self.last_warnings: list = []  # Warnings from most recent add_fact()
+
         # SPARQL store (pyoxigraph) — primary storage backend
         # Initialized lazily on first add_fact or explicit load
         self._sparql_store = None
@@ -155,6 +166,10 @@ class KnowledgeGraph:
                  proof: str = "", temporal_start: int = None,
                  temporal_end: int = None) -> Triple:
         """Add a triple to the knowledge graph.
+
+        Runs the Lightweight Ontological Type Guard (LOTG) before storing.
+        Contradictions are recorded as warnings on the triple and on
+        self.last_warnings — the triple is ALWAYS stored (user is authority).
 
         Args:
             subject, relation, obj: The fact triple
@@ -167,6 +182,9 @@ class KnowledgeGraph:
         subject = subject.strip().lower()
         relation = relation.strip().lower()
         obj = obj.strip().lower()
+
+        # ── LOTG: Pre-commit ontological consistency check ────────
+        self.last_warnings = self.detector.check(subject, relation, obj)
 
         # Check for duplicate (ignoring temporal fields for deduplication)
         for t in self.triples:
@@ -183,6 +201,9 @@ class KnowledgeGraph:
 
         triple = Triple(subject, relation, obj, source, proof,
                         temporal_start=temporal_start, temporal_end=temporal_end)
+        # Attach contradiction warnings to the triple (metadata)
+        if self.last_warnings:
+            triple.metadata = {"contradictions": [str(w) for w in self.last_warnings]}
         idx = len(self.triples)
         self.triples.append(triple)
         self._entity_index[subject].append(idx)

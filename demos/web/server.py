@@ -70,11 +70,14 @@ def teach():
     try:
         result = td.teach(text, answer or text)
         save_kg()  # Persist after teaching
-        return jsonify({
+        response = {
             "success": True,
             "message": result.get("message", "Taught"),
             "triples": len(td.kg.triples),
-        })
+        }
+        if "warnings" in result:
+            response["warnings"] = result["warnings"]
+        return jsonify(response)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

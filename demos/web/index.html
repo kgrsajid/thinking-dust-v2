@@ -121,7 +121,7 @@ textarea.input{min-height:52px;max-height:100px;resize:vertical;line-height:1.5}
 .tag.teach{background:#dbeafe;color:#2563eb}.tag.derive{background:#d1fae5;color:#059669}.tag.ask{background:#ede9fe;color:#7c3aed}.tag.err{background:#fee2e2;color:#dc2626}
 
 .status{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:6px;font-size:12px;font-weight:500;margin-top:6px}
-.status.hidden{display:none}.status.info{background:#eef2ff;color:var(--color-primary)}.status.ok{background:#ecfdf5;color:#059669}.status.err{background:#fef2f2;color:#e11d48}
+.status.hidden{display:none}.status.info{background:#eef2ff;color:var(--color-primary)}.status.ok{background:#ecfdf5;color:#059669}.status.err{background:#fef2f2;color:#e11d48}.status.warn{background:#fffbeb;color:#d97706}
 .spin{width:12px;height:12px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .5s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
@@ -336,9 +336,14 @@ async function teach(){
   try{
     const r=await api('teach',{text:t});
     if(r.error){setStatus('teach-status','err','✕ '+r.error);hideLoading();return}
-    setStatus('teach-status','ok','✓ Stored');log('teach',esc(t));inp.value='';refreshGraph();
+    if(r.warnings && r.warnings.length>0){
+      setStatus('teach-status','warn','⚠ '+r.warnings[0]);log('teach',esc(t)+' <span style="color:#dc2626">⚠ type conflict</span>');
+    }else{
+      setStatus('teach-status','ok','✓ Stored');log('teach',esc(t));
+    }
+    inp.value='';refreshGraph();
   }catch(e){setStatus('teach-status','err','✕ '+e.message)}
-  finally{btn.disabled=false;hideLoading();setTimeout(()=>clearStatus('teach-status'),2000)}
+  finally{btn.disabled=false;hideLoading();setTimeout(()=>clearStatus('teach-status'),4000)}
 }
 
 async function teachRel(){

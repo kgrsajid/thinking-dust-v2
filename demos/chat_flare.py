@@ -439,10 +439,18 @@ def main():
                 problem, solution = rest.split("|", 1)
                 r = td.teach(problem.strip(), solution.strip())
                 print(f"\n  {C['green']}✓ {r['message']}{C['reset']}")
+                # Show contradiction warnings if any
+                if "warnings" in r:
+                    for w in r["warnings"]:
+                        print(f"  {C['red']}⚠  {w}{C['reset']}")
             else:
                 # Triple-only teach: just extract facts, no answer
                 td.teach(rest, rest)
                 print(f"\n  {C['green']}✓ Fact stored.{C['reset']}")
+                # Show contradiction warnings if any
+                if td.kg.last_warnings:
+                    for w in td.kg.last_warnings:
+                        print(f"  {C['red']}⚠  {w}{C['reset']}")
 
             # Check if any NEW relation was taught that has no properties.
             # Uses the engine's KG — no hardcoded patterns needed.
