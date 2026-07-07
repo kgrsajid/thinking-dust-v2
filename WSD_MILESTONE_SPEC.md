@@ -138,38 +138,49 @@ self.sense_inventory: dict[str, list[str]] = {}
 
 ### 3.4 The Routing Algorithm (Corrected)
 
-#### Teach Path: "cell is_a organelle"
+**Key insight:** Context clustering uses the FULL SENTENCE, not just the extracted triple. Sentence-level context > triple-level context for disambiguation.
+
+**Reference:** Ruas et al. (2020), "Context Expansion Approach for Graph-Based WSD," *Expert Systems with Applications*. "Existing graph-based WSD methods represent nodes at the word level... the proposed method measures graph node semantic relations at the sentence level by expanding the words' context."
+
+**Reference:** AlMousa et al. (2022), "SCSMM: A Novel Word Sense Disambiguation Approach Using WordNet Knowledge Graph," *ACM TALLIP*. "Guarantees the capture of the maximum sentence context while maintaining the terms' order within the sentence."
+
+#### Teach Path: "The prisoner was locked in his cell"
 
 ```
-1. Parse: entities = ["cell"], relation = "is_a", object = "organelle"
-2. Build context: C = BEAGLE context of surrounding words
-3. Assign to sense cluster:
-   a. If "cell" has no clusters → create first cluster
-   b. If "cell" has clusters → cosine similarity to each
-      → If best_sim > threshold → assign to existing cluster
-      → If best_sim < threshold → create new cluster
-4. Route to KG URI:
-   a. If only one sense URI exists → use it
-   b. If multiple → pick based on cluster index
-5. Check LOTG:
-   → If (cell_X, is_a, organelle) conflicts with existing types
-   → Trigger sense induction: create new URI cell_new
-6. Store triple on resolved URI
-7. Update BEAGLE (existing online learning — unchanged)
+1. User teaches: "The prisoner was locked in his cell"
+2. Parser extracts triple: (prisoner, locked_in, cell)
+3. BEAGLE encodes FULL sentence context: [prisoner, locked, cell]
+   NOT just the triple [prisoner, locked_in, cell]
+4. Assign to sense cluster:
+   → Compare sentence context with existing clusters for "cell"
+   → If no clusters exist → create first cluster
+   → If best_sim > threshold → assign to existing cluster
+   → If best_sim < threshold → create new cluster
+5. Route to KG URI based on cluster assignment
+6. LOTG check: does the triple conflict with existing types on that URI?
+7. Store triple on resolved URI
 ```
 
-#### Ask Path: "what is cell made of?"
+#### Ask Path: "What is cell made of?"
 
 ```
-1. Parse: entities = ["cell"], relation = "made_of"
-2. Build query context: C_query = BEAGLE context of query words
-3. Resolve sense:
-   → MHN retrieval: naturally selects biology-context patterns
-     because "made_of" co-occurs with biology context
-   → If multiple senses exist in KG: use cluster similarity
-4. Query KG: BFS/SPARQL with resolved URI
-5. Return answer + sense used (for transparency)
+1. User asks: "What is cell made of?"
+2. BEAGLE encodes FULL query context: [cell, made]
+3. Compare with existing clusters for "cell"
+4. Best-matching cluster → resolve to sense URI
+5. Query KG: BFS/SPARQL with resolved URI
+6. Return answer + sense used (for transparency)
 ```
+
+#### Why Full Sentence > Triple
+
+| Context Level | Example | Signal Quality |
+|---------------|---------|---------------|
+| **Triple** | `[cell, part_of, prison]` | Weak — "part_of" is generic |
+| **Sentence** | `[prisoner, locked, cell]` | Strong — "prisoner" + "locked" uniquely identify prison-cell |
+| **Document** | `[prisoner, locked, cell, warden, parole, sentence]` | Strongest — but overkill for teach() |
+
+The SCSMM paper (AlMousa et al., 2022) proves sentence-level context captures the "maximum sentence context while maintaining the terms' order." For TD v2's interactive teach() model, sentence-level is the sweet spot.
 
 ### 3.5 Dynamic Sense Induction (LOTG-Supervised)
 
