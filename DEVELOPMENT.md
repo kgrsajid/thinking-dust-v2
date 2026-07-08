@@ -243,6 +243,31 @@ Paraphrase matching: Two words are semantically similar if their context vectors
 
 ---
 
+## 🚨 URGENT: teach() Gloss Quality Fix (TODO — Next Session)
+
+**Problem:** The `teach()` path extracts triples and loses context words from the original sentence. When teaching "bats use echolocation to navigate in the dark", the Lesk gloss only gets the triple-form words — not "navigate" or "dark". This makes the Lesk WSD algorithm weak for facts taught through `teach()`.
+
+**Evidence:**
+- Standalone Lesk with full Wikipedia sentences: **100% accuracy** (66/66)
+- Lesk integrated with `teach()`: **sparse glosses**, fallback rate increases
+- Manual enrichment via `add_sense_example()` restores accuracy to 90-100%
+
+**Root cause:** Line 1016 in `td/thinking.py`:
+```python
+self.lesk_wsd.add_sense_example(base_entity, sense_idx, problem_text)
+```
+This DOES pass the full `problem_text`, but the `_extract_context_words` method strips most words via lemmatization and frame-word exclusion. The triple-form words from `_rebuild_lesk_glosses` are even sparser.
+
+**Fix needed:**
+1. Store the FULL original teach sentence (not triple-form) in the Lesk gloss
+2. Reduce frame-word exclusion — keep domain-relevant words
+3. Add both raw and lemmatized forms to the gloss
+4. The `_rebuild_lesk_glosses()` method should use the original sentences, not reconstructed triples
+
+**Impact:** This is the single biggest improvement opportunity for TD v2's WSD. The algorithm works — the gloss quality is the bottleneck.
+
+---
+
 ## 4. Extending the Knowledge Graph
 
 ### 4.1 Adding Triple Extraction Patterns
