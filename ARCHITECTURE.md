@@ -929,11 +929,26 @@ teach: cell is_a device        → device ≠ organelle, device ≠ room → NEW
 
 ### Limitations
 
-1. **Requires `is_a` for reliable sense creation.** Non-`is_a` facts alone can't trigger sense creation (BEAGLE context is noise for short sentences). Users must teach at least one `is_a` fact per sense.
+1. **Requires `is_a` for reliable sense creation.** BEAGLE (2007) is a static word vector model — one vector per word regardless of context. Measured cosine similarity between same-sense and different-sense teach sentences is ~0.0 ± 0.03 (noise). Modern WSD research (Sumanathilaka et al. 2026, Navigli AAAI 2026) confirms: contextualized embeddings (BERT attention heads) are needed for reliable WSD. Static vectors are insufficient.
 
-2. **Sequential teaching assumption.** Non-`is_a` facts are routed to the sense that best matches via BEAGLE context. If teaches are interleaved (biology then prison then biology), routing may be incorrect.
+2. **BEAGLE similarity is unreliable for word-level matching.** Unrelated words like "membrane" and "damp" can have high cosine similarity (0.31) due to chance co-occurrences in the training corpus. This makes neighbor-word analysis via BEAGLE too noisy for production use.
 
-3. **BEAGLE query routing is approximate.** Query-time sense resolution uses BEAGLE context similarity, which is noisy for short queries.
+3. **Corpus coverage matters.** The 10K synthetic corpus covers programming, science, geography, and technology. It has NO coverage of prison/crime, finance, or food domains. BEAGLE has zero semantic knowledge about words outside its training corpus.
+
+4. **Sequential teaching assumption.** Non-`is_a` facts are routed to the sense that best matches via BEAGLE context. If teaches are interleaved (biology then prison then biology), routing may be incorrect.
+
+### What Would Fix This
+
+| Approach | Reference | Feasibility for TD v2 |
+|----------|-----------|----------------------|
+| **BERT contextualized embeddings** | Devlin et al. (2019) | ❌ Requires 110M+ params, GPU |
+| **Sentence-transformers** | Sumanathilaka et al. (2026) | ❌ Requires pre-trained model |
+| **Attention contextual vectors** | Romanian WSD paper (2025) | ❌ Requires BERT attention heads |
+| **Domain-specific corpus expansion** | — | ✅ Add prison/finance/food to 10K corpus |
+| **SpaCy dependency-based context** | — | ✅ Use syntactic neighbors, not all words |
+| **TF-IDF weighted context** | Salton & Buckley (1988) | ⚠️ Helps with common words, not enough alone |
+
+**Most promising for TD v2:** SpaCy dependency-based context extraction. Instead of using ALL context words (noisy), extract only syntactically connected words (subject, object, modifiers). This is more precise than bag-of-words and fits TD v2's existing spaCy infrastructure.
 
 ### References
 
@@ -941,14 +956,20 @@ teach: cell is_a device        → device ≠ organelle, device ≠ room → NEW
 |---|-------|------|-------|-----------|
 | 1 | Lesk, "Automatic Sense Disambiguation Using Machine Readable Dictionaries" | 1986 | *SIGDOC* | Foundation of WSD — dictionary definition overlap |
 | 2 | Miller, "WordNet: A Lexical Database for English" | 1995 | *CACM* | Sense inventory with hierarchical synsets |
-| 3 | Navigli & Ponzetto, "BabelNet: The Automatic Construction, Evaluation and Application of a Wide-Coverage Multilingual Semantic Network" | 2012 | *AI Journal* | Multilingual sense inventory + graph-based WSD |
+| 3 | Navigli & Ponzetto, "BabelNet" | 2012 | *AI Journal* | Multilingual sense inventory + graph-based WSD |
 | 4 | Suchanek et al., "YAGO: A Core of Semantic Knowledge" | 2007 | *WWW* | WordNet synsets for entity typing in KGs |
 | 5 | Wikidata — Unique Entity Identifiers | 2012+ | Wikidata | Production solution: QIDs per sense |
-| 6 | Melamud et al., "context2vec: Learning Generic Context Embedding with Bidirectional LSTM" | 2016 | *ACL* | Context-dependent embeddings for WSD |
-| 7 | Ji & Grishman, "Knowledge Base Population: Successful Approaches and Challenges" | 2011 | *ACL* | Entity linking pipeline (NER + disambiguation) |
-| 8 | Huang et al., "GlossBERT: BERT for Word Sense Disambiguation with Gloss Knowledge" | 2019 | *EMNLP* | Definition-based WSD |
-| 9 | Jones & Mewhort, "Representing Word Meaning and Order Information in a Composite Holographic Lexicon" | 2007 | *Psychological Review* | BEAGLE context vectors (already in TD v2) |
+| 6 | Melamud et al., "context2vec" | 2016 | *ACL* | Context-dependent embeddings for WSD |
+| 7 | Ji & Grishman, "Knowledge Base Population" | 2011 | *ACL* | Entity linking pipeline (NER + disambiguation) |
+| 8 | Huang et al., "GlossBERT" | 2019 | *EMNLP* | Definition-based WSD |
+| 9 | Jones & Mewhort, "BEAGLE" | 2007 | *Psychological Review* | Static context vectors — INSUFFICIENT for WSD |
 | 10 | Pustejovsky, "The Generative Lexicon" | 1991 | *Computational Linguistics* | Type coercion and sense extension |
+| 11 | **Sumanathilaka et al., "EAD Framework"** | **2026** | **LREC** | **Neighbour word analysis + CoT reasoning. Key finding: context window + cosine similarity to target = critical WSD signal.** |
+| 12 | **Mosolova et al., "In the LLM era, WSI remains unsolved"** | **2025** | **ACL Findings** | **Even LLMs struggle with WSI without explicit reasoning. Validates need for dedicated WSD.** |
+| 13 | **Navigli, "Is WSD Dead in the LLM Era?"** | **2026** | **AAAI** | **WSD is evolving, not dead. Contextualized embeddings (BERT) needed. Static vectors insufficient.** |
+| 14 | **Romanian WSD with attention contextual vectors** | **2025** | **MLKE** | **BERT attention heads at all hidden layers → contextual vectors for WSD. 5 example sentences per sense sufficient.** |
+| 15 | **"Adaptive context-aware fine-grained WSD" (Bag-of-Senses)** | **2021** | **ScienceDirect** | **Adaptive context window + TF-IDF weighting. BoS assumption: document = multiset of word senses.** |
+| 16 | Salton & Buckley, "Term-weighting approaches" | 1988 | *IP&M* | TF-IDF weighting for discriminative context words |
 
 ---
 
