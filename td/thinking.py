@@ -668,6 +668,11 @@ class GenericThinkingDust:
 
 
 
+        # ── WSD: Teach context history per entity ─────────────────────
+        # Maps entity → list of (context_vector, sense_index)
+        # Used to detect context divergence for dynamic sense induction.
+        self._teach_contexts: dict[str, list[tuple[np.ndarray, int]]] = {}
+
         self.total_thinks = 0
         self.total_learned = 0
         self.avg_iterations = 0.0
@@ -913,45 +918,76 @@ class GenericThinkingDust:
         contradictions = []
         for (s, r, o) in triples:
             # ── WSD: Dynamic Sense Induction ────────────────────────
-            # Before adding, check if the subject has existing senses
-            # and if LOTG would detect a type conflict.
+            # The key insight: LOTG's entity_types track what types an
+            # entity has been assigned. When a NEW fact assigns a
+            # DISJOINT type, we need a new sense URI.
+            #
+            # Flow:
+            # 1. Check existing types for this entity (from LOTG)
+            # 2. Check if the new fact's type conflicts with existing types
+            # 3. If conflict → create new sense URI, store on new URI
+            # 4. If no conflict but senses exist → route via BEAGLE context
+            # 5. If no conflict and no senses → store on base form
             resolved_subject = s
             existing_senses = self.kg.get_sense_uris(s)
 
-            if existing_senses:
-                # Try to resolve to an existing sense using BEAGLE context
-                resolved_subject = self.kg.resolve_sense_uri(
-                    s, context_sentence=problem_text, wvm=self.wvm
-                )
+            # ── WSD: Sense routing via context clustering ───────────
+            # PRIMARY signal: BEAGLE context similarity (Jones & Mewhort, 2007)
+            # SECONDARY signal: LOTG type conflict (when disjoint types exist)
+            #
+            # The BEAGLE model has sense_clusters for this word from training.
+            # If the teach context is SIMILAR to an existing sense cluster,
+            # route to that sense. If DISSIMILAR, create a new sense.
+            #
+            # Reference: Ruas et al. (2020) — sentence-level context for WSD
+            # Reference: Sumanathilaka et al. (2026) — neighbour word analysis
 
-            # Add the fact (LOTG runs inside add_fact)
+            # ── WSD: Sense routing via `is_a` object comparison ───────
+            # When teaching "X is_a Y", the object Y IS the type/sense.
+            # If we've already seen "X is_a Z" where Z ≠ Y, check if
+            # Y and Z are compatible (same domain) or incompatible
+            # (different domain → different sense).
+            #
+            # Signal: compare new `is_a` object against existing `is_a`
+            # objects for this entity. Use BEAGLE similarity when available,
+            # fall back to string overlap for short words.
+            #
+            # For non-`is_a` relations, route to the MOST RECENT sense
+            # (the context of teaching is sequential — related facts
+            # are taught together).
+            if r == "is_a":
+                # This is a type declaration — check against existing types
+                existing_is_a = self._get_is_a_objects(s)
+                if existing_is_a:
+                    # Check if the new object matches any existing type
+                    match = self._type_matches_any(o, existing_is_a)
+                    if not match:
+                        # New type doesn't match existing → new sense
+                        if not existing_senses:
+                            self._induce_senses_from_context(s, problem_text)
+                        else:
+                            self.kg.induce_new_sense(
+                                s, conflicting_types={o},
+                                proof=f"is_a divergence: {o} vs existing {existing_is_a}"
+                            )
+                        resolved_subject = self.kg.get_sense_uris(s)[-1]
+                    else:
+                        # Matches existing type — route to that sense
+                        if existing_senses:
+                            resolved_subject = self.kg.resolve_sense_uri(
+                                s, context_sentence=problem_text, wvm=self.wvm
+                            )
+            elif existing_senses:
+                # Non-`is_a` relation — route to the most recent sense
+                # (sequential teaching: related facts are taught together)
+                resolved_subject = existing_senses[-1]
+
+            # Add the fact (LOTG runs inside add_fact for domain/range)
             self.kg.add_fact(resolved_subject, r, o)
 
-            # Capture any contradiction warnings from the type guard
+            # Capture any contradiction warnings from LOTG (domain/range)
             if self.kg.last_warnings:
                 contradictions.extend(self.kg.last_warnings)
-                # ── WSD: If LOTG found a conflict, induce a new sense ──
-                # This happens when a polysemous word gets a fact that
-                # conflicts with its existing type profile.
-                # Example: "cell is_a organelle" (bio) then "cell has_screen"
-                #   → LOTG: organelle ≠ product → new sense cell_1
-                for warning in self.kg.last_warnings:
-                    if isinstance(warning, ContradictionWarning):
-                        # Check if we need a new sense (not already split)
-                        if len(existing_senses) <= 1:
-                            # Get the conflicting types
-                            conflicting = {warning.new_type}
-                            # Create a new sense URI for the new fact
-                            new_uri = self.kg.induce_new_sense(
-                                s, conflicting_types=conflicting,
-                                proof=str(warning)
-                            )
-                            # Move the just-added fact to the new sense URI
-                            # by re-adding with the new URI and removing the old
-                            self._move_triple_to_sense(
-                                resolved_subject, r, o, new_uri
-                            )
-                            resolved_subject = new_uri
 
             # Sync to SPARQL store (if available)
             if self.sparql_store is not None:
@@ -1056,6 +1092,252 @@ class GenericThinkingDust:
                     # Add to new sense URI
                     self.kg._entity_index[new_sense_uri].append(idx)
                 break
+
+    def _infer_type_from_fact(self, subject: str, relation: str, obj: str) -> str | None:
+        """Infer the type that a fact assigns to its subject.
+
+        Used for WSD: before adding a fact, check what type it would assign.
+        This is the SAME logic as LOTG's check(), but returns the type
+        instead of just checking for conflicts.
+
+        Returns:
+            The inferred type string, or None if no type can be inferred.
+        """
+        from .reasoning.contradiction_detector import RELATION_SCHEMA
+
+        # is_a: the object IS the type
+        if relation == "is_a":
+            return obj
+
+        # Check relation schema for domain constraints
+        schema = RELATION_SCHEMA.get(relation)
+        if schema:
+            return schema.get("domain")
+
+        return None
+
+    def _check_type_conflict(self, entity: str, new_type: str,
+                             existing_types: set[str]) -> str | None:
+        """Check if a new type conflicts with existing types for an entity.
+
+        Uses LOTG's disjointness table and type hierarchy.
+        Returns the conflicting existing type, or None if no conflict.
+        """
+        from .reasoning.contradiction_detector import DISJOINT_TYPES, TYPE_HIERARCHY
+
+        for existing_type in existing_types:
+            if existing_type == new_type:
+                continue  # Same type, no conflict
+
+            # Check if one subsumes the other (compatible)
+            if self._is_subsumed(new_type, existing_type):
+                continue
+            if self._is_subsumed(existing_type, new_type):
+                continue
+
+            # Check if they're in the same disjoint set
+            for disjoint_set in DISJOINT_TYPES:
+                if new_type in disjoint_set and existing_type in disjoint_set:
+                    return existing_type  # Conflict found
+
+        return None  # No conflict
+
+    def _is_subsumed(self, subtype: str, supertype: str) -> bool:
+        """Check if subtype is a sub-type of supertype (transitively)."""
+        from .reasoning.contradiction_detector import TYPE_HIERARCHY
+        if subtype == supertype:
+            return True
+        visited = {subtype}
+        queue = [subtype]
+        while queue:
+            current = queue.pop(0)
+            parents = TYPE_HIERARCHY.get(current, set())
+            for parent in parents:
+                if parent == supertype:
+                    return True
+                if parent not in visited:
+                    visited.add(parent)
+                    queue.append(parent)
+        return False
+
+    def _induce_senses_on_conflict(self, entity: str, new_type: str,
+                                   conflicting_type: str) -> None:
+        """Create sense URIs when a type conflict is detected during teach().
+
+        This is the core WSD mechanism: when "cell is_a organelle" is taught
+        and then "cell is_a device" is taught, the type conflict
+        (organelle ∈ {product, invention, ...} vs device ∈ {product, ...})
+        triggers sense induction.
+
+        Steps:
+        1. Create sense_0 for existing facts (the original type)
+        2. Create sense_1 for the new fact (the conflicting type)
+        3. Move ALL existing triples for this entity to sense_0
+        4. Update LOTG entity_types to track per-sense
+
+        Args:
+            entity: The ambiguous entity (e.g., "cell")
+            new_type: The type from the new fact (e.g., "device")
+            conflicting_type: The existing conflicting type (e.g., "organelle")
+        """
+        # Create sense_0 (existing facts) and sense_1 (new fact)
+        self.kg.sense_inventory[entity] = [entity]  # sense_0 = base form
+        new_uri = self.kg.induce_new_sense(
+            entity,
+            conflicting_types={new_type},
+            proof=f"type conflict: {conflicting_type} vs {new_type}"
+        )
+
+        # Move ALL existing triples for this entity to sense_0
+        for t in self.kg.triples:
+            if t.subject == entity:
+                t.subject = entity  # Already base form, but now it's sense_0
+                # Update entity index
+                idx = self.kg.triples.index(t)
+                if entity in self.kg._entity_index:
+                    if idx not in self.kg._entity_index[entity]:
+                        self.kg._entity_index[entity].append(idx)
+
+        # Copy LOTG type info to sense_0
+        existing_types = self.kg.detector.get_entity_types(entity)
+        if entity not in self.kg.detector.entity_types:
+            self.kg.detector.entity_types[entity] = existing_types
+
+    def _induce_senses_from_context(self, entity: str, context_sentence: str) -> None:
+        """Create sense URIs when BEAGLE context divergence is detected.
+
+        Called during teach() when the new fact's context is significantly
+        different from the entity's existing context clusters. This means
+        the entity is polysemous and needs separate KG nodes.
+
+        Steps:
+        1. Create sense_0 for existing facts (the dominant sense)
+        2. Create sense_1 for the new fact (the divergent context)
+        3. Existing triples stay on the base form (now sense_0)
+        4. New fact will be stored on sense_1 by the caller
+
+        Args:
+            entity: The ambiguous entity (e.g., "cell")
+            context_sentence: The sentence that triggered the divergence
+        """
+        # Create sense inventory: base form = sense_0
+        self.kg.sense_inventory[entity] = [entity]
+        # Create sense_1 for the new (divergent) context
+        self.kg.induce_new_sense(
+            entity,
+            conflicting_types=set(),
+            proof=f"context divergence in: {context_sentence[:80]}"
+        )
+
+    def _get_is_a_objects(self, entity: str) -> list[str]:
+        """Get all `is_a` objects for an entity from the KG.
+
+        These are the type declarations for the entity.
+        Example: "cell is_a organelle" → ["organelle"]
+        """
+        return [t.object for t in self.kg.triples
+                if t.subject == entity and t.relation == "is_a"]
+
+    def _type_matches_any(self, new_type: str, existing_types: list[str]) -> bool:
+        """Check if a new type matches any existing type for the same entity.
+
+        Uses multiple signals:
+        1. Exact match → True
+        2. BEAGLE similarity > threshold → True (same domain)
+        3. String overlap (prefix/suffix) → True (related terms)
+        4. LOTG subsumption → True (subtype relationship)
+        5. Otherwise → False (different sense)
+
+        This is the core WSD decision for `is_a` declarations.
+        """
+        new_lower = new_type.strip().lower()
+
+        for existing in existing_types:
+            exist_lower = existing.strip().lower()
+
+            # 1. Exact match
+            if new_lower == exist_lower:
+                return True
+
+            # 2. LOTG subsumption (city ⊑ place)
+            if self._is_subsumed(new_lower, exist_lower):
+                return True
+            if self._is_subsumed(exist_lower, new_lower):
+                return True
+
+            # 3. String overlap (related terms share roots)
+            # "organelle" vs "organism" → share "organ" prefix
+            # "room" vs "prison" → no overlap
+            if len(new_lower) >= 4 and len(exist_lower) >= 4:
+                # Check if they share a 4+ character prefix
+                prefix_len = 0
+                for i in range(min(len(new_lower), len(exist_lower))):
+                    if new_lower[i] == exist_lower[i]:
+                        prefix_len += 1
+                    else:
+                        break
+                if prefix_len >= 4:
+                    return True
+
+            # 4. BEAGLE similarity (when available)
+            if self.wvm is not None:
+                sim = self.wvm.similarity(new_lower, exist_lower)
+                if sim > 0.10:  # Relaxed threshold for word-level comparison
+                    return True
+
+        return False
+
+    def _teach_context_divergence_threshold(self, entity: str, best_sim: float) -> float:
+        """Compute adaptive threshold for teach context divergence.
+
+        Problem: BEAGLE context vectors for short teach sentences (3-4 words)
+        are nearly orthogonal (~0.003 cosine similarity), even for same-topic
+        sentences. The training corpus threshold (0.15) is too high.
+
+        Solution: use an adaptive threshold based on the spread of existing
+        teach context similarities. If all existing contexts are very similar
+        to each other (high coherence), use a tighter threshold. If they're
+        diverse, use a looser threshold.
+
+        Also: for the first divergence (only 1 sense), use a very relaxed
+        threshold to avoid false splits from short sentences.
+
+        Args:
+            entity: The entity being taught about
+            best_sim: The best similarity score against existing contexts
+
+        Returns:
+            The threshold below which a new sense should be created
+        """
+        teach_contexts = self._teach_contexts.get(entity, [])
+
+        if len(teach_contexts) <= 1:
+            # Only one previous context — don't split on the second teach
+            # unless it's VERY different (near zero or negative)
+            return -0.05
+
+        if len(teach_contexts) == 2:
+            # Two previous contexts — relaxed threshold
+            return -0.02
+
+        # 3+ previous contexts — compute pairwise similarity
+        # and use a threshold based on the spread
+        vectors = [v for v, _ in teach_contexts]
+        sims = []
+        for i in range(len(vectors)):
+            for j in range(i + 1, len(vectors)):
+                n1 = np.linalg.norm(vectors[i])
+                n2 = np.linalg.norm(vectors[j])
+                if n1 > 1e-10 and n2 > 1e-10:
+                    sims.append(float(np.dot(vectors[i] / n1, vectors[j] / n2)))
+
+        if not sims:
+            return -0.02
+
+        # Use the minimum pairwise similarity as the threshold
+        # (conservative: only split if BELOW the worst existing pair)
+        # Add a small margin to avoid boundary cases
+        return min(sims) - 0.05
 
     def _build_semantic_prototypes(self):
         descriptions = {
