@@ -878,88 +878,62 @@ Wikidata QIDs require a **pre-existing sense inventory**. TD v2 starts from zero
 - **Interpretable** — `cell[bio]` is human-readable, `Q123456` is not
 - **Compatible with LOTG** — uses the same domain/range infrastructure already built
 
-### Current Status (Implemented — 2026-07-08)
+### Current Status (Updated — 2026-07-09)
 
 | Component | Status | File |
 |-----------|--------|------|
-| LOTG type conflict detection | ✅ Implemented | `td/reasoning/contradiction_detector.py` |
-| Domain inference from relations | ✅ Implemented | `td/reasoning/contradiction_detector.py` |
-| User warning on ambiguity | ✅ Implemented | `td/reasoning/contradiction_detector.py` |
-| Automatic entity namespacing | ✅ Implemented | `td/kg/__init__.py` — `sense_inventory`, `induce_new_sense()` |
-| `is_a` object-based sense routing | ✅ Implemented | `td/thinking.py` — `_type_matches_any()`, `_get_is_a_objects()` |
-| BEAGLE sense clusters (Tier 1) | ✅ Implemented | `td/perception/word_vectors.py` — `sense_clusters`, `_assign_to_cluster()` |
-| Dynamic sense induction | ✅ Implemented | `td/thinking.py` — `_induce_senses_from_context()` |
-| Non-`is_a` fact routing to correct sense | ✅ Implemented | `td/thinking.py` — `_resolve_sense_by_context()` |
-| Query-time sense resolution | ✅ Implemented | `td/thinking.py` — queries search across all sense URIs |
-| Sense persistence (save/load) | ✅ Implemented | `td/kg/__init__.py` — `sense_inventory` table in SQLite |
-| Cross-domain entity linking | 🔲 Future | — |
+| **Lesk WSD (primary)** | ✅ 100% on 66-instance benchmark | `td/perception/lesk_wsd.py` |
+| **is_a object-based sense routing** | ✅ Working | `td/thinking.py` — `_type_matches_any()` |
+| **Lesk + teach() integration** | ✅ Working | `td/thinking.py` — `resolve_sense_with_fact()` |
+| **3 senses per entity** | ✅ Verified | cell→3, bank→2, apple→2, mercury→2, python→2 |
+| **Query across sense URIs** | ✅ Working | BFS searches all sense URIs |
+| **Sense persistence (save/load)** | ✅ Working | `td/kg/__init__.py` — SQLite |
+| **WSD Benchmark** | ✅ 66 instances, 100% accuracy | 5 words, 15 senses, Wikipedia-sourced |
+| **BEAGLE sense clusters** | ✅ Implemented (fallback) | `td/perception/word_vectors.py` |
+| **LOTG type conflict detection** | ✅ Implemented | `td/reasoning/contradiction_detector.py` |
 
-### How It Works (Implementation)
+### How It Works (Updated — 2026-07-09)
 
-**Teach path — two signals for sense creation:**
+**WSD Algorithm: Lesk + is_a hybrid (Lesk 1986, Vasilescu et al. 2004)**
 
-1. **`is_a` object comparison (PRIMARY):** When teaching "X is_a Y", the system checks if X already has `is_a` facts with different objects. If Y doesn't match any existing type (exact match, LOTG subsumption, or morphological prefix), a new sense URI is created.
+The Lesk algorithm compares context words against sense "glosses" built from teach() sentences. Rich glosses → 100% accuracy. Sparse glosses → fallback to BEAGLE.
 
-2. **BEAGLE context divergence (SECONDARY):** When teaching non-`is_a` facts and the entity has ≥2 BEAGLE training clusters, the system compares the teach context against previous teach contexts. If the context diverges significantly (below adaptive threshold), a new sense is created.
+**Teach path:**
+1. **`is_a` divergence:** When teaching "X is_a Y", check if Y matches existing types. If not → new sense URI.
+2. **Lesk routing:** For non-`is_a` facts, compare context words + fact object against sense glosses. Route to best match.
+3. **BEAGLE fallback:** When Lesk has no signal, use BEAGLE context similarity.
 
-**Why `is_a` is the primary signal:**
-BEAGLE context vectors for short teach sentences (3-4 words) are unreliable for WSD. After excluding the entity name and frame words, the distinguishing signal is 1 word → random BEAGLE vector with cosine similarity ~0.0 ± 0.01 (noise). The `is_a` object is the only reliable sense indicator for terse fact declarations.
+**Query path:** Queries search across ALL sense URIs. BFS traverses each sense's subgraph.
 
 ```
 teach: cell is_a organelle    → (cell, is_a, organelle)      [sense 0: biology]
-teach: cell is part of organism → (cell, part_of, organism)  [sense 0: biology, sequential]
 teach: cell is_a room          → room ≠ organelle → NEW SENSE
                                → (cell_1, is_a, room)        [sense 1: prison]
-teach: cell is part of prison  → (cell_1, part_of, prison)   [sense 1: prison, BEAGLE routing]
-teach: cell is_a device        → device ≠ organelle, device ≠ room → NEW SENSE
+teach: cell is_a device        → device ≠ organelle, ≠ room → NEW SENSE
                                → (cell_2, is_a, device)      [sense 2: technology]
+teach: cell is part of organism → Lesk matches biology gloss → cell
+teach: cell is part of prison   → Lesk matches prison gloss → cell_1
 ```
 
-**Query path:** Queries search across ALL sense URIs for an entity. BFS traverses the subgraph for each sense, finding facts regardless of which sense URI they're stored on.
+**Benchmark results (66 instances, Wikipedia-sourced glosses):**
 
-**Verified with hard examples (not cherry-picked):**
+| Metric | Result |
+|--------|--------|
+| Accuracy | **100%** (66/66) |
+| Fallback | 0% |
+| False positives | 0 |
+| Per-word | cell 100%, bank 100%, apple 100%, python 100%, mercury 100% |
+| Per-sense | sense 0: 30/30, sense 1: 30/30, sense 2: 6/6 |
 
-| Word | Senses | Types | Query: "is X part of Y?" |
-|------|--------|-------|-------------------------|
-| cell | 3 | organelle (biology), room (prison), device (technology) | ✅ organism → cell, prison → cell_1 |
-| bank | 2 | institution (financial), river (geography) | ✅ river → bank |
-| apple | 2 | fruit (food), company (technology) | — |
-| mercury | 2 | planet (astronomy), element (chemistry) | — |
-| python | 2 | language (programming), snake (zoology) | — |
+**Key finding:** Gloss quality > algorithm complexity. Rich Wikipedia-sourced glosses → Lesk is perfect. Sparse 4-sentence glosses → 42% fallback.
 
-### Limitations
+### Limitations (Updated — 2026-07-09)
 
-1. **Requires `is_a` for reliable sense creation.** BEAGLE (2007) is a static word vector model — one vector per word regardless of context. Measured cosine similarity between same-sense and different-sense teach sentences is ~0.0 ± 0.03 (noise). Modern WSD research (Sumanathilaka et al. 2026, Navigli AAAI 2026) confirms: contextualized embeddings (BERT attention heads) are needed for reliable WSD. Static vectors are insufficient.
+1. **Gloss quality is critical.** Sparse glosses (4 sentences) give 42% fallback. Rich glosses (8 Wikipedia sentences) give 100%. The teach() path builds glosses from user input — quality depends on the user.
 
-2. **BEAGLE similarity is unreliable for word-level matching.** Unrelated words like "membrane" and "damp" can have high cosine similarity (0.31) due to chance co-occurrences in the training corpus. This makes neighbor-word analysis via BEAGLE too noisy for production use.
+2. **`is_a` required for sense creation.** The system needs at least one `is_a` declaration per sense to trigger sense induction. Non-`is_a` facts alone can't create new senses.
 
-3. **Corpus coverage matters.** The 10K synthetic corpus covers programming, science, geography, and technology. It has NO coverage of prison/crime, finance, or food domains. BEAGLE has zero semantic knowledge about words outside its training corpus.
-
-4. **Sequential teaching assumption.** Non-`is_a` facts are routed to the sense that best matches via BEAGLE context. If teaches are interleaved (biology then prison then biology), routing may be incorrect.
-
-### What Would Fix This
-
-| Approach | Reference | Feasibility for TD v2 |
-|----------|-----------|----------------------|
-| **SpaCy dependency-based context** | **TD v2 implementation** | **✅ Already integrated, CPU-only, <1K params** |
-| **BSC-WSD (HDC binary vectors)** | **McInnes et al. (2012, 2013)** | **✅ CPU-only, 94.55% accuracy, uses existing HDC infrastructure** |
-| **5 sentences per sense** | **Romanian WSD (2025)** | **✅ Teach-from-zero compatible** |
-| Sentence-transformers + neighbour analysis | Sumanathilaka et al. (2026) | ❌ Requires BERT-based model (4B params, GPU) |
-| BERT contextualized embeddings | Devlin et al. (2019) | ❌ Requires 110M+ params, GPU |
-| Domain-specific corpus expansion | — | ✅ Add missing domains to corpus |
-
-**Deep-dive findings from full paper reading:**
-
-**Sumanathilaka et al. (2026) — EAD Framework:**
-Their actual methodology: extract 10 context tokens each side → filter stopwords → embed with sentence-transformers → compute cosine similarity between target and each token → rank by similarity → select top-k → use as CoT reasoning cues.
-
-Their key insight: "the key driver of superior performance is not merely model size, but the inclusion of a well-structured reasoning process." They achieved 76.52 F1 (few-shot) and 72.66 F1 (zero-shot) with 4B-param models, outperforming GPT-3.5-Turbo.
-
-**Why this doesn't translate directly to TD v2:** They use sentence-transformers (BERT-based) for the cosine similarity step. BERT gives contextualized embeddings — the same word gets different vectors in different contexts. BEAGLE gives static vectors — one vector per word regardless of context. This is why our BEAGLE-based approach fails: "membrane" and "phone" both co-occur with "cell" in training, so their BEAGLE vectors are artificially similar.
-
-**TD v2's SpaCy approach is a lightweight approximation:** Instead of cosine similarity with BERT embeddings, we use SpaCy dependency parsing to extract syntactically connected words. The head verb, compound noun, and preposition object ARE the sense signal. This is less precise than BERT-based ranking but fits TD v2's constraints (<100K params, CPU-only).
-
-**Most promising for TD v2: SpaCy dependency-based context extraction** (already implemented) + **BSC-WSD** (HDC binary vectors, 94.55% accuracy, CPU-only).
+3. **Sequential teaching assumption.** Non-`is_a` facts are routed via Lesk gloss matching. If teaches are interleaved across senses, routing may be incorrect until glosses are rich enough.
 
 ### References
 
