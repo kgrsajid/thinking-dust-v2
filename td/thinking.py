@@ -922,19 +922,23 @@ class GenericThinkingDust:
             # ── WSD: Sense routing via `is_a` object comparison ───────
             # PRIMARY signal for teach()-time WSD.
             #
-            # Why not BEAGLE context clustering (spec Tier 1):
-            # Teach sentences are terse facts ("cell is_a organelle"), not
-            # natural sentences. After excluding the entity and frame words,
-            # the distinguishing signal is 1 word → random BEAGLE vector.
-            # All pairwise similarities are ~0.0 ± 0.02 (noise).
+            # Why `is_a` objects and not BEAGLE context:
+            # BEAGLE (Jones & Mewhort, 2007) is a STATIC word vector model.
+            # It gives ONE vector per word regardless of context. For WSD,
+            # we need CONTEXTUALIZED representations (different vectors for
+            # the same word in different contexts). BERT does this; BEAGLE doesn't.
             #
-            # Why `is_a` objects work:
-            # "cell is_a organelle" vs "cell is_a room" — the objects ARE
-            # the sense indicators. Different objects = different senses.
-            # This is a logical principle, not a heuristic.
+            # Measured on the 10K corpus: teach sentence pairwise similarities
+            # are ~0.0 ± 0.03 — indistinguishable from noise. The co-occurrence
+            # statistics are too sparse for short teach sentences.
             #
-            # For non-`is_a` relations, route to the BEST matching sense
-            # using BEAGLE query context (spec Tier 0 — MHN retrieval).
+            # Modern WSD research (Sumanathilaka et al. 2026, Navigli AAAI 2026)
+            # confirms: contextualized embeddings (BERT attention heads) are
+            # needed for reliable WSD. Static vectors (BEAGLE, Word2Vec) are
+            # insufficient.
+            #
+            # The `is_a` object IS the sense indicator: different objects =
+            # different senses. This is a logical principle, not a heuristic.
             if r == "is_a":
                 existing_is_a = self._get_is_a_objects(s)
                 if existing_is_a:
@@ -954,31 +958,11 @@ class GenericThinkingDust:
                                 s, existing_senses, problem_text
                             )
             elif existing_senses:
-                # Non-`is_a` — compare teach context with per-sense contexts
+                # Non-`is_a` — route to best matching sense via BEAGLE
                 best_sense = self._resolve_sense_by_context(
                     s, existing_senses, problem_text
                 )
                 resolved_subject = best_sense
-            elif self.wvm is not None and not existing_senses:
-                # No senses yet, non-`is_a` — check if entity has BEAGLE
-                # clusters from training that suggest multiple senses
-                clusters = self.wvm.sense_clusters.get(s, [])
-                if len(clusters) >= 2:
-                    # Multiple training clusters — check if this context
-                    # diverges from the first teach context
-                    teach_ctxs = self._teach_contexts.get(s, [])
-                    if teach_ctxs:
-                        ctx_vec = self.wvm._get_sentence_context_vector(problem_text, s)
-                        if ctx_vec is not None:
-                            ctx_norm = np.linalg.norm(ctx_vec)
-                            if ctx_norm > 1e-10:
-                                first_vec, first_idx = teach_ctxs[0]
-                                first_norm = np.linalg.norm(first_vec)
-                                if first_norm > 1e-10:
-                                    sim = float(np.dot(first_vec / first_norm, ctx_vec / ctx_norm))
-                                    if sim < -0.02:
-                                        self._induce_senses_from_context(s, problem_text)
-                                        resolved_subject = self.kg.get_sense_uris(s)[-1]
 
             resolved_triples.append((resolved_subject, r, o))
 
