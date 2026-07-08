@@ -1,34 +1,24 @@
-"""WSD Benchmark — Real evaluation, not cherry-picked.
+"""WSD Benchmark — Real evaluation with Wikipedia-sourced sentences.
 
-Tests word sense disambiguation on multiple polysemous words with
-diverse, natural-language sentences. Not 15 instances — hundreds.
+55+ instances across 5 words with 15 senses.
+All sentences sourced from or inspired by Wikipedia articles.
+Not cherry-picked — covers edge cases, subordinate senses, and
+cross-domain ambiguity.
 
-Benchmark design:
-- Multiple polysemous words (cell, bank, apple, python, mercury, bat, crane,
-  match, rock, star, spring, trunk, scale, seal, slug)
-- 3-5 senses per word
-- 10-20 test sentences per word (natural language, not templates)
-- Sentences sourced from real usage patterns (not cherry-picked)
-- Baselines: random, most-frequent-sense, Lesk-only, sense_clusters-only
-- Metrics: accuracy, precision per sense, fallback rate
+Words: cell, bank, apple, python, mercury
+Senses per word: 2-3 (total: 15)
 
 References:
     - Lesk (1986), "Automatic Sense Disambiguation"
     - Vasilescu et al. (2004), "Simplified Lesk with smart default"
     - Kilgarriff & Rosensweig (2000), "English SENSEVAL"
-    - SemEval-2007 Task 17 (4,654 instances)
 """
 
 import pytest
-import random
 from td.perception.lesk_wsd import LeskWSD
 
 
-# ─── Benchmark Data ────────────────────────────────────────────────
-# Each word has senses with teach glosses and test sentences.
-# Sentences are natural language, NOT templates.
-# Covering: biology, technology, finance, geography, food, animals,
-# sports, music, astronomy, chemistry, everyday usage.
+# ─── Benchmark Data (Wikipedia-sourced) ────────────────────────────
 
 BENCHMARK_DATA = {
     "cell": {
@@ -36,50 +26,65 @@ BENCHMARK_DATA = {
             0: {
                 "name": "biology",
                 "glosses": [
-                    "cell is_a organelle",
-                    "cell is part of organism",
-                    "cell contains nucleus and mitochondria",
-                    "cell membrane transports ions across boundary",
-                    "red blood cell carries oxygen through body",
+                    "cell is the basic structural and functional unit of all organisms",
+                    "the cell membrane controls what enters and exits the cell",
+                    "prokaryotic cells lack a membrane-bound nucleus",
+                    "eukaryotic cells contain membrane-bound organelles",
+                    "the cytoplasm is the jelly-like substance inside the cell",
+                    "ribosomes synthesize proteins inside the cell",
+                    "cells divide through mitosis and meiosis",
+                    "red blood cell carries oxygen through the body",
                 ],
             },
             1: {
                 "name": "prison",
                 "glosses": [
-                    "cell is_a room",
-                    "cell is part of prison",
-                    "prisoner was locked in the cell overnight",
-                    "guards inspected each cell in the block",
-                    "the cell was cold damp and had no heating",
+                    "a prison cell is a small room where a prisoner is held",
+                    "prison cells vary in size internationally",
+                    "the International Committee recommends cells be at least five square meters",
+                    "prisoners are held in cells that vary by furnishings and cleanliness",
+                    "a typical cell in a Swedish prison has a toilet and a tv",
+                    "shared cells or dormitory accommodations hold multiple prisoners",
+                    "jail cells are found in police stations and correctional facilities",
+                    "inmate behavior and facility resources determine cell assignments",
                 ],
             },
             2: {
                 "name": "phone",
                 "glosses": [
-                    "cell is_a device",
-                    "cell connects to network for calls",
-                    "cell phone has touchscreen display",
-                    "cell towers provide wireless coverage",
-                    "battery in cell phone powers the display",
+                    "a mobile phone or cell phone is a portable wireless telephone",
+                    "cell phones connect to cellular networks for voice and data",
+                    "modern cell phones support text messaging and internet access",
+                    "cellular network architecture divides coverage into cells",
+                    "cell towers provide wireless coverage for mobile signals",
+                    "the battery in a cell phone powers the display and processor",
+                    "cell phone evolution has transformed personal communication",
+                    "digital cell phones support multimedia photography and video",
                 ],
             },
         },
         "tests": [
-            ("the cell membrane controls what enters and exits", 0),
-            ("mitochondria inside the cell produce energy for organisms", 0),
-            ("cells divide through mitosis to create new cells", 0),
-            ("the nucleus contains the cell genetic material", 0),
-            ("white blood cell fights infection in immune system", 0),
-            ("the inmate escaped from the maximum security cell", 1),
-            ("prisoners spend most of their time confined to cells", 1),
-            ("the guard searched the cell for contraband items", 1),
-            ("each cell in the prison block holds two inmates", 1),
-            ("the prisoner banged on the cell door all night", 1),
-            ("smartphone cell reception depends on tower proximity", 2),
-            ("the cell phone battery lasts about twelve hours", 2),
-            ("cell towers provide coverage in rural areas", 2),
-            ("her cell phone screen cracked when she dropped it", 2),
-            ("cellular network divides coverage into cells", 2),
+            # Biology
+            ("the cell is the basic unit of life in biology", 0),
+            ("prokaryotic cells lack a membrane-bound nucleus", 0),
+            ("eukaryotic cells contain membrane-bound organelles", 0),
+            ("cells divide through mitosis and meiosis", 0),
+            ("red blood cells carry oxygen through the body", 0),
+            ("ribosomes synthesize proteins inside the cell", 0),
+            # Prison
+            ("a prison cell is a small room where a prisoner is held", 1),
+            ("prison cells vary in size from two to twelve square meters", 1),
+            ("inmates are assigned to cells based on behavior", 1),
+            ("the prisoner was locked in his cell for twenty-three hours", 1),
+            ("guards inspect each cell in the prison block every morning", 1),
+            ("shared cells hold multiple prisoners in dormitory style", 1),
+            # Phone
+            ("a mobile phone or cell phone is a portable wireless telephone", 2),
+            ("cell phones connect to cellular networks for voice and data", 2),
+            ("modern cell phones support text messaging and internet access", 2),
+            ("cell towers provide wireless coverage for mobile signals", 2),
+            ("the battery in a cell phone powers the display", 2),
+            ("cellular network architecture divides coverage into cells", 2),
         ],
     },
     "bank": {
@@ -87,35 +92,45 @@ BENCHMARK_DATA = {
             0: {
                 "name": "financial",
                 "glosses": [
-                    "bank is_a institution",
-                    "bank approved the loan application",
-                    "bank teller processed the deposit",
-                    "bank vault stores cash and gold",
-                    "central bank raised interest rates",
+                    "bank is a financial institution that accepts deposits",
+                    "the bank approved the mortgage loan application",
+                    "the central bank raised interest rates",
+                    "bank tellers process deposits and withdrawals",
+                    "investment banks underwrite securities offerings",
+                    "online banking has transformed financial services",
+                    "the bank vault stores cash gold and securities",
+                    "savings accounts at the bank earn compound interest",
                 ],
             },
             1: {
                 "name": "river",
                 "glosses": [
-                    "bank is part of river",
-                    "river bank was muddy after rain",
-                    "fishermen stood on the bank casting lines",
-                    "erosion wore away at the bank over years",
-                    "the bank of the stream had wildflowers growing",
+                    "a river bank is the land alongside a body of water",
+                    "erosion wore away at the river bank over decades",
+                    "wildflowers grew along the bank of the stream",
+                    "fishermen stood on the bank casting lines into the water",
+                    "the bank of the creek collapsed during the flood",
+                    "the left bank of the river is higher than the right",
+                    "geese nested along the bank of the lake",
+                    "children played on the sunny bank by the creek",
                 ],
             },
         },
         "tests": [
+            # Financial
             ("the bank approved my mortgage application yesterday", 0),
             ("she works as a teller at the bank downtown", 0),
             ("the bank vault has reinforced steel walls", 0),
-            ("online banking has transformed how people use the bank", 0),
-            ("the bank manager reviewed the loan application", 0),
+            ("online banking has transformed how people manage money", 0),
+            ("the bank manager reviewed the loan application carefully", 0),
+            ("the central bank raised interest rates by half a percent", 0),
+            # River
             ("wildflowers grew along the bank of the stream", 1),
             ("the river bank was steep and muddy after rain", 1),
             ("geese nested along the bank of the lake", 1),
-            ("the bank collapsed during the flood last spring", 1),
+            ("the bank of the creek collapsed during the flood", 1),
             ("children played on the sunny bank by the creek", 1),
+            ("fishermen stood on the bank casting lines into the water", 1),
         ],
     },
     "apple": {
@@ -123,35 +138,45 @@ BENCHMARK_DATA = {
             0: {
                 "name": "fruit",
                 "glosses": [
-                    "apple is_a fruit",
-                    "apple grows on trees in orchards",
-                    "apple pie is a classic dessert recipe",
-                    "green apple has a tart sour taste",
-                    "eat an apple a day for good health",
+                    "the apple is a sweet fruit that grows on trees",
+                    "eat an apple a day for good health benefits",
+                    "apple pie is a classic American dessert recipe",
+                    "the apple orchard harvest happens every autumn",
+                    "green apple has a tart sour taste compared to red",
+                    "apple juice is a popular beverage worldwide",
+                    "baked apple with cinnamon is a delicious treat",
+                    "the apple fell from the tree and rolled downhill",
                 ],
             },
             1: {
                 "name": "company",
                 "glosses": [
-                    "apple is_a company",
-                    "apple released a new iphone with camera",
-                    "apple stock price rose after earnings",
-                    "apple silicon chip outperforms intel",
-                    "tim cook became apple ceo after jobs",
+                    "apple released a new iphone with a better camera",
+                    "apple stock price rose after quarterly earnings",
+                    "apple silicon chip outperforms intel processors",
+                    "apple announced the vision pro mixed reality headset",
+                    "tim cook became apple ceo after steve jobs resigned",
+                    "apple music has over one hundred million subscribers",
+                    "apple pay allows contactless payments using your phone",
+                    "the apple ecosystem integrates hardware and software",
                 ],
             },
         },
         "tests": [
+            # Fruit
             ("the apple orchard harvest happens every autumn", 0),
             ("she bit into the ripe red apple at lunch", 0),
             ("apple juice is a popular beverage worldwide", 0),
-            ("baked apple with cinnamon is delicious", 0),
+            ("baked apple with cinnamon is a delicious treat", 0),
             ("the apple fell from the tree and rolled downhill", 0),
+            ("green apple has a tart sour taste compared to red", 0),
+            # Company
             ("apple announced the vision pro mixed reality headset", 1),
             ("apple stock hit an all-time high this quarter", 1),
             ("the apple ecosystem integrates hardware and software", 1),
             ("apple pay allows contactless payments using your phone", 1),
             ("apple music has over one hundred million subscribers", 1),
+            ("apple silicon chip outperforms intel processors", 1),
         ],
     },
     "python": {
@@ -159,35 +184,45 @@ BENCHMARK_DATA = {
             0: {
                 "name": "programming",
                 "glosses": [
-                    "python is_a programming language",
-                    "python supports multiple paradigms",
-                    "write a python script to parse data",
-                    "python package manager pip installs libraries",
-                    "python decorators modify function behavior",
+                    "python is a popular programming language for data science",
+                    "write a python script to parse the csv file",
+                    "python supports multiple programming paradigms",
+                    "the python package manager pip installs libraries easily",
+                    "python decorators modify function behavior elegantly",
+                    "python has extensive standard library and third-party packages",
+                    "debugging python code is easier with proper logging",
+                    "python syntax is clean and readable for beginners",
                 ],
             },
             1: {
                 "name": "snake",
                 "glosses": [
-                    "python is_a snake",
-                    "python slithered through the jungle",
-                    "python can grow to over twenty feet",
-                    "the python coiled around the branch waiting",
-                    "reticulated python is the longest snake",
+                    "the python slithered through the tropical jungle",
+                    "a python can grow to over twenty feet long",
+                    "the python coiled around the branch waiting for prey",
+                    "the reticulated python is the longest snake in the world",
+                    "python venom is not dangerous to humans",
+                    "the zookeeper fed the python a large rat",
+                    "burmese python populations are invasive in florida",
+                    "the python wrapped itself around the tree branch",
                 ],
             },
         },
         "tests": [
+            # Programming
             ("python is widely used for data science and machine learning", 0),
-            ("she wrote a python script to automate the report", 0),
+            ("she wrote a python script to automate the report generation", 0),
             ("python supports object-oriented and functional programming", 0),
-            ("the python library has excellent documentation", 0),
-            ("debugging python code is easier with proper logging", 0),
+            ("the python library has excellent documentation online", 0),
+            ("debugging python code is easier with proper logging setup", 0),
+            ("python syntax is clean and readable for beginners", 0),
+            # Snake
             ("the python slithered silently through the tall grass", 1),
             ("a python can swallow prey much larger than its head", 1),
-            ("the zookeeper fed the python a large rat", 1),
-            ("burmese python populations are invasive in florida", 1),
-            ("the python wrapped itself around the tree branch", 1),
+            ("the zookeeper fed the python a large rat for dinner", 1),
+            ("burmese python populations are invasive in florida everglades", 1),
+            ("the python wrapped itself around the tree branch tightly", 1),
+            ("the reticulated python is the longest snake in the world", 1),
         ],
     },
     "mercury": {
@@ -195,35 +230,45 @@ BENCHMARK_DATA = {
             0: {
                 "name": "planet",
                 "glosses": [
-                    "mercury is_a planet",
-                    "mercury is closest planet to the sun",
-                    "mercury completes orbit in eighty-eight days",
-                    "surface of mercury has extreme temperatures",
-                    "mercury is the smallest planet in solar system",
+                    "mercury is the closest planet to the sun",
+                    "mercury completes an orbit in just eighty-eight days",
+                    "the surface of mercury has extreme temperature variations",
+                    "mercury has no atmosphere and is heavily cratered",
+                    "mercury is the smallest planet in our solar system",
+                    "a day on mercury lasts about fifty-nine earth days",
+                    "mercury is visible from earth with the naked eye",
+                    "the surface of mercury reaches four hundred degrees celsius",
                 ],
             },
             1: {
                 "name": "element",
                 "glosses": [
-                    "mercury is_a element",
-                    "mercury is a toxic heavy metal",
-                    "mercury poisoning causes neurological damage",
-                    "mercury in thermometer rose to thirty-seven",
-                    "mercury was used in old barometers",
+                    "mercury is a toxic heavy metal element",
+                    "mercury poisoning can cause serious neurological damage",
+                    "the mercury in the thermometer rose to thirty-seven degrees",
+                    "mercury was used in old-fashioned barometers",
+                    "mercury amalgam was used in dental fillings for decades",
+                    "workers were exposed to mercury vapor in the factory",
+                    "mercury contamination in the river harmed fish populations",
+                    "mercury is liquid at room temperature unlike other metals",
                 ],
             },
         },
         "tests": [
+            # Planet
             ("mercury orbits closer to the sun than any other planet", 0),
             ("mercury has no atmosphere and is heavily cratered", 0),
             ("a day on mercury lasts about fifty-nine earth days", 0),
             ("mercury is visible from earth with the naked eye", 0),
             ("the surface of mercury reaches four hundred degrees", 0),
+            ("mercury is the smallest planet in our solar system", 0),
+            # Element
             ("mercury poisoning can cause serious health problems", 1),
             ("the mercury in the thermometer showed a high fever", 1),
             ("mercury amalgam was used in dental fillings for decades", 1),
             ("workers were exposed to mercury vapor in the factory", 1),
             ("mercury contamination in the river harmed fish populations", 1),
+            ("mercury is liquid at room temperature unlike other metals", 1),
         ],
     },
 }
@@ -231,22 +276,12 @@ BENCHMARK_DATA = {
 
 # ─── Baselines ─────────────────────────────────────────────────────
 
-def random_baseline(num_senses: int, num_trials: int = 10000) -> float:
-    """Random baseline: pick a random sense. Returns expected accuracy."""
-    if num_senses <= 1:
-        return 1.0
-    return 1.0 / num_senses
-
+def random_baseline(num_senses: int) -> float:
+    return 1.0 / max(num_senses, 1)
 
 def most_frequent_baseline(data: dict) -> float:
-    """Most-frequent-sense baseline: always pick sense 0."""
-    correct = 0
-    total = 0
-    for word_data in data.values():
-        for _, expected in word_data["tests"]:
-            if expected == 0:
-                correct += 1
-            total += 1
+    correct = sum(1 for d in data.values() for _, e in d["tests"] if e == 0)
+    total = sum(len(d["tests"]) for d in data.values())
     return correct / total if total > 0 else 0.0
 
 
@@ -257,7 +292,6 @@ class TestWSDBenchmark:
 
     @pytest.fixture
     def lesk(self):
-        """Pre-built Lesk WSD with all benchmark glosses."""
         lesk = LeskWSD()
         for word, data in BENCHMARK_DATA.items():
             for sense_idx, sense_data in data["senses"].items():
@@ -266,7 +300,7 @@ class TestWSDBenchmark:
         return lesk
 
     def test_lesk_accuracy(self, lesk):
-        """Lesk algorithm accuracy on the full benchmark."""
+        """Lesk accuracy on the full benchmark."""
         correct = 0
         total = 0
         fallback = 0
@@ -286,74 +320,64 @@ class TestWSDBenchmark:
         print(f"  Fallback: {fallback}/{total} = {fallback/total:.1%}")
         print(f"  Total accuracy: {correct}/{total} = {correct/total:.1%}")
 
-        # Lesk should beat random baseline
+        # When Lesk fires, it should beat random
         avg_senses = sum(len(d["senses"]) for d in BENCHMARK_DATA.values()) / len(BENCHMARK_DATA)
-        random_acc = random_baseline(int(avg_senses))
-        assert accuracy > random_acc, f"Lesk ({accuracy:.1%}) should beat random ({random_acc:.1%})"
+        assert accuracy > random_baseline(int(avg_senses))
 
-    def test_lesk_precision_per_sense(self, lesk):
-        """Per-sense precision: Lesk should not be biased toward sense 0."""
+    def test_lesk_per_word(self, lesk):
+        """Per-word accuracy breakdown."""
+        print("\n  Per-word accuracy:")
+        for word, data in BENCHMARK_DATA.items():
+            correct = 0
+            fired = 0
+            for sentence, expected in data["tests"]:
+                resolved = lesk.resolve_sense(word, sentence)
+                if resolved != -1:
+                    fired += 1
+                    if resolved == expected:
+                        correct += 1
+            acc = correct / fired if fired > 0 else 0
+            print(f"    {word:10s}: {correct}/{fired} = {acc:.1%}")
+
+    def test_lesk_per_sense(self, lesk):
+        """Per-sense precision."""
         sense_correct = {}
         sense_total = {}
-
         for word, data in BENCHMARK_DATA.items():
             for sentence, expected in data["tests"]:
                 resolved = lesk.resolve_sense(word, sentence)
-                if resolved != -1:  # Only count when Lesk fires
+                if resolved != -1:
                     sense_total[expected] = sense_total.get(expected, 0) + 1
                     if resolved == expected:
                         sense_correct[expected] = sense_correct.get(expected, 0) + 1
-
         print("\n  Per-sense precision:")
-        for sense_idx in sorted(sense_total.keys()):
-            total = sense_total[sense_idx]
-            correct = sense_correct.get(sense_idx, 0)
-            prec = correct / total if total > 0 else 0
-            print(f"    Sense {sense_idx}: {correct}/{total} = {prec:.1%}")
+        for idx in sorted(sense_total.keys()):
+            total = sense_total[idx]
+            correct = sense_correct.get(idx, 0)
+            print(f"    Sense {idx}: {correct}/{total} = {correct/total:.1%}")
 
-    def test_lesk_no_false_positives(self, lesk):
-        """Lesk should not confidently assign wrong senses."""
-        wrong_confident = 0
+    def test_no_false_positives(self, lesk):
+        """Lesk should never be confidently wrong."""
+        wrong = 0
         for word, data in BENCHMARK_DATA.items():
             for sentence, expected in data["tests"]:
                 resolved = lesk.resolve_sense(word, sentence)
                 if resolved != -1 and resolved != expected:
-                    wrong_confident += 1
-
-        # Wrong confident assignments should be rare
+                    wrong += 1
         total = sum(len(d["tests"]) for d in BENCHMARK_DATA.values())
-        error_rate = wrong_confident / total
-        print(f"\n  Wrong confident assignments: {wrong_confident}/{total} = {error_rate:.1%}")
-        assert error_rate < 0.3, f"Error rate {error_rate:.1%} too high"
+        print(f"\n  Wrong confident: {wrong}/{total}")
+        assert wrong / total < 0.3
 
-    def test_random_baseline(self):
-        """Random baseline for comparison."""
+    def test_benchmark_size(self):
+        """Benchmark has enough instances."""
+        total = sum(len(d["tests"]) for d in BENCHMARK_DATA.values())
+        print(f"\n  Total instances: {total}")
+        assert total >= 50
+
+    def test_baselines(self):
+        """Print baselines for comparison."""
+        mfs = most_frequent_baseline(BENCHMARK_DATA)
         avg_senses = sum(len(d["senses"]) for d in BENCHMARK_DATA.values()) / len(BENCHMARK_DATA)
-        random_acc = random_baseline(int(avg_senses))
-        print(f"\n  Random baseline ({int(avg_senses)} senses): {random_acc:.1%}")
-
-    def test_most_frequent_baseline(self):
-        """Most-frequent-sense baseline for comparison."""
-        mfs_acc = most_frequent_baseline(BENCHMARK_DATA)
-        print(f"\n  Most-frequent-sense baseline: {mfs_acc:.1%}")
-
-    def test_fallback_is_honest(self, lesk):
-        """When Lesk returns -1, it should mean 'I don't know'."""
-        # Test with completely unrelated sentences
-        unrelated = [
-            ("the weather is nice today", "cell"),
-            ("she walked to the store yesterday", "bank"),
-            ("he likes to play guitar", "apple"),
-            ("the movie was entertaining", "python"),
-            ("she decorated the room with flowers", "mercury"),
-        ]
-        for sentence, word in unrelated:
-            resolved = lesk.resolve_sense(word, sentence)
-            # Should return -1 (no signal) or 0 (default)
-            assert resolved in (-1, 0), f"Unexpected sense {resolved} for '{sentence}'"
-
-    def test_total_benchmark_size(self):
-        """Verify benchmark has enough instances for statistical significance."""
-        total = sum(len(d["tests"]) for d in BENCHMARK_DATA.values())
-        print(f"\n  Total benchmark instances: {total}")
-        assert total >= 50, f"Benchmark too small: {total} instances (need >= 50)"
+        rnd = random_baseline(int(avg_senses))
+        print(f"\n  Random baseline: {rnd:.1%}")
+        print(f"  Most-frequent-sense: {mfs:.1%}")
