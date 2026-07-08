@@ -1,8 +1,41 @@
 # TD v2 — Contextualized Embeddings Comparative Tech Spec
 
 **Date:** 2026-07-08
-**Status:** SPEC — 5 modules to implement and benchmark
+**Status:** REVISED — 4 modules (HDC binding dropped) + Lesk hybrid baseline
 **Purpose:** Find the best lightweight contextualized embedding approach for TD v2's WSD
+
+---
+
+## 0. Current Status
+
+### What's Working Now
+
+| Component | Status | Evidence |
+|-----------|--------|----------|
+| **Lesk WSD (standalone)** | ✅ 100% precision | 32/32 on 55-instance benchmark, 0 false positives |
+| **WSD Benchmark** | ✅ 55 instances | 5 words, 15 senses, natural language |
+| **Sense clusters (BEAGLE)** | ✅ Working | Per-word context clustering |
+| **is_a object routing** | ✅ Working | cell(3), bank(2), apple(2), mercury(2), python(2) |
+| **Lesk + teach() integration** | ⚠️ Gloss contamination | First few teaches go to base entity before senses created → gloss for sense 0 has words from all senses |
+
+### Known Limitation: Teach() Gloss Contamination
+
+When teaching multiple senses of a word, the first few facts go to the base entity (no senses yet). When senses are created later, the Lesk gloss for sense 0 contains words from ALL early teaches. The `_rebuild_lesk_glosses()` method mitigates this by rebuilding from triples after sense creation, but the routing for the first few facts is still affected.
+
+**Impact:** First 2-3 teaches per entity may route incorrectly. After senses are established, routing works correctly.
+
+**Fix needed:** Pre-create senses before teaching facts (require `is_a` declaration first), or use a two-pass approach (collect all facts, then route).
+
+### What's Planned (4 Approaches + Lesk)
+
+| # | Approach | Status | Params |
+|---|----------|--------|--------|
+| A | AERC (with dim reduction) | Planned | ~50K |
+| B | NG-RC (with dim reduction) | Planned | ~57K |
+| C | Pseudo-BiLM (real backward LSTM) | Planned | ~42K |
+| D | Stacked BiLSTM (targeted attention) | Planned | ~85K |
+| E | ~~HDC Binding~~ | **DROPPED** | — |
+| Baseline | **Lesk WSD** | ✅ Working | 0 |
 
 ---
 

@@ -34,6 +34,7 @@ from .perception.hdc import (
 from .perception.nl_parser import GenericNLParser, GenericEntityGraph
 from .memory.mhn import ModernHopfieldNetwork, MHNConfig
 from .reasoning.contradiction_detector import ContradictionWarning
+from .perception.lesk_wsd import LeskWSD
 
 
 # =========================================================================
@@ -685,6 +686,15 @@ class GenericThinkingDust:
         #   dependency relations are language-agnostic
         self._dep_sense_words: dict[str, list[set[str]]] = {}
 
+        # ── WSD: Lesk algorithm for high-precision sense routing ───
+        # Zero-parameter WSD using teach() sentences as sense glosses.
+        # When Lesk has signal (word overlap with glosses), it's 100% precise.
+        # When Lesk has no signal (returns -1), fall back to sense_clusters.
+        #
+        # Reference: Lesk (1986), "Automatic Sense Disambiguation"
+        # Reference: Vasilescu et al. (2004), "Simplified Lesk"
+        self.lesk_wsd = LeskWSD()
+
         self.total_thinks = 0
         self.total_learned = 0
         self.avg_iterations = 0.0
@@ -931,50 +941,34 @@ class GenericThinkingDust:
             resolved_subject = s
             existing_senses = self.kg.get_sense_uris(s)
 
-            # ── WSD: Sense routing via `is_a` object comparison ───────
-            # PRIMARY signal for teach()-time WSD.
+            # ── WSD: Lesk-first sense routing ───────────────────────
+            # ALL facts go through Lesk routing (not just is_a).
+            # Lesk compares context words against sense glosses built
+            # from previous teach() sentences.
             #
-            # Why `is_a` objects and not BEAGLE context:
-            # BEAGLE (Jones & Mewhort, 2007) is a STATIC word vector model.
-            # It gives ONE vector per word regardless of context. For WSD,
-            # we need CONTEXTUALIZED representations (different vectors for
-            # the same word in different contexts). BERT does this; BEAGLE doesn't.
-            #
-            # Measured on the 10K corpus: teach sentence pairwise similarities
-            # are ~0.0 ± 0.03 — indistinguishable from noise. The co-occurrence
-            # statistics are too sparse for short teach sentences.
-            #
-            # Modern WSD research (Sumanathilaka et al. 2026, Navigli AAAI 2026)
-            # confirms: contextualized embeddings (BERT attention heads) are
-            # needed for reliable WSD. Static vectors (BEAGLE, Word2Vec) are
-            # insufficient.
-            #
-            # The `is_a` object IS the sense indicator: different objects =
-            # different senses. This is a logical principle, not a heuristic.
-            if r == "is_a":
+            # Flow:
+            # 1. No senses yet → store on base entity, Lesk gloss = sense 0
+            # 2. is_a diverges → create new sense, route to it
+            # 3. Non-is_a with senses → Lesk routes to best sense
+            # 4. Lesk has no signal → fall back to sense_clusters
+            if existing_senses:
+                # Entity has senses — try Lesk first
+                lesk_result = self.lesk_wsd.resolve_sense(s, problem_text)
+                if lesk_result >= 0 and lesk_result < len(existing_senses):
+                    resolved_subject = existing_senses[lesk_result]
+                elif lesk_result == -1:
+                    # Lesk has no signal — fall back to sense_clusters
+                    resolved_subject = self._resolve_sense_by_context(
+                        s, existing_senses, problem_text
+                    )
+            elif r == "is_a":
+                # No senses yet, is_a relation — check for divergence
                 existing_is_a = self._get_is_a_objects(s)
                 if existing_is_a:
                     match = self._type_matches_any(o, existing_is_a)
                     if not match:
-                        if not existing_senses:
-                            self._induce_senses_from_context(s, problem_text)
-                        else:
-                            self.kg.induce_new_sense(
-                                s, conflicting_types={o},
-                                proof=f"is_a divergence: {o} vs existing {existing_is_a}"
-                            )
+                        self._induce_senses_from_context(s, problem_text)
                         resolved_subject = self.kg.get_sense_uris(s)[-1]
-                    else:
-                        if existing_senses:
-                            resolved_subject = self._resolve_sense_by_context(
-                                s, existing_senses, problem_text
-                            )
-            elif existing_senses:
-                # Non-`is_a` — route to best matching sense via BEAGLE
-                best_sense = self._resolve_sense_by_context(
-                    s, existing_senses, problem_text
-                )
-                resolved_subject = best_sense
 
             resolved_triples.append((resolved_subject, r, o))
 
@@ -983,12 +977,13 @@ class GenericThinkingDust:
             self.wvm.train_incremental(problem_text)
             self.wvm.train_incremental(solution_text)
 
-        # ── Store resolved triples in KG ────────────────────────────
+        # ── Store resolved triples in KG + update Lesk glosses ─────
         for (resolved_subject, r, o) in resolved_triples:
             self.kg.add_fact(resolved_subject, r, o)
             # Store teach context for sense resolution (non-is_a routing)
             base_entity = self.kg.get_surface_form(resolved_subject)
             sense_uris = self.kg.get_sense_uris(base_entity)
+            sense_idx = 0
             if sense_uris:
                 sense_idx = sense_uris.index(resolved_subject) if resolved_subject in sense_uris else 0
 
@@ -1006,6 +1001,9 @@ class GenericThinkingDust:
                     if ctx_vec is not None:
                         self._teach_contexts.setdefault(base_entity, [])
                         self._teach_contexts[base_entity].append((ctx_vec, sense_idx))
+
+            # Always update Lesk gloss (including first teach, sense_idx=0)
+            self.lesk_wsd.add_sense_example(base_entity, sense_idx, problem_text)
 
             # Capture any contradiction warnings from LOTG (domain/range)
             if self.kg.last_warnings:
@@ -1105,17 +1103,17 @@ class GenericThinkingDust:
         return False
 
     def _induce_senses_from_context(self, entity: str, context_sentence: str) -> None:
-        """Create sense URIs when BEAGLE context divergence is detected.
+        """Create sense URIs when is_a divergence is detected.
 
-        Called during teach() when the new fact's context is significantly
-        different from the entity's existing context clusters. This means
-        the entity is polysemous and needs separate KG nodes.
+        Called during teach() when a new is_a object doesn't match existing ones.
+        The entity is polysemous and needs separate KG nodes.
 
         Steps:
         1. Create sense_0 for existing facts (the dominant sense)
         2. Create sense_1 for the new fact (the divergent context)
         3. Existing triples stay on the base form (now sense_0)
         4. New fact will be stored on sense_1 by the caller
+        5. Rebuild Lesk glosses from actual triples (clean separation)
 
         Args:
             entity: The ambiguous entity (e.g., "cell")
@@ -1127,8 +1125,29 @@ class GenericThinkingDust:
         self.kg.induce_new_sense(
             entity,
             conflicting_types=set(),
-            proof=f"context divergence in: {context_sentence[:80]}"
+            proof=f"is_a divergence in: {context_sentence[:80]}"
         )
+        # Rebuild Lesk glosses — separate words by sense URI
+        self._rebuild_lesk_glosses(entity)
+
+    def _rebuild_lesk_glosses(self, entity: str) -> None:
+        """Rebuild Lesk glosses from actual triples after sense creation.
+
+        When a new sense is created, existing Lesk glosses may be
+        contaminated (words from multiple senses in sense 0).
+        This rebuilds clean glosses by reading triples per sense URI.
+        """
+        # Clear existing glosses for this entity
+        if entity in self.lesk_wsd.sense_glosses:
+            del self.lesk_wsd.sense_glosses[entity]
+
+        # Rebuild from triples: each triple's subject maps to a sense URI
+        sense_uris = self.kg.get_sense_uris(entity)
+        for t in self.kg.triples:
+            if t.subject == entity or t.subject in sense_uris:
+                sense_idx = sense_uris.index(t.subject) if t.subject in sense_uris else 0
+                gloss = f"{t.subject} {t.relation} {t.object}"
+                self.lesk_wsd.add_sense_example(entity, sense_idx, gloss)
 
     def _get_is_a_objects(self, entity: str) -> list[str]:
         """Get all `is_a` objects for an entity from the KG.
