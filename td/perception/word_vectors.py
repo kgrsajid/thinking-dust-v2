@@ -515,25 +515,6 @@ class WordVectorModel:
                     j += 1
             i += 1
 
-    def _update_sense_clusters(self, sentence: str) -> None:
-        """Update sense clusters for all content words in a sentence.
-
-        Called from train_incremental(). For each content word, computes
-        the sentence-level context vector and assigns it to a sense cluster.
-
-        This is the Tier 1 WSD mechanism. Full sentence context is used
-        (not just the triple) per Ruas et al. (2020) and AlMousa et al. (2022).
-        """
-        tokens = tokenize(sentence)
-        words = content_words(tokens)
-        if len(words) < 2:
-            return
-
-        for w in words:
-            ctx = self._get_sentence_context_vector(sentence, w)
-            if ctx is not None:
-                self._assign_to_cluster(w, ctx, sentence)
-
     def get_sense(self, word: str, context_sentence: str) -> int:
         """Get the sense cluster index for a word given its context.
 

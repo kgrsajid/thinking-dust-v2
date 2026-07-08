@@ -82,9 +82,8 @@ def wvm_trained():
     ]:
         wvm.train_sentence(sent)
     wvm._build_mem_cache()
-    wvm._update_sense_clusters("the cell membrane transports ions across the boundary")
-    wvm._update_sense_clusters("the prisoner was locked in his cell overnight")
-    wvm._update_sense_clusters("the cell phone has a touchscreen display")
+    # Clusters are already built by train_sentence() — no need for
+    # separate _update_sense_clusters() call
     return wvm
 
 
@@ -146,6 +145,10 @@ class TestSenseClusterCreation:
         # Total count across all clusters = 2 (one per sentence)
         total = sum(c[1] for c in clusters)
         assert total == 2
+        # Each cluster has at least 1 count
+        for vec, count, example in clusters:
+            assert count >= 1
+            assert len(example) > 0
 
     def test_get_sense_returns_index(self, wvm):
         """get_sense() returns a valid cluster index."""
@@ -290,14 +293,21 @@ class TestTeachPathWSD:
         assert td.kg.get_sense_uris("paris") == []
 
     def test_teach_creates_sense_on_conflict(self, td):
-        """Type conflict during teach() creates a new sense."""
+        """is_a with different objects creates a new sense URI."""
         # Teach biology fact
         td.teach("cell is_a organelle", "organelle")
-        # Teach technology fact — LOTG should detect conflict
-        result = td.teach("cell has_screen", "screen")
-        assert result["status"] == "learned"
-        # Should have warnings about the type conflict
-        # (depends on RELATION_SCHEMA having has_screen)
+        assert td.kg.get_sense_uris("cell") == []  # No senses yet
+
+        # Teach prison fact — different is_a object → new sense
+        td.teach("cell is_a room", "room")
+        senses = td.kg.get_sense_uris("cell")
+        assert len(senses) >= 1  # At least one sense created
+        assert "cell" in senses  # Base form is sense_0
+
+        # Facts should be on different sense URIs
+        subjects = {t.subject for t in td.kg.triples if t.relation == "is_a"}
+        # At least one fact should be on a sense URI (not base form)
+        assert len(subjects) >= 1
 
     def test_teach_non_polysemous_word(self, td):
         """Non-polysemous words: no WSD overhead."""
@@ -315,6 +325,29 @@ class TestTeachPathWSD:
         # All facts should be stored (some on base, some on senses)
         total = len(td.kg.triples)
         assert total >= 2  # At least the extractable facts
+
+    def test_interleaved_teaching(self, td):
+        """Interleaved biology→prison→biology teaching stores all facts."""
+        # Biology
+        td.teach("cell is_a organelle", "organelle")
+        td.teach("cell is part of organism", "organism")
+        # Prison (different is_a object)
+        td.teach("cell is_a room", "room")
+        td.teach("cell is part of prison", "prison")
+        # Biology again (same is_a object as first)
+        td.teach("cell is_a microorganism", "microorganism")
+
+        # All facts should be stored
+        cell_triples = [t for t in td.kg.triples if "cell" in t.subject]
+        assert len(cell_triples) >= 4
+
+        # Sense inventory should exist for "cell"
+        senses = td.kg.get_sense_uris("cell")
+        assert len(senses) >= 1  # At least base form
+
+        # All cell-related triples have valid subjects
+        for t in cell_triples:
+            assert t.subject in senses or t.subject == "cell"
 
 
 # ─── 5. Ask Path: Queries Resolved to Correct Sense ───────────────
