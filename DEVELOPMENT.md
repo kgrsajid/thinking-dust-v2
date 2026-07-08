@@ -268,6 +268,63 @@ This DOES pass the full `problem_text`, but the `_extract_context_words` method 
 
 ---
 
+## 🚨 URGENT: Duplicate Triples from Dual-Path Extraction
+
+**Problem:** The parser has a dual-path design (clause segmenter + main parser). Both run on the same sentence and produce near-duplicates with different relation strings. Deduplication uses exact string matching — doesn't catch them.
+
+**Examples:**
+```
+"information pertains to the interpretation"
+→ (information, pertains_to, interpretation)          ← clause segmenter (strips "the")
+→ (information, pertains_to, the interpretation)      ← main parser (includes "the")
+
+"redundant data can be compressed up to an optimal size"
+→ (redundant data, compressed_to, optimal size)       ← clause segmenter (strips aux)
+→ (redundant data, can compressed_to, an optimal size) ← main parser (includes "can")
+```
+
+**Root cause:** `_get_object_text` (clause segmenter) strips determiners, `_get_chunk_text` (main parser) includes them. `_get_verb_text` (clause segmenter) strips auxpass, main parser includes aux.
+
+**Fix:** Normalize triples before deduplication — strip determiners from objects, strip auxiliaries from relation strings.
+
+---
+
+## 🚨 HIGH: LLM Sentence Simplification Layer
+
+**Problem:** Complex natural language sentences produce garbage triples. spaCy's en_core_web_sm can't parse:
+- Nested coordination: "phenomena such as analogue signals, poems, pictures, music"
+- Subordinate clauses: "Whereas X, Y such as A, B, C convey Z"
+- Appositives: "information, not knowledge itself, but the meaning..."
+
+**Evidence from Wikipedia "Information" article:**
+```
+"information is not knowledge itself but the meaning derived from representation"
+→ NO TRIPLES EXTRACTED (most important fact silently dropped)
+
+"Whereas digital signals and other data use discrete signs to convey information,
+ other phenomena such as analogue signals, poems, pictures convey information
+ in a more continuous form"
+→ (analog, signal, poems)  ← COMPLETELY WRONG
+```
+
+**Solution:** LLM simplification as preprocessing before teach():
+```
+Input:  "Whereas digital signals use discrete signs to convey information,
+         other phenomena such as analogue signals, poems, music convey
+         information in a more continuous form."
+Output: "Digital signals use discrete signs to convey information."
+        "Analogue signals convey information in a continuous form."
+        "Poems and music convey information in a continuous form."
+```
+
+Each simple sentence goes through the existing parser — which handles them perfectly. ~20 lines of code. Reuses all existing TD v2 infrastructure.
+
+**Research backing:**
+- GraphRAG (Min et al., 2025) — sentence simplification improves KG extraction
+- UDASTE (2023) — complex sentences are the primary source of extraction errors
+
+---
+
 ## 4. Extending the Knowledge Graph
 
 ### 4.1 Adding Triple Extraction Patterns

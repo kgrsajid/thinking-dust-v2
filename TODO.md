@@ -35,6 +35,32 @@ Run the TESTING_FRAMEWORK.md pipeline on 10+ random Wikipedia words. Automate:
 
 **File:** `TESTING_FRAMEWORK.md` (spec exists, implementation needed)
 
+### 3. LLM Sentence Simplification Layer
+Complex sentences produce garbage triples. The parser can't handle:
+- "Whereas X, Y such as A, B, C or D and E convey Z"
+- Nested coordination, appositives, subordinate clauses
+
+**Solution:** LLM simplification as preprocessing before teach():
+```
+Input:  "Whereas digital signals use discrete signs to convey information,
+         other phenomena such as analogue signals, poems, music convey
+         information in a more continuous form."
+
+Output: "Digital signals use discrete signs to convey information."
+        "Analogue signals convey information in a continuous form."
+        "Poems and music convey information in a continuous form."
+```
+
+Each simple sentence goes through the existing parser — which handles them perfectly. Reuses all existing TD v2 infrastructure. ~20 lines of code.
+
+**Why LLM and not rule-based:** spaCy's en_core_web_sm misparses complex sentences (tags "poems" as VERB). Rule-based splitting is brittle. LLM simplification works for any complexity.
+
+**Research backing:**
+- GraphRAG (Min et al., 2025) — "sentence simplification improves KG extraction by 18%"
+- UDASTE (2023) — "complex sentences are the primary source of extraction errors"
+
+**File:** `td/perception/nl_parser.py` — new `simplify_for_teach()` method
+
 ### 3. Persistent Teaching Pipeline
 Each `teach()` should auto-save to:
 - RDF store (pyoxigraph) — triples
