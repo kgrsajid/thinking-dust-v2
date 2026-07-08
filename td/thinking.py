@@ -673,6 +673,18 @@ class GenericThinkingDust:
         # Used to detect context divergence for dynamic sense induction.
         self._teach_contexts: dict[str, list[tuple[np.ndarray, int]]] = {}
 
+        # ── WSD: Per-sense vocabulary from SpaCy dependency parsing ──
+        # Maps entity → sense_index → set of syntactic neighbor words
+        # Built from teach() interactions using SpaCy dependency extraction.
+        # The syntactic neighbor of the target word (head verb, compound noun,
+        # preposition object) is the sense-indicating signal.
+        #
+        # Reference: Sumanathilaka et al. (2026) — 'neighbour word analysis
+        #   is the critical disambiguation signal'
+        # Reference: Universal Dependencies (Nivre et al., 2016) —
+        #   dependency relations are language-agnostic
+        self._dep_sense_words: dict[str, list[set[str]]] = {}
+
         self.total_thinks = 0
         self.total_learned = 0
         self.avg_iterations = 0.0
@@ -977,12 +989,23 @@ class GenericThinkingDust:
             # Store teach context for sense resolution (non-is_a routing)
             base_entity = self.kg.get_surface_form(resolved_subject)
             sense_uris = self.kg.get_sense_uris(base_entity)
-            if sense_uris and self.wvm is not None:
+            if sense_uris:
                 sense_idx = sense_uris.index(resolved_subject) if resolved_subject in sense_uris else 0
-                ctx_vec = self.wvm._get_sentence_context_vector(problem_text, base_entity)
-                if ctx_vec is not None:
-                    self._teach_contexts.setdefault(base_entity, [])
-                    self._teach_contexts[base_entity].append((ctx_vec, sense_idx))
+
+                # Record SpaCy dependency neighbour for this sense
+                dep_word = self._extract_dep_neighbor(problem_text, base_entity)
+                if dep_word is not None:
+                    self._dep_sense_words.setdefault(base_entity, [])
+                    while len(self._dep_sense_words[base_entity]) <= sense_idx:
+                        self._dep_sense_words[base_entity].append(set())
+                    self._dep_sense_words[base_entity][sense_idx].add(dep_word)
+
+                # Also store BEAGLE context as fallback
+                if self.wvm is not None:
+                    ctx_vec = self.wvm._get_sentence_context_vector(problem_text, base_entity)
+                    if ctx_vec is not None:
+                        self._teach_contexts.setdefault(base_entity, [])
+                        self._teach_contexts[base_entity].append((ctx_vec, sense_idx))
 
             # Capture any contradiction warnings from LOTG (domain/range)
             if self.kg.last_warnings:
@@ -1385,10 +1408,13 @@ class GenericThinkingDust:
 
     def _resolve_sense_by_context(self, entity: str, senses: list[str],
                                     problem_text: str) -> str:
-        """Resolve which sense URI a new fact belongs to using teach context.
+        """Resolve which sense URI a new fact belongs to.
 
-        Compares the new fact's BEAGLE context against the teach contexts
-        stored for each sense URI. Returns the sense with the best match.
+        Uses SpaCy dependency-based neighbour word analysis (primary) and
+        BEAGLE context similarity (fallback) to route non-`is_a` facts.
+
+        Reference: Sumanathilaka et al. (2026) — 'neighbour word analysis
+            is the critical disambiguation signal'
 
         Args:
             entity: The entity being taught about
@@ -1398,21 +1424,33 @@ class GenericThinkingDust:
         Returns:
             The best-matching sense URI
         """
-        if not senses or self.wvm is None:
-            return senses[0] if senses else entity
+        if not senses:
+            return entity
 
-        # Get teach contexts grouped by sense index
+        # ── Primary: SpaCy dependency-based routing ──────────────
+        # Extract the syntactic neighbour (head verb, compound noun)
+        # and match against per-sense vocabularies.
+        dep_word = self._extract_dep_neighbor(problem_text, entity)
+        if dep_word is not None:
+            sense_words = self._dep_sense_words.get(entity, [])
+            best_sense_idx = -1
+            best_match = False
+            for idx, vocab in enumerate(sense_words):
+                if dep_word in vocab:
+                    best_sense_idx = idx
+                    best_match = True
+                    break
+            if best_match and best_sense_idx < len(senses):
+                return senses[best_sense_idx]
+
+        # ── Fallback: BEAGLE context centroid ────────────────────
+        if self.wvm is None or not senses:
+            return senses[0]
+
         teach_contexts = self._teach_contexts.get(entity, [])
         if not teach_contexts:
             return senses[0]
 
-        # Group context vectors by sense index
-        sense_vectors: dict[int, list[np.ndarray]] = {}
-        for vec, sense_idx in teach_contexts:
-            sense_vectors.setdefault(sense_idx, [])
-            sense_vectors[sense_idx].append(vec)
-
-        # Compute new fact's context
         ctx_vec = self.wvm._get_sentence_context_vector(problem_text, entity)
         if ctx_vec is None:
             return senses[0]
@@ -1420,14 +1458,16 @@ class GenericThinkingDust:
         if ctx_norm < 1e-10:
             return senses[0]
 
-        # Find best matching sense
         best_sim = -1.0
         best_sense_idx = 0
+        sense_vectors: dict[int, list[np.ndarray]] = {}
+        for vec, sense_idx in teach_contexts:
+            sense_vectors.setdefault(sense_idx, [])
+            sense_vectors[sense_idx].append(vec)
 
         for sense_idx, vecs in sense_vectors.items():
             if sense_idx >= len(senses):
                 continue
-            # Average similarity across all contexts for this sense
             sims = []
             for v in vecs:
                 v_norm = np.linalg.norm(v)
@@ -1442,6 +1482,50 @@ class GenericThinkingDust:
         if best_sense_idx < len(senses):
             return senses[best_sense_idx]
         return senses[0]
+
+    def _extract_dep_neighbor(self, sentence: str, target_word: str) -> str | None:
+        """Extract the syntactic neighbour of target_word using SpaCy.
+
+        The neighbour is the word most syntactically connected to the target:
+        - Compound noun head: "cell phone" → "phone"
+        - Head verb: "cell contains" → "contains"
+        - Governing verb via preposition: "locked in cell" → "lock"
+
+        Reference: Sumanathilaka et al. (2026) — neighbour word analysis
+        Reference: Universal Dependencies (Nivre et al., 2016)
+
+        Returns:
+            The neighbour word's lemma, or None if SpaCy unavailable
+        """
+        if not self.parser.nlp:
+            return None
+
+        doc = self.parser.nlp(sentence)
+        target = target_word.lower()
+
+        for token in doc:
+            if token.lemma_.lower() == target:
+                dep = token.dep_
+                head = token.head
+
+                # Compound: "cell phone" → phone
+                if dep == "compound":
+                    return head.lemma_
+
+                # Subject: "cell contains organelles" → contains
+                if dep in ("nsubj", "nsubjpass"):
+                    return head.lemma_
+
+                # Object: "inspect cell" → inspect
+                if dep in ("dobj", "attr"):
+                    return head.lemma_
+
+                # Prep object: "locked in the cell" → lock (via prep → verb)
+                if dep == "pobj" and head.dep_ == "prep":
+                    verb = head.head
+                    return verb.lemma_
+
+        return None
 
     def _build_semantic_prototypes(self):
         descriptions = {

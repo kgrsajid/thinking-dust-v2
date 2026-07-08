@@ -941,23 +941,25 @@ teach: cell is_a device        → device ≠ organelle, device ≠ room → NEW
 
 | Approach | Reference | Feasibility for TD v2 |
 |----------|-----------|----------------------|
+| **SpaCy dependency-based context** | **TD v2 implementation** | **✅ Already integrated, CPU-only, <1K params** |
 | **BSC-WSD (HDC binary vectors)** | **McInnes et al. (2012, 2013)** | **✅ CPU-only, 94.55% accuracy, uses existing HDC infrastructure** |
 | **5 sentences per sense** | **Romanian WSD (2025)** | **✅ Teach-from-zero compatible** |
-| Sentence-transformers | Sumanathilaka et al. (2026) | ❌ Requires pre-trained model |
+| Sentence-transformers + neighbour analysis | Sumanathilaka et al. (2026) | ❌ Requires BERT-based model (4B params, GPU) |
 | BERT contextualized embeddings | Devlin et al. (2019) | ❌ Requires 110M+ params, GPU |
-| SpaCy dependency-based context | — | ✅ Use syntactic neighbors, not all words |
 | Domain-specific corpus expansion | — | ✅ Add missing domains to corpus |
 
-**Most promising for TD v2: BSC-WSD (McInnes et al., 2012)**
+**Deep-dive findings from full paper reading:**
 
-The BSC-WSD algorithm uses HDC binary vectors for WSD — the SAME infrastructure TD v2 already has. It achieves 94.55% accuracy on clinical abbreviation disambiguation using:
-- Random elemental vectors for each sense
-- Binding: `S(context_word) += E(ambiguous) ⊗ E(sense)`
-- Unbinding: `S(context) ∅ E(ambiguous) ≈ E(sense)`
-- CPU-only, <1ms per disambiguation
-- 5 example sentences per sense sufficient (Romanian WSD, 2025)
+**Sumanathilaka et al. (2026) — EAD Framework:**
+Their actual methodology: extract 10 context tokens each side → filter stopwords → embed with sentence-transformers → compute cosine similarity between target and each token → rank by similarity → select top-k → use as CoT reasoning cues.
 
-**Reference:** McInnes, B.T. et al. "Hyperdimensional Computing Approach to Word Sense Disambiguation." *AMIA Annual Symposium*, 2012. PMC3540565. One-to-one BSC-WSD: 94.55%. One-to-many: 93.91%.
+Their key insight: "the key driver of superior performance is not merely model size, but the inclusion of a well-structured reasoning process." They achieved 76.52 F1 (few-shot) and 72.66 F1 (zero-shot) with 4B-param models, outperforming GPT-3.5-Turbo.
+
+**Why this doesn't translate directly to TD v2:** They use sentence-transformers (BERT-based) for the cosine similarity step. BERT gives contextualized embeddings — the same word gets different vectors in different contexts. BEAGLE gives static vectors — one vector per word regardless of context. This is why our BEAGLE-based approach fails: "membrane" and "phone" both co-occur with "cell" in training, so their BEAGLE vectors are artificially similar.
+
+**TD v2's SpaCy approach is a lightweight approximation:** Instead of cosine similarity with BERT embeddings, we use SpaCy dependency parsing to extract syntactically connected words. The head verb, compound noun, and preposition object ARE the sense signal. This is less precise than BERT-based ranking but fits TD v2's constraints (<100K params, CPU-only).
+
+**Most promising for TD v2: SpaCy dependency-based context extraction** (already implemented) + **BSC-WSD** (HDC binary vectors, 94.55% accuracy, CPU-only).
 
 ### References
 

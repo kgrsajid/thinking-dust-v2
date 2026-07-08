@@ -299,6 +299,121 @@ class WordVectorModel:
                 context += self.env_hvs[w].astype(np.float32)
         return context
 
+    def get_dependency_context_vector(self, sentence: str, target_word: str,
+                                       nlp=None) -> np.ndarray | None:
+        """Compute context vector using SpaCy dependency-based neighbor extraction.
+
+        Instead of ALL content words (noisy), extract only syntactically
+        connected words: the target's head, the head's subject/object,
+        and the target's children. This is more precise than bag-of-words
+        and matches the "neighbour word analysis" from Sumanathilaka et al. (2026).
+
+        Algorithm:
+            1. Find the target word in the SpaCy dependency tree
+            2. Get its head word (the word it depends on)
+            3. Get the head's subject (nsubj) — WHO does the action
+            4. Get the head's other objects — WHAT is affected
+            5. Get the target's children (modifiers, determiners)
+            6. Compute BEAGLE context from these syntactic neighbors only
+
+        Example:
+            "the prisoner was locked in the cell overnight"
+            target = "cell"
+            → head = "locked" (via "in")
+            → head's subject = "prisoner"
+            → context = env(locked) + env(prisoner) + env(overnight)
+
+            "the cell contains organelles"
+            target = "cell"
+            → head = "contains"
+            → head's object = "organelles"
+            → context = env(contains) + env(organelles)
+
+        Reference: Sumanathilaka et al. (2026), 'EAD Framework':
+            'neighbour word analysis is the critical disambiguation signal'
+            'a fixed-size context window of up to 10 tokens on each side'
+
+        Args:
+            sentence: The full sentence text
+            target_word: The word to compute context for
+            nlp: SpaCy model (optional, uses lazy loading if None)
+
+        Returns:
+            Context vector (float32), or None if SpaCy unavailable or
+            target not found in dependency tree
+        """
+        if nlp is None:
+            try:
+                import spacy
+                nlp = spacy.load("en_core_web_sm")
+            except (ImportError, OSError):
+                return None
+
+        doc = nlp(sentence)
+        target = target_word.lower()
+
+        # Find the target token in the dependency tree
+        target_token = None
+        for token in doc:
+            if token.text.lower() == target:
+                target_token = token
+                break
+
+        if target_token is None:
+            return None
+
+        # Collect syntactic neighbors
+        neighbor_words = set()
+
+        # 1. Head word (what the target depends on)
+        head = target_token.head
+        if head.text.lower() != target:
+            neighbor_words.add(head.text.lower())
+
+        # 2. Head's subject (WHO does the action)
+        for child in head.children:
+            if child.dep_ in ("nsubj", "nsubjpass") and child.text.lower() != target:
+                neighbor_words.add(child.text.lower())
+
+        # 3. Head's objects (WHAT is affected)
+        for child in head.children:
+            if child.dep_ in ("dobj", "attr", "acomp") and child.text.lower() != target:
+                neighbor_words.add(child.text.lower())
+
+        # 4. Preposition chain (for "locked in the cell" → "locked")
+        if target_token.dep_ == "pobj":
+            prep = target_token.head  # the preposition
+            if prep.dep_ == "prep":
+                verb = prep.head  # the verb
+                neighbor_words.add(verb.text.lower())
+                # Get verb's subject
+                for child in verb.children:
+                    if child.dep_ in ("nsubj", "nsubjpass") and child.text.lower() != target:
+                        neighbor_words.add(child.text.lower())
+
+        # 5. Target's children (modifiers, adjectives)
+        for child in target_token.children:
+            if child.dep_ in ("amod", "compound", "nummod") and child.text.lower() != target:
+                neighbor_words.add(child.text.lower())
+
+        # Remove stopwords and the target itself
+        neighbor_words.discard(target)
+        neighbor_words = {w for w in neighbor_words if w not in STOP_WORDS}
+
+        if not neighbor_words:
+            return None
+
+        # Ensure all words have environmental vectors
+        for w in neighbor_words:
+            self._get_or_create_env(w)
+
+        # Compute context from syntactic neighbors only
+        context = np.zeros(self.dim, dtype=np.float32)
+        for w in neighbor_words:
+            context += self.env_hvs[w].astype(np.float32)
+
+        return context
+
     def _assign_to_cluster(self, word: str, context_vec: np.ndarray,
                            sentence: str) -> int:
         """Assign a context vector to a sense cluster for a word.
