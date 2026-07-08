@@ -22,8 +22,11 @@ import sqlite3
 import os
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from collections import defaultdict
+
+if TYPE_CHECKING:
+    from td.perception.word_vectors import WordVectorModel
 
 # Contradiction detection — Lightweight Ontological Type Guard (LOTG)
 from td.reasoning.contradiction_detector import (
@@ -158,6 +161,15 @@ class KnowledgeGraph:
         self.detector = ContradictionDetector()
         self.last_warnings: list = []  # Warnings from most recent add_fact()
 
+        # ── WSD: Sense Inventory ──────────────────────────────────────
+        # Maps surface form → list of sense URIs (e.g., "cell" → ["cell_0", "cell_1"])
+        # Each sense URI is a separate node in the knowledge graph.
+        # Senses emerge dynamically from teach() interactions via LOTG supervision.
+        #
+        # Reference: WSD_MILESTONE_SPEC.md — "One word in the lexicon,
+        # many concepts in the graph, context clusters route between them."
+        self.sense_inventory: dict[str, list[str]] = {}
+
         # SPARQL store (pyoxigraph) — primary storage backend
         # Initialized lazily on first add_fact or explicit load
         self._sparql_store = None
@@ -229,6 +241,88 @@ class KnowledgeGraph:
             )
 
         return triple
+
+    # ── WSD: Sense URI Resolution ──────────────────────────────────────
+
+    def resolve_sense_uri(self, surface_form: str, context_sentence: str = None,
+                          wvm: 'WordVectorModel' = None) -> str:
+        """Resolve a surface form to a specific sense URI.
+
+        Tiered resolution (from WSD_MILESTONE_SPEC):
+        1. If only one sense (or no senses) → return base form
+        2. If context available + WVM has sense clusters → use BEAGLE clustering
+        3. Fallback → return base form (no disambiguation)
+
+        Args:
+            surface_form: The word/phrase to resolve (e.g., "cell")
+            context_sentence: Full sentence context for BEAGLE-based routing
+            wvm: WordVectorModel with sense clusters (optional)
+
+        Returns:
+            Sense URI string (e.g., "cell_0", "cell_1") or base form
+        """
+        surface = surface_form.strip().lower()
+        senses = self.sense_inventory.get(surface, [])
+
+        # No senses or only one → return base form
+        if len(senses) <= 1:
+            return surface
+
+        # If we have context and WVM with sense clusters, use BEAGLE routing
+        if context_sentence and wvm is not None:
+            sense_idx = wvm.get_sense(surface, context_sentence)
+            if sense_idx < len(senses):
+                return senses[sense_idx]
+
+        # Fallback: return the first (most common) sense
+        return senses[0] if senses else surface
+
+    def induce_new_sense(self, surface_form: str, conflicting_types: set[str],
+                         proof: str) -> str:
+        """Create a new sense URI for a polysemous word.
+
+        Called when LOTG detects a type conflict between a new fact and
+        existing facts on the same entity. This is dynamic sense induction —
+        senses emerge from teaching, not from a predefined inventory.
+
+        The new URI is: "{surface}_{N}" where N is the next available index.
+
+        Args:
+            surface_form: The ambiguous word (e.g., "cell")
+            conflicting_types: The types that conflict with existing senses
+            proof: Why this new sense was created
+
+        Returns:
+            The new sense URI
+        """
+        surface = surface_form.strip().lower()
+        if surface not in self.sense_inventory:
+            # First sense doesn't need a suffix — keep base form as sense 0
+            self.sense_inventory[surface] = [surface]
+
+        # Generate new URI: surface_N
+        existing = self.sense_inventory[surface]
+        new_idx = len(existing)
+        new_uri = f"{surface}_{new_idx}"
+        existing.append(new_uri)
+
+        return new_uri
+
+    def get_sense_uris(self, surface_form: str) -> list[str]:
+        """Get all sense URIs for a surface form."""
+        return self.sense_inventory.get(surface_form.strip().lower(), [])
+
+    def get_surface_form(self, sense_uri: str) -> str:
+        """Get the surface form from a sense URI.
+
+        "cell_0" → "cell", "cell_1" → "cell", "paris" → "paris"
+        """
+        # Check if this is a numbered sense URI
+        if "_" in sense_uri:
+            parts = sense_uri.rsplit("_", 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                return parts[0]
+        return sense_uri
 
     def _init_default_composition_rules(self):
         """Initialize default composition rules from OWL best practices.
@@ -1225,6 +1319,12 @@ class KnowledgeGraph:
                 CREATE TABLE IF NOT EXISTS gazetteer (
                     entity TEXT PRIMARY KEY
                 );
+                CREATE TABLE IF NOT EXISTS sense_inventory (
+                    surface_form TEXT NOT NULL,
+                    sense_uri TEXT NOT NULL,
+                    sense_index INTEGER NOT NULL,
+                    PRIMARY KEY (surface_form, sense_uri)
+                );
             """)
             conn.execute("DELETE FROM triples")
             conn.execute("DELETE FROM relation_properties")
@@ -1247,6 +1347,13 @@ class KnowledgeGraph:
                 "INSERT INTO gazetteer (entity) VALUES (?)",
                 [(e,) for e in self.gazetteer]
             )
+            conn.execute("DELETE FROM sense_inventory")
+            for surface, uris in self.sense_inventory.items():
+                for idx, uri in enumerate(uris):
+                    conn.execute(
+                        "INSERT INTO sense_inventory (surface_form, sense_uri, sense_index) VALUES (?, ?, ?)",
+                        (surface, uri, idx)
+                    )
             conn.commit()
         finally:
             conn.close()
@@ -1279,7 +1386,7 @@ class KnowledgeGraph:
 
         # Try pyoxigraph store first
         if os.path.exists(store_path) and os.path.isdir(store_path):
-            return self._load_sparql(store_path)
+            return self._load_sparql(store_path, sqlite_path=sqlite_path)
 
         # Fall back: try SQLite migration
         if os.path.exists(sqlite_path):
@@ -1300,7 +1407,7 @@ class KnowledgeGraph:
         except ImportError:
             pass  # pyoxigraph not installed
 
-    def _load_sparql(self, path: str) -> bool:
+    def _load_sparql(self, path: str, sqlite_path: str = None) -> bool:
         """Load from existing pyoxigraph store."""
         self._init_sparql_store(path)
         if self._sparql_store is None:
@@ -1385,6 +1492,22 @@ class KnowledgeGraph:
             if " " in t.object:
                 self.gazetteer.add(t.object)
 
+        # Load sense_inventory from companion SQLite file (if exists)
+        # Sense inventory is stored in SQLite, not in the SPARQL store
+        if sqlite_path and os.path.exists(sqlite_path):
+            try:
+                conn = sqlite3.connect(sqlite_path)
+                sense_rows = conn.execute(
+                    "SELECT surface_form, sense_uri, sense_index FROM sense_inventory ORDER BY surface_form, sense_index"
+                ).fetchall()
+                for surface, uri, _ in sense_rows:
+                    self.sense_inventory.setdefault(surface, [])
+                    if uri not in self.sense_inventory[surface]:
+                        self.sense_inventory[surface].append(uri)
+                conn.close()
+            except sqlite3.OperationalError:
+                pass  # Table doesn't exist in older DBs
+
         return len(self.triples) > 0
 
     def _load_sqlite_migrate(self, sqlite_path: str, sparql_path: str) -> bool:
@@ -1431,6 +1554,17 @@ class KnowledgeGraph:
                 gaz_rows = conn.execute("SELECT entity FROM gazetteer").fetchall()
                 for (entity,) in gaz_rows:
                     self.gazetteer.add(entity)
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                sense_rows = conn.execute(
+                    "SELECT surface_form, sense_uri, sense_index FROM sense_inventory ORDER BY surface_form, sense_index"
+                ).fetchall()
+                for surface, uri, _ in sense_rows:
+                    self.sense_inventory.setdefault(surface, [])
+                    if uri not in self.sense_inventory[surface]:
+                        self.sense_inventory[surface].append(uri)
             except sqlite3.OperationalError:
                 pass
 

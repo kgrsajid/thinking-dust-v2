@@ -92,7 +92,31 @@ class WordVectorModel:
         - Online learning (can add sentences incrementally)
         - O(1) lookup at runtime
         - ~10KB per word (10000-dim int8)
+
+    WSD (Word Sense Disambiguation):
+        - sense_clusters: per-word list of (context_vec, count, example_sentence)
+        - New contexts assigned to best-matching cluster or create new one
+        - Enables context-dependent sense routing for polysemous words
+
+    References:
+        Jones & Mewhort (2007), Psychological Review 114(1): 1-37.
+            BEAGLE context vectors encode co-occurrence.
+        Ruas et al. (2020), Expert Systems with Applications.
+            "Sentence-level context expands graph connectivity beyond word-level."
+        AlMousa et al. (2022), ACM TALLIP.
+            "Captures maximum sentence context while maintaining term order."
+        Melamud et al. (2016), CoNLL.
+            Context-dependent embeddings outperform context-independent for WSD.
     """
+
+    # Similarity threshold for assigning to existing sense cluster.
+    # Below this, a new cluster is created.
+    # Tuned: 0.15 is BEAGLE's effective semantic threshold (Jones & Mewhort, 2007).
+    SENSE_CLUSTER_NEW_THRESHOLD = 0.15
+
+    # Similarity threshold for merging two clusters (anti-fragmentation).
+    # Above this, clusters are too similar and should be merged.
+    SENSE_CLUSTER_MERGE_THRESHOLD = 0.95
 
     def __init__(self, dim: int = 10000):
         self.dim = dim
@@ -111,6 +135,21 @@ class WordVectorModel:
         # Cache for memory vectors (invalidated on update)
         self._mem_cache: dict[str, np.ndarray] = {}
         self._cache_dirty = True
+
+        # ── WSD: Per-word sense clusters ──────────────────────────────
+        # Each entry: list of (context_vec, count, example_sentence)
+        # context_vec: accumulated environmental vectors for this sense
+        # count: number of sentences assigned to this cluster
+        # example_sentence: first sentence that created this cluster
+        #
+        # This is the Tier 1 WSD mechanism from the WSD_MILESTONE_SPEC.
+        # Instead of one muddled context vector per word, we maintain
+        # separate accumulators per sense. New contexts are assigned to
+        # the best-matching cluster (or create a new one).
+        #
+        # Cost: ~24KB per extra sense (10K-dim float32).
+        # Most words have 1 sense → no increase.
+        self.sense_clusters: dict[str, list[tuple[np.ndarray, int, str]]] = {}
 
     def _get_or_create_env(self, word: str) -> np.ndarray:
         """Get or create the environmental (static identity) vector for a word."""
@@ -154,6 +193,13 @@ class WordVectorModel:
 
         self.trained_sentences += 1
         self._cache_dirty = True
+
+        # Update sense clusters (WSD Tier 1)
+        # Uses full sentence context per Ruas et al. (2020) and AlMousa et al. (2022)
+        for w in words:
+            ctx = self._get_sentence_context_vector(sentence, w)
+            if ctx is not None:
+                self._assign_to_cluster(w, ctx, sentence)
 
     def train(self, sentences: list[str], verbose: bool = True) -> None:
         """Train on a corpus of sentences."""
@@ -206,10 +252,224 @@ class WordVectorModel:
         """Online learning: update word vectors from a single sentence.
 
         Called from teach() to continuously improve word semantics.
+        Sense clusters are updated inside train_sentence() (WSD Tier 1).
         """
         self.train_sentence(sentence)
         # Rebuild cache for affected words only (optimization for production)
         self._build_mem_cache()
+
+    def _get_sentence_context_vector(self, sentence: str, target_word: str) -> np.ndarray | None:
+        """Compute context vector for a target word from a full sentence.
+
+        This is the BEAGLE context computation from Jones & Mewhort (2007):
+        context(w) = sum of environmental vectors of all OTHER content words in sentence.
+
+        Key insight from Ruas et al. (2020) and AlMousa et al. (2022):
+        Use the FULL SENTENCE context, not just the extracted triple.
+        Sentence-level context captures maximum disambiguation signal.
+
+        Args:
+            sentence: The full sentence text
+            target_word: The word to compute context for
+
+        Returns:
+            Context vector (float32), or None if sentence has <2 content words
+        """
+        tokens = tokenize(sentence)
+        words = content_words(tokens)
+        if len(words) < 2:
+            return None
+
+        # Ensure all words have environmental vectors
+        for w in words:
+            self._get_or_create_env(w)
+
+        # Context for target_word = sum of ALL other content words' env vectors
+        target = target_word.lower()
+        context = np.zeros(self.dim, dtype=np.float32)
+        for w in words:
+            if w != target:
+                context += self.env_hvs[w].astype(np.float32)
+        return context
+
+    def _assign_to_cluster(self, word: str, context_vec: np.ndarray,
+                           sentence: str) -> int:
+        """Assign a context vector to a sense cluster for a word.
+
+        Algorithm (from CRHCL 2025, Sumanathilaka et al. 2026, Melamud et al. 2016):
+        1. Compare context_vec with all existing clusters' context vectors
+        2. If best_sim > SENSE_CLUSTER_NEW_THRESHOLD → assign to existing cluster
+        3. Otherwise → create new cluster
+
+        Anti-fragmentation (from ART / Grossberg 1976):
+        After assignment, check if any two clusters are too similar (>MERGE_THRESHOLD).
+        If so, merge them.
+
+        Args:
+            word: The word being disambiguated
+            context_vec: The sentence-level context vector
+            sentence: The original sentence (stored as example)
+
+        Returns:
+            Index of the assigned cluster
+        """
+        word = word.lower()
+        if word not in self.sense_clusters:
+            self.sense_clusters[word] = []
+
+        clusters = self.sense_clusters[word]
+
+        if not clusters:
+            # First sense: create first cluster
+            clusters.append((context_vec.copy(), 1, sentence))
+            return 0
+
+        # Find best-matching cluster via cosine similarity
+        best_sim = -1.0
+        best_idx = -1
+        ctx_norm = context_vec / (np.linalg.norm(context_vec) + 1e-10)
+
+        for i, (cluster_vec, count, _) in enumerate(clusters):
+            cluster_norm = cluster_vec / (np.linalg.norm(cluster_vec) + 1e-10)
+            sim = float(np.dot(ctx_norm, cluster_norm))
+            if sim > best_sim:
+                best_sim = sim
+                best_idx = i
+
+        if best_sim >= self.SENSE_CLUSTER_NEW_THRESHOLD:
+            # Assign to existing cluster: running average update
+            # Weighted average preserves the cluster centroid while
+            # incorporating new evidence (Jones & Mewhort, 2007)
+            old_vec, count, example = clusters[best_idx]
+            new_count = count + 1
+            # Running average: new_vec = (old_vec * count + context_vec) / (count + 1)
+            updated_vec = (old_vec * count + context_vec) / new_count
+            clusters[best_idx] = (updated_vec, new_count, example)
+            return best_idx
+        else:
+            # New sense: create new cluster
+            clusters.append((context_vec.copy(), 1, sentence))
+            # Anti-fragmentation: check if any clusters should be merged
+            self._check_sense_merge(word)
+            return len(clusters) - 1
+
+    def _check_sense_merge(self, word: str) -> None:
+        """Merge clusters that are too similar (anti-fragmentation).
+
+        If two clusters have cosine similarity > SENSE_CLUSTER_MERGE_THRESHOLD,
+        they represent the same sense and should be merged.
+
+        This prevents over-fragmentation from slight context variations.
+        Reference: Adaptive Resonance Theory (Grossberg, 1976) —
+        vigilance parameter controls cluster granularity.
+        """
+        clusters = self.sense_clusters.get(word, [])
+        if len(clusters) < 2:
+            return
+
+        # Check all pairs (small N, typically 2-5 clusters per word)
+        i = 0
+        while i < len(clusters):
+            j = i + 1
+            while j < len(clusters):
+                vec_i, count_i, ex_i = clusters[i]
+                vec_j, count_j, ex_j = clusters[j]
+
+                norm_i = np.linalg.norm(vec_i)
+                norm_j = np.linalg.norm(vec_j)
+                if norm_i < 1e-10 or norm_j < 1e-10:
+                    j += 1
+                    continue
+
+                sim = float(np.dot(vec_i / norm_i, vec_j / norm_j))
+                if sim > self.SENSE_CLUSTER_MERGE_THRESHOLD:
+                    # Merge: weighted average of centroids, sum counts
+                    total = count_i + count_j
+                    merged_vec = (vec_i * count_i + vec_j * count_j) / total
+                    clusters[i] = (merged_vec, total, ex_i)
+                    clusters.pop(j)
+                    # Don't increment j — it was removed
+                else:
+                    j += 1
+            i += 1
+
+    def _update_sense_clusters(self, sentence: str) -> None:
+        """Update sense clusters for all content words in a sentence.
+
+        Called from train_incremental(). For each content word, computes
+        the sentence-level context vector and assigns it to a sense cluster.
+
+        This is the Tier 1 WSD mechanism. Full sentence context is used
+        (not just the triple) per Ruas et al. (2020) and AlMousa et al. (2022).
+        """
+        tokens = tokenize(sentence)
+        words = content_words(tokens)
+        if len(words) < 2:
+            return
+
+        for w in words:
+            ctx = self._get_sentence_context_vector(sentence, w)
+            if ctx is not None:
+                self._assign_to_cluster(w, ctx, sentence)
+
+    def get_sense(self, word: str, context_sentence: str) -> int:
+        """Get the sense cluster index for a word given its context.
+
+        This is the WSD routing function. Given a word and its full sentence
+        context, returns which sense cluster it belongs to.
+
+        Args:
+            word: The polysemous word
+            context_sentence: The full sentence containing the word
+
+        Returns:
+            Sense cluster index (0 = first/default sense)
+        """
+        word = word.lower()
+        if word not in self.sense_clusters:
+            return 0  # No clusters yet, default sense
+
+        clusters = self.sense_clusters[word]
+        if len(clusters) <= 1:
+            return 0  # Only one sense, use it
+
+        # Compute context vector for this word in this sentence
+        ctx = self._get_sentence_context_vector(context_sentence, word)
+        if ctx is None:
+            return 0  # Can't compute context, use default
+
+        # Find best-matching cluster
+        ctx_norm = ctx / (np.linalg.norm(ctx) + 1e-10)
+        best_sim = -1.0
+        best_idx = 0
+
+        for i, (cluster_vec, _, _) in enumerate(clusters):
+            norm = np.linalg.norm(cluster_vec)
+            if norm < 1e-10:
+                continue
+            cluster_norm = cluster_vec / norm
+            sim = float(np.dot(ctx_norm, cluster_norm))
+            if sim > best_sim:
+                best_sim = sim
+                best_idx = i
+
+        return best_idx
+
+    def get_sense_count(self, word: str) -> int:
+        """Get the number of sense clusters for a word."""
+        return len(self.sense_clusters.get(word.lower(), []))
+
+    def get_sense_info(self, word: str) -> list[dict]:
+        """Get information about all sense clusters for a word.
+
+        Returns list of dicts with cluster metadata.
+        """
+        word = word.lower()
+        clusters = self.sense_clusters.get(word, [])
+        return [
+            {"index": i, "count": count, "example": example[:80]}
+            for i, (_, count, example) in enumerate(clusters)
+        ]
 
     def similarity(self, word1: str, word2: str) -> float:
         """Cosine similarity between two words' memory vectors."""
@@ -251,7 +511,7 @@ class WordVectorModel:
         return normalize_hdc(bundle(*vectors))
 
     def save(self, path: str) -> None:
-        """Save model to file."""
+        """Save model to file (includes sense clusters for WSD)."""
         if self._cache_dirty:
             self._build_mem_cache()
         data = {
@@ -260,12 +520,13 @@ class WordVectorModel:
             "ctx_hvs": self.ctx_hvs,
             "word_freq": dict(self.word_freq),
             "trained_sentences": self.trained_sentences,
+            "sense_clusters": self.sense_clusters,
         }
         with open(path, "wb") as f:
             pickle.dump(data, f)
 
     def load(self, path: str) -> None:
-        """Load model from file."""
+        """Load model from file (includes sense clusters for WSD)."""
         with open(path, "rb") as f:
             data = pickle.load(f)
         self.dim = data["dim"]
@@ -273,6 +534,8 @@ class WordVectorModel:
         self.ctx_hvs = data["ctx_hvs"]
         self.word_freq = defaultdict(int, data["word_freq"])
         self.trained_sentences = data["trained_sentences"]
+        # Load sense clusters (backward compatible: missing key = empty)
+        self.sense_clusters = data.get("sense_clusters", {})
         self._cache_dirty = True
         self._build_mem_cache()
 

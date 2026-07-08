@@ -33,6 +33,7 @@ from .perception.hdc import (
 )
 from .perception.nl_parser import GenericNLParser, GenericEntityGraph
 from .memory.mhn import ModernHopfieldNetwork, MHNConfig
+from .reasoning.contradiction_detector import ContradictionWarning
 
 
 # =========================================================================
@@ -907,16 +908,54 @@ class GenericThinkingDust:
             self.wvm.train_incremental(solution_text)
 
         # Try to extract knowledge graph triples
+        # WSD: Use full sentence context for sense resolution (Ruas et al., 2020)
         triples = self._extract_triples(problem_text, solution_text)
         contradictions = []
         for (s, r, o) in triples:
-            self.kg.add_fact(s, r, o)
+            # ── WSD: Dynamic Sense Induction ────────────────────────
+            # Before adding, check if the subject has existing senses
+            # and if LOTG would detect a type conflict.
+            resolved_subject = s
+            existing_senses = self.kg.get_sense_uris(s)
+
+            if existing_senses:
+                # Try to resolve to an existing sense using BEAGLE context
+                resolved_subject = self.kg.resolve_sense_uri(
+                    s, context_sentence=problem_text, wvm=self.wvm
+                )
+
+            # Add the fact (LOTG runs inside add_fact)
+            self.kg.add_fact(resolved_subject, r, o)
+
             # Capture any contradiction warnings from the type guard
             if self.kg.last_warnings:
                 contradictions.extend(self.kg.last_warnings)
+                # ── WSD: If LOTG found a conflict, induce a new sense ──
+                # This happens when a polysemous word gets a fact that
+                # conflicts with its existing type profile.
+                # Example: "cell is_a organelle" (bio) then "cell has_screen"
+                #   → LOTG: organelle ≠ product → new sense cell_1
+                for warning in self.kg.last_warnings:
+                    if isinstance(warning, ContradictionWarning):
+                        # Check if we need a new sense (not already split)
+                        if len(existing_senses) <= 1:
+                            # Get the conflicting types
+                            conflicting = {warning.new_type}
+                            # Create a new sense URI for the new fact
+                            new_uri = self.kg.induce_new_sense(
+                                s, conflicting_types=conflicting,
+                                proof=str(warning)
+                            )
+                            # Move the just-added fact to the new sense URI
+                            # by re-adding with the new URI and removing the old
+                            self._move_triple_to_sense(
+                                resolved_subject, r, o, new_uri
+                            )
+                            resolved_subject = new_uri
+
             # Sync to SPARQL store (if available)
             if self.sparql_store is not None:
-                self.sparql_store.add_fact(s, r, o, source="user")
+                self.sparql_store.add_fact(resolved_subject, r, o, source="user")
 
         result = {
             "status": "learned", "problem": problem_text[:80],
@@ -988,6 +1027,35 @@ class GenericThinkingDust:
         return False
 
     # ─── Internal ─────────────────────────────────────────────────────
+
+    def _move_triple_to_sense(self, old_subject: str, relation: str,
+                              obj: str, new_sense_uri: str) -> None:
+        """Move a triple from one subject to a sense URI.
+
+        Called during WSD dynamic sense induction when LOTG detects a type
+        conflict. The triple that caused the conflict is moved from the
+        base entity to the newly created sense URI.
+
+        Args:
+            old_subject: Current subject (base form or existing sense URI)
+            relation: The relation
+            obj: The object
+            new_sense_uri: The new sense URI to move the triple to
+        """
+        # Find and update the triple in the in-memory list
+        for t in self.kg.triples:
+            if t.subject == old_subject and t.relation == relation and t.object == obj:
+                t.subject = new_sense_uri
+                # Update entity index
+                if old_subject in self.kg._entity_index:
+                    indices = self.kg._entity_index[old_subject]
+                    # Remove this triple's index from old subject
+                    idx = self.kg.triples.index(t)
+                    if idx in indices:
+                        indices.remove(idx)
+                    # Add to new sense URI
+                    self.kg._entity_index[new_sense_uri].append(idx)
+                break
 
     def _build_semantic_prototypes(self):
         descriptions = {
@@ -1241,7 +1309,28 @@ class GenericThinkingDust:
                         if part in entities_in_query:
                             entities_in_query.remove(part)
 
-            if len(entities_in_query) < 2:
+        # ── WSD: Resolve entity senses using BEAGLE context ────────
+        # If an entity has multiple sense URIs in the KG, use the
+        # query context to route to the correct sense.
+        # Example: "what is cell made of?" → cell_bio (not cell_phone)
+        resolved_entities = []
+        for entity in entities_in_query:
+            senses = self.kg.get_sense_uris(entity)
+            if len(senses) > 1:
+                # Multiple senses — resolve using BEAGLE context
+                resolved = self.kg.resolve_sense_uri(
+                    entity, context_sentence=text, wvm=self.wvm
+                )
+                resolved_entities.append(resolved)
+                # Also keep the base form as fallback
+                if resolved != entity and resolved not in entities_in_query:
+                    resolved_entities.append(entity)
+            else:
+                resolved_entities.append(entity)
+        # Use resolved entities for the rest of the query
+        entities_in_query = resolved_entities
+
+        if len(entities_in_query) < 2:
                 # Try inverse/open query: "What is the capital of France?"
                 # Uses UD PronType=Int feature when available, PTB tags as fallback.
                 # Reference: Nivre et al. (2016), Universal Dependencies 2.0
