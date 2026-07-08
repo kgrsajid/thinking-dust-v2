@@ -645,7 +645,10 @@ class GenericNLParser:
                         pobj = [c for c in prep.children if c.dep_ == "pobj"]
                         if pobj:
                             obj_text = self._get_chunk_text(doc, pobj[0])
-                            rel = f"{attr.text.lower()}_{prep.lemma_}"
+                            # Use chunk text for attr to preserve amod chains
+                            # "jelly-like substance inside cell" → attr_chunk = "jelly-like substance"
+                            attr_chunk = self._get_chunk_text(doc, attr)
+                            rel = f"{attr_chunk.lower()}_{prep.lemma_}"
                             for subj_text in subj_texts:
                                 triples.append((subj_text, rel, obj_text))
                             continue
@@ -704,6 +707,17 @@ class GenericNLParser:
                             if gc.dep_ == "pobj":
                                 prep_chain = (child, gc)
                                 break
+
+                # Fallback: if no nsubj found, check for advmod that is
+                # the logical subject. spaCy sometimes misparses plural noun
+                # subjects as advmod (e.g., "ribosomes synthesize proteins"
+                # → ribosomes=advmod, should be nsubj).
+                # Accept any advmod as subject when there's no nsubj/nsubjpass.
+                if not subj:
+                    for child in token.children:
+                        if child.dep_ == "advmod":
+                            subj = child
+                            break
 
                 # Detect negation
                 has_neg = any(c.dep_ == "neg" for c in token.children)
@@ -765,6 +779,35 @@ class GenericNLParser:
                                 if has_neg:
                                     rel = f"NOT_{rel}"
                                 triples.append((subj_text, rel, obj_text))
+
+                            # NEW: Attach spatial/temporal PP from dobj children
+                            # "ribosomes synthesize proteins inside the cell"
+                            # spaCy: inside→prep→proteins (dobj), NOT prep→synthesize
+                            # → (ribosomes, synthesize, proteins)
+                            # → (ribosomes, synthesize_inside, cell)
+                            #
+                            # Reference: Stanford OpenIE (Angeli et al., 2015)
+                            for dobj_child in dobj.children:
+                                if dobj_child.dep_ == "prep":
+                                    for gc in dobj_child.children:
+                                        if gc.dep_ == "pobj":
+                                            pp_text = self._get_chunk_text(doc, gc)
+                                            spatial_rel = f"{token.text.lower()}_{dobj_child.lemma_}"
+                                            if has_neg:
+                                                spatial_rel = f"NOT_{spatial_rel}"
+                                            for subj_text in subj_texts:
+                                                triples.append((subj_text, spatial_rel, pp_text))
+
+                            # Also handle prep_chain on the verb itself
+                            if prep_chain:
+                                prep, pp_obj = prep_chain
+                                pp_text = self._get_chunk_text(doc, pp_obj)
+                                spatial_rel = f"{token.text.lower()}_{prep.lemma_}"
+                                if has_neg:
+                                    spatial_rel = f"NOT_{spatial_rel}"
+                                for subj_text in subj_texts:
+                                    triples.append((subj_text, spatial_rel, pp_text))
+
                         elif prep_chain:
                             prep, obj = prep_chain
                             obj_text = self._get_chunk_text(doc, obj)
