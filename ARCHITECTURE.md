@@ -312,15 +312,15 @@ extract_triples_spacy(text):
 
 ### References
 
-| Paper | Year | Technique |
-|-------|------|-----------|
-| Sahaj Software, "Knowledge graphs from complex text" | 2023 | Verb-based sentence splitting via spaCy dependency tree |
-| Manning & Schütze, "Foundations of Statistical NLP" | 1999 | Coordinated noun phrase extraction (Ch. 5) |
-| spaCy dependency labels | 2017 | Universal Dependencies v2 |
-| Min et al., "Towards Practical GraphRAG" | 2025 | ccomp as subject propagation boundary |
-| UDASTE, "Unsupervised Dependency parsing Aided Semantic Triple Extraction" | 2023 | Compound expansion via dependency subtree |
-| Stanford OpenIE (Angeli et al.) | 2015 | Verb-PP separate triples for spatial/temporal context |
-| Bohnet et al. | 2020 | Coordination expansion preserves dependency path |
+| # | Paper | Year | Venue | Technique |
+|---|-------|------|-------|-----------|
+| 1 | Sahaj Software, "Knowledge graphs from complex text" | 2023 | Blog/Technical Report | Verb-based sentence splitting via spaCy dependency tree |
+| 2 | Manning & Schütze, "Foundations of Statistical Natural Language Processing" | 1999 | MIT Press, Ch. 5 | Coordinated noun phrase extraction, collocation detection |
+| 3 | Honnibal & Montani, "spaCy 2" | 2017 | Industrial-strength NLP with Cython and NumPy | Universal Dependencies v2, dependency labels (nsubj, dobj, prep, amod, compound, conj) |
+| 4 | Min et al., "Towards Practical GraphRAG" | 2025 | arXiv:2507.03226 | ccomp/xcomp as subject propagation boundary, dependency path table for IE |
+| 5 | UDASTE: "Unsupervised Dependency parsing Aided Semantic Triple Extraction" | 2023 | ScienceDirect, Expert Systems with Applications | Compound expansion via dependency subtree, MiniLM for relation extraction |
+| 6 | Angeli, Premkumar & Manning, "Leveraging Linguistic Structure For Open Domain Information Extraction" | 2015 | ACL 2015 | Stanford OpenIE: clause splitting → maximally shorten → atomic patterns for triples, verb-PP separate triples |
+| 7 | Bohnet & Nivre, "A Transition-Based System for Joint Dependency Parsing and Morphological Analysis" | 2012 | COLING | Coordination expansion preserves dependency path from ROOT to head |
 
 ### Parser Quality Fixes (2026-07-09)
 
