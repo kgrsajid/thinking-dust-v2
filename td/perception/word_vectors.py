@@ -258,7 +258,8 @@ class WordVectorModel:
         # Rebuild cache for affected words only (optimization for production)
         self._build_mem_cache()
 
-    def _get_sentence_context_vector(self, sentence: str, target_word: str) -> np.ndarray | None:
+    def _get_sentence_context_vector(self, sentence: str, target_word: str,
+                                      exclude_words: frozenset[str] = None) -> np.ndarray | None:
         """Compute context vector for a target word from a full sentence.
 
         This is the BEAGLE context computation from Jones & Mewhort (2007):
@@ -268,9 +269,13 @@ class WordVectorModel:
         Use the FULL SENTENCE context, not just the extracted triple.
         Sentence-level context captures maximum disambiguation signal.
 
+        For WSD teach routing, exclude_words can strip the shared frame
+        (entity name, copula, etc.) so only distinguishing content remains.
+
         Args:
             sentence: The full sentence text
             target_word: The word to compute context for
+            exclude_words: Additional words to exclude from context (e.g., shared frame)
 
         Returns:
             Context vector (float32), or None if sentence has <2 content words
@@ -284,11 +289,13 @@ class WordVectorModel:
         for w in words:
             self._get_or_create_env(w)
 
-        # Context for target_word = sum of ALL other content words' env vectors
+        # Context for target_word = sum of OTHER content words' env vectors
+        # Exclude target word AND any additional exclude_words
         target = target_word.lower()
+        exclude = exclude_words or frozenset()
         context = np.zeros(self.dim, dtype=np.float32)
         for w in words:
-            if w != target:
+            if w != target and w not in exclude:
                 context += self.env_hvs[w].astype(np.float32)
         return context
 

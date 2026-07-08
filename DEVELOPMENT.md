@@ -434,6 +434,99 @@ LOTG runs in <1ms per `add_fact()` call. It uses only dict lookups and set inter
 
 ---
 
+## 4.5 Word Sense Disambiguation (WSD)
+
+TD v2 handles polysemous entities (words with multiple meanings) through dynamic sense induction. When the same entity is taught with incompatible `is_a` types, separate sense URIs are created automatically.
+
+### How It Works
+
+```python
+# Biology sense of "cell" — requires is_a for sense creation
+td.teach("cell is_a organelle", "organelle")      # → (cell, is_a, organelle)
+
+# Prison sense — "room" ≠ "organelle" → new sense created
+td.teach("cell is_a room", "room")                 # → (cell_1, is_a, room)
+
+# Technology sense — "device" ≠ "organelle" and ≠ "room" → another sense
+td.teach("cell is_a device", "device")             # → (cell_2, is_a, device)
+
+# Non-is_a facts route to the best matching sense via BEAGLE context
+td.teach("cell is part of organism", "organism")   # → (cell, part_of, organism)
+td.teach("cell is part of prison", "prison")       # → (cell_1, part_of, prison)
+```
+
+**Important:** Sense creation requires `is_a` declarations. BEAGLE context vectors for short teach sentences (3-4 words) are unreliable — the distinguishing signal is one word, giving cosine similarity ~0.0 ± 0.01 (noise). The `is_a` object is the only reliable sense indicator.
+
+### Sense Routing Rules
+
+| Signal | When Used | Example |
+|--------|-----------|---------|
+| **`is_a` object comparison** | Primary — for type declarations | "cell is_a room" vs "cell is_a organelle" → different senses |
+| **LOTG subsumption** | Compatible types | "city" ⊑ "place" → same sense |
+| **Morphological prefix** | Related terms | "organelle" vs "organism" → share "organ" → same sense |
+| **Sequential (most recent)** | Non-`is_a` relations | "cell part_of prison" → routes to prison sense |
+
+### Data Structures
+
+```python
+# In KnowledgeGraph:
+kg.sense_inventory: dict[str, list[str]]
+# "cell" → ["cell", "cell_1", "cell_2"]
+
+# In WordVectorModel (BEAGLE — for future query-time resolution):
+wvm.sense_clusters: dict[str, list[tuple[np.ndarray, int, str]]]
+# "cell" → [(context_vec, count, example_sentence), ...]
+```
+
+### Query-Time Resolution (Partial)
+
+For queries about entities with multiple senses, the system tries to resolve the correct sense using BEAGLE context. Currently works for single-sense entities; multi-sense query routing is a work in progress.
+
+```python
+# Works (single sense):
+td.think("is cell part of organism?")  # → YES (cell = biology)
+
+# Needs improvement (multi-sense):
+td.think("is cell part of prison?")    # → needs sense resolution
+```
+
+### API
+
+```python
+# Get all sense URIs for an entity
+kg.get_sense_uris("cell")  # → ["cell", "cell_1", "cell_2"]
+
+# Get surface form from sense URI
+kg.get_surface_form("cell_1")  # → "cell"
+
+# Manually induce a sense (usually automatic)
+kg.induce_new_sense("cell", conflicting_types={"room"}, proof="...")
+
+# Resolve sense URI using context
+kg.resolve_sense_uri("cell", context_sentence="the prisoner escaped", wvm=wvm)
+```
+
+### Test Suite
+
+`tests/test_word_senses.py` — 57 tests covering:
+- Sense cluster creation, merging, persistence
+- LOTG-triggered dynamic sense induction
+- Teach/ask WSD routing
+- Multiple senses per word (cell/bank/apple/python/mercury)
+- Edge cases (cold start, empty context, stop words)
+- Non-polysemous words: zero overhead
+
+### Files
+
+| File | What Changed |
+|------|-------------|
+| `td/perception/word_vectors.py` | `sense_clusters`, `_assign_to_cluster()`, `get_sense()`, `_check_sense_merge()` |
+| `td/kg/__init__.py` | `sense_inventory`, `resolve_sense_uri()`, `induce_new_sense()`, save/load |
+| `td/thinking.py` | `_type_matches_any()`, `_get_is_a_objects()`, `_induce_senses_from_context()`, teach/ask WSD routing |
+| `tests/test_word_senses.py` | 57 tests, 13 test classes |
+
+---
+
 ## 5. When to Teach Relation Properties
 
 ### Pre-Seeded (No Action Needed)

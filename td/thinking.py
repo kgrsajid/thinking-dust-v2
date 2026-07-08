@@ -907,62 +907,39 @@ class GenericThinkingDust:
         self.mhn.store(problem_hdc, solution_hdc, meta)
         self.total_learned += 1
 
-        # Online BEAGLE update: word vectors learn from this interaction
-        if self.wvm is not None:
-            self.wvm.train_incremental(problem_text)
-            self.wvm.train_incremental(solution_text)
-
         # Try to extract knowledge graph triples
-        # WSD: Use full sentence context for sense resolution (Ruas et al., 2020)
+        # WSD routing happens BEFORE BEAGLE update to preserve clean vectors.
+        # Reference: Ruas et al. (2020) — sentence-level context for WSD
+        # Reference: Jones & Mewhort (2007) — BEAGLE context vectors
         triples = self._extract_triples(problem_text, solution_text)
         contradictions = []
+        resolved_triples = []
+
         for (s, r, o) in triples:
-            # ── WSD: Dynamic Sense Induction ────────────────────────
-            # The key insight: LOTG's entity_types track what types an
-            # entity has been assigned. When a NEW fact assigns a
-            # DISJOINT type, we need a new sense URI.
-            #
-            # Flow:
-            # 1. Check existing types for this entity (from LOTG)
-            # 2. Check if the new fact's type conflicts with existing types
-            # 3. If conflict → create new sense URI, store on new URI
-            # 4. If no conflict but senses exist → route via BEAGLE context
-            # 5. If no conflict and no senses → store on base form
             resolved_subject = s
             existing_senses = self.kg.get_sense_uris(s)
 
-            # ── WSD: Sense routing via context clustering ───────────
-            # PRIMARY signal: BEAGLE context similarity (Jones & Mewhort, 2007)
-            # SECONDARY signal: LOTG type conflict (when disjoint types exist)
-            #
-            # The BEAGLE model has sense_clusters for this word from training.
-            # If the teach context is SIMILAR to an existing sense cluster,
-            # route to that sense. If DISSIMILAR, create a new sense.
-            #
-            # Reference: Ruas et al. (2020) — sentence-level context for WSD
-            # Reference: Sumanathilaka et al. (2026) — neighbour word analysis
-
             # ── WSD: Sense routing via `is_a` object comparison ───────
-            # When teaching "X is_a Y", the object Y IS the type/sense.
-            # If we've already seen "X is_a Z" where Z ≠ Y, check if
-            # Y and Z are compatible (same domain) or incompatible
-            # (different domain → different sense).
+            # PRIMARY signal for teach()-time WSD.
             #
-            # Signal: compare new `is_a` object against existing `is_a`
-            # objects for this entity. Use BEAGLE similarity when available,
-            # fall back to string overlap for short words.
+            # Why not BEAGLE context clustering (spec Tier 1):
+            # Teach sentences are terse facts ("cell is_a organelle"), not
+            # natural sentences. After excluding the entity and frame words,
+            # the distinguishing signal is 1 word → random BEAGLE vector.
+            # All pairwise similarities are ~0.0 ± 0.02 (noise).
             #
-            # For non-`is_a` relations, route to the MOST RECENT sense
-            # (the context of teaching is sequential — related facts
-            # are taught together).
+            # Why `is_a` objects work:
+            # "cell is_a organelle" vs "cell is_a room" — the objects ARE
+            # the sense indicators. Different objects = different senses.
+            # This is a logical principle, not a heuristic.
+            #
+            # For non-`is_a` relations, route to the BEST matching sense
+            # using BEAGLE query context (spec Tier 0 — MHN retrieval).
             if r == "is_a":
-                # This is a type declaration — check against existing types
                 existing_is_a = self._get_is_a_objects(s)
                 if existing_is_a:
-                    # Check if the new object matches any existing type
                     match = self._type_matches_any(o, existing_is_a)
                     if not match:
-                        # New type doesn't match existing → new sense
                         if not existing_senses:
                             self._induce_senses_from_context(s, problem_text)
                         else:
@@ -972,18 +949,56 @@ class GenericThinkingDust:
                             )
                         resolved_subject = self.kg.get_sense_uris(s)[-1]
                     else:
-                        # Matches existing type — route to that sense
                         if existing_senses:
-                            resolved_subject = self.kg.resolve_sense_uri(
-                                s, context_sentence=problem_text, wvm=self.wvm
+                            resolved_subject = self._resolve_sense_by_context(
+                                s, existing_senses, problem_text
                             )
             elif existing_senses:
-                # Non-`is_a` relation — route to the most recent sense
-                # (sequential teaching: related facts are taught together)
-                resolved_subject = existing_senses[-1]
+                # Non-`is_a` — compare teach context with per-sense contexts
+                best_sense = self._resolve_sense_by_context(
+                    s, existing_senses, problem_text
+                )
+                resolved_subject = best_sense
+            elif self.wvm is not None and not existing_senses:
+                # No senses yet, non-`is_a` — check if entity has BEAGLE
+                # clusters from training that suggest multiple senses
+                clusters = self.wvm.sense_clusters.get(s, [])
+                if len(clusters) >= 2:
+                    # Multiple training clusters — check if this context
+                    # diverges from the first teach context
+                    teach_ctxs = self._teach_contexts.get(s, [])
+                    if teach_ctxs:
+                        ctx_vec = self.wvm._get_sentence_context_vector(problem_text, s)
+                        if ctx_vec is not None:
+                            ctx_norm = np.linalg.norm(ctx_vec)
+                            if ctx_norm > 1e-10:
+                                first_vec, first_idx = teach_ctxs[0]
+                                first_norm = np.linalg.norm(first_vec)
+                                if first_norm > 1e-10:
+                                    sim = float(np.dot(first_vec / first_norm, ctx_vec / ctx_norm))
+                                    if sim < -0.02:
+                                        self._induce_senses_from_context(s, problem_text)
+                                        resolved_subject = self.kg.get_sense_uris(s)[-1]
 
-            # Add the fact (LOTG runs inside add_fact for domain/range)
+            resolved_triples.append((resolved_subject, r, o))
+
+        # ── NOW update BEAGLE (after WSD routing is done) ───────────
+        if self.wvm is not None:
+            self.wvm.train_incremental(problem_text)
+            self.wvm.train_incremental(solution_text)
+
+        # ── Store resolved triples in KG ────────────────────────────
+        for (resolved_subject, r, o) in resolved_triples:
             self.kg.add_fact(resolved_subject, r, o)
+            # Store teach context for sense resolution (non-is_a routing)
+            base_entity = self.kg.get_surface_form(resolved_subject)
+            sense_uris = self.kg.get_sense_uris(base_entity)
+            if sense_uris and self.wvm is not None:
+                sense_idx = sense_uris.index(resolved_subject) if resolved_subject in sense_uris else 0
+                ctx_vec = self.wvm._get_sentence_context_vector(problem_text, base_entity)
+                if ctx_vec is not None:
+                    self._teach_contexts.setdefault(base_entity, [])
+                    self._teach_contexts[base_entity].append((ctx_vec, sense_idx))
 
             # Capture any contradiction warnings from LOTG (domain/range)
             if self.kg.last_warnings:
@@ -1241,35 +1256,40 @@ class GenericThinkingDust:
     def _type_matches_any(self, new_type: str, existing_types: list[str]) -> bool:
         """Check if a new type matches any existing type for the same entity.
 
-        Uses multiple signals:
-        1. Exact match → True
-        2. BEAGLE similarity > threshold → True (same domain)
-        3. String overlap (prefix/suffix) → True (related terms)
-        4. LOTG subsumption → True (subtype relationship)
-        5. Otherwise → False (different sense)
+        Uses DETERMINISTIC signals only (no BEAGLE — teach() corrupts vectors):
 
-        This is the core WSD decision for `is_a` declarations.
+        1. Exact match → True (same type)
+        2. LOTG subsumption → True (city ⊑ place, compatible)
+        3. String overlap (4+ char prefix) → True (morphological variants)
+        4. Otherwise → False (different types = different senses)
+
+        Core principle: different `is_a` objects for the same entity = different
+        senses. "bank is_a institution" and "bank is_a river" are DIFFERENT
+        senses of "bank". Only exact matches and subtypes prevent sense creation.
+
+        Why no BEAGLE: train_incremental() is called BEFORE this check,
+        which changes the vectors. Words in similar syntactic frames
+        ("cell is_a X") become artificially similar, defeating WSD.
         """
         new_lower = new_type.strip().lower()
 
         for existing in existing_types:
             exist_lower = existing.strip().lower()
 
-            # 1. Exact match
+            # 1. Exact match → same type, same sense
             if new_lower == exist_lower:
                 return True
 
-            # 2. LOTG subsumption (city ⊑ place)
+            # 2. LOTG subsumption → compatible types (city ⊑ place)
             if self._is_subsumed(new_lower, exist_lower):
                 return True
             if self._is_subsumed(exist_lower, new_lower):
                 return True
 
-            # 3. String overlap (related terms share roots)
-            # "organelle" vs "organism" → share "organ" prefix
-            # "room" vs "prison" → no overlap
+            # 3. String overlap → morphological variants of the same concept
+            # "organelle" vs "organism" → share "organ" (4+ chars)
+            # "institution" vs "river" → no overlap
             if len(new_lower) >= 4 and len(exist_lower) >= 4:
-                # Check if they share a 4+ character prefix
                 prefix_len = 0
                 for i in range(min(len(new_lower), len(exist_lower))):
                     if new_lower[i] == exist_lower[i]:
@@ -1279,13 +1299,53 @@ class GenericThinkingDust:
                 if prefix_len >= 4:
                     return True
 
-            # 4. BEAGLE similarity (when available)
-            if self.wvm is not None:
-                sim = self.wvm.similarity(new_lower, exist_lower)
-                if sim > 0.10:  # Relaxed threshold for word-level comparison
-                    return True
-
+        # 4. Different types, no compatibility evidence → different sense
         return False
+
+    def _wsd_threshold(self, teach_contexts: list, best_sim: float) -> float:
+        """Adaptive threshold for BEAGLE context divergence detection.
+
+        Problem: with dim=10000, random vectors have cosine similarity ~0 ± 0.01.
+        A fixed threshold (like 0.15 from BEAGLE training) doesn't work for
+        short teach sentences (3-4 words) whose context vectors are sparse.
+
+        Solution: use an adaptive threshold based on the number of existing
+        contexts. With few contexts, be very relaxed (don't split prematurely).
+        With many contexts, use the minimum pairwise similarity as a baseline.
+
+        Args:
+            teach_contexts: List of (context_vector, sense_index) for this entity
+            best_sim: Best similarity score against existing contexts
+
+        Returns:
+            Threshold below which a new sense should be created
+        """
+        n = len(teach_contexts)
+
+        if n <= 1:
+            # Only 1 previous context — don't split on 2nd teach
+            # (too few data points to distinguish senses)
+            return -0.05
+
+        if n <= 3:
+            # 2-3 previous contexts — relaxed
+            return -0.02
+
+        # 4+ contexts — compute pairwise similarities
+        vectors = [v for v, _ in teach_contexts]
+        sims = []
+        for i in range(len(vectors)):
+            for j in range(i + 1, len(vectors)):
+                n1 = np.linalg.norm(vectors[i])
+                n2 = np.linalg.norm(vectors[j])
+                if n1 > 1e-10 and n2 > 1e-10:
+                    sims.append(float(np.dot(vectors[i] / n1, vectors[j] / n2)))
+
+        if not sims:
+            return -0.02
+
+        # Use minimum pairwise similarity minus margin
+        return min(sims) - 0.05
 
     def _teach_context_divergence_threshold(self, entity: str, best_sim: float) -> float:
         """Compute adaptive threshold for teach context divergence.
@@ -1338,6 +1398,66 @@ class GenericThinkingDust:
         # (conservative: only split if BELOW the worst existing pair)
         # Add a small margin to avoid boundary cases
         return min(sims) - 0.05
+
+    def _resolve_sense_by_context(self, entity: str, senses: list[str],
+                                    problem_text: str) -> str:
+        """Resolve which sense URI a new fact belongs to using teach context.
+
+        Compares the new fact's BEAGLE context against the teach contexts
+        stored for each sense URI. Returns the sense with the best match.
+
+        Args:
+            entity: The entity being taught about
+            senses: List of sense URIs for this entity
+            problem_text: The teach sentence
+
+        Returns:
+            The best-matching sense URI
+        """
+        if not senses or self.wvm is None:
+            return senses[0] if senses else entity
+
+        # Get teach contexts grouped by sense index
+        teach_contexts = self._teach_contexts.get(entity, [])
+        if not teach_contexts:
+            return senses[0]
+
+        # Group context vectors by sense index
+        sense_vectors: dict[int, list[np.ndarray]] = {}
+        for vec, sense_idx in teach_contexts:
+            sense_vectors.setdefault(sense_idx, [])
+            sense_vectors[sense_idx].append(vec)
+
+        # Compute new fact's context
+        ctx_vec = self.wvm._get_sentence_context_vector(problem_text, entity)
+        if ctx_vec is None:
+            return senses[0]
+        ctx_norm = np.linalg.norm(ctx_vec)
+        if ctx_norm < 1e-10:
+            return senses[0]
+
+        # Find best matching sense
+        best_sim = -1.0
+        best_sense_idx = 0
+
+        for sense_idx, vecs in sense_vectors.items():
+            if sense_idx >= len(senses):
+                continue
+            # Average similarity across all contexts for this sense
+            sims = []
+            for v in vecs:
+                v_norm = np.linalg.norm(v)
+                if v_norm > 1e-10:
+                    sims.append(float(np.dot(v / v_norm, ctx_vec / ctx_norm)))
+            if sims:
+                avg_sim = sum(sims) / len(sims)
+                if avg_sim > best_sim:
+                    best_sim = avg_sim
+                    best_sense_idx = sense_idx
+
+        if best_sense_idx < len(senses):
+            return senses[best_sense_idx]
+        return senses[0]
 
     def _build_semantic_prototypes(self):
         descriptions = {
@@ -1604,11 +1724,19 @@ class GenericThinkingDust:
                     entity, context_sentence=text, wvm=self.wvm
                 )
                 resolved_entities.append(resolved)
-                # Also keep the base form as fallback
-                if resolved != entity and resolved not in entities_in_query:
+                # Also add ALL sense URIs as fallback (BFS will search all)
+                for sense in senses:
+                    if sense not in resolved_entities:
+                        resolved_entities.append(sense)
+                # Also keep the base form
+                if entity not in resolved_entities:
                     resolved_entities.append(entity)
             else:
                 resolved_entities.append(entity)
+                # Also add sense URIs (even single-sense, for consistency)
+                for sense in senses:
+                    if sense not in resolved_entities:
+                        resolved_entities.append(sense)
         # Use resolved entities for the rest of the query
         entities_in_query = resolved_entities
 

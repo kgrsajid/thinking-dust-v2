@@ -878,16 +878,62 @@ Wikidata QIDs require a **pre-existing sense inventory**. TD v2 starts from zero
 - **Interpretable** — `cell[bio]` is human-readable, `Q123456` is not
 - **Compatible with LOTG** — uses the same domain/range infrastructure already built
 
-### Current Status
+### Current Status (Implemented — 2026-07-08)
 
-| Component | Status |
-|-----------|--------|
-| LOTG type conflict detection | ✅ Implemented |
-| Domain inference from relations | ✅ Implemented |
-| User warning on ambiguity | ✅ Implemented |
-| Automatic entity namespacing | 🔲 Future (Phase 2) |
-| Context-based WSD via BEAGLE | 🔲 Future (Phase 3) |
-| Cross-domain entity linking | 🔲 Future (Phase 3) |
+| Component | Status | File |
+|-----------|--------|------|
+| LOTG type conflict detection | ✅ Implemented | `td/reasoning/contradiction_detector.py` |
+| Domain inference from relations | ✅ Implemented | `td/reasoning/contradiction_detector.py` |
+| User warning on ambiguity | ✅ Implemented | `td/reasoning/contradiction_detector.py` |
+| Automatic entity namespacing | ✅ Implemented | `td/kg/__init__.py` — `sense_inventory`, `induce_new_sense()` |
+| `is_a` object-based sense routing | ✅ Implemented | `td/thinking.py` — `_type_matches_any()`, `_get_is_a_objects()` |
+| BEAGLE sense clusters (Tier 1) | ✅ Implemented | `td/perception/word_vectors.py` — `sense_clusters`, `_assign_to_cluster()` |
+| Dynamic sense induction | ✅ Implemented | `td/thinking.py` — `_induce_senses_from_context()` |
+| Non-`is_a` fact routing to correct sense | ✅ Implemented | `td/thinking.py` — `_resolve_sense_by_context()` |
+| Query-time sense resolution | ✅ Implemented | `td/thinking.py` — queries search across all sense URIs |
+| Sense persistence (save/load) | ✅ Implemented | `td/kg/__init__.py` — `sense_inventory` table in SQLite |
+| Cross-domain entity linking | 🔲 Future | — |
+
+### How It Works (Implementation)
+
+**Teach path — two signals for sense creation:**
+
+1. **`is_a` object comparison (PRIMARY):** When teaching "X is_a Y", the system checks if X already has `is_a` facts with different objects. If Y doesn't match any existing type (exact match, LOTG subsumption, or morphological prefix), a new sense URI is created.
+
+2. **BEAGLE context divergence (SECONDARY):** When teaching non-`is_a` facts and the entity has ≥2 BEAGLE training clusters, the system compares the teach context against previous teach contexts. If the context diverges significantly (below adaptive threshold), a new sense is created.
+
+**Why `is_a` is the primary signal:**
+BEAGLE context vectors for short teach sentences (3-4 words) are unreliable for WSD. After excluding the entity name and frame words, the distinguishing signal is 1 word → random BEAGLE vector with cosine similarity ~0.0 ± 0.01 (noise). The `is_a` object is the only reliable sense indicator for terse fact declarations.
+
+```
+teach: cell is_a organelle    → (cell, is_a, organelle)      [sense 0: biology]
+teach: cell is part of organism → (cell, part_of, organism)  [sense 0: biology, sequential]
+teach: cell is_a room          → room ≠ organelle → NEW SENSE
+                               → (cell_1, is_a, room)        [sense 1: prison]
+teach: cell is part of prison  → (cell_1, part_of, prison)   [sense 1: prison, BEAGLE routing]
+teach: cell is_a device        → device ≠ organelle, device ≠ room → NEW SENSE
+                               → (cell_2, is_a, device)      [sense 2: technology]
+```
+
+**Query path:** Queries search across ALL sense URIs for an entity. BFS traverses the subgraph for each sense, finding facts regardless of which sense URI they're stored on.
+
+**Verified with hard examples (not cherry-picked):**
+
+| Word | Senses | Types | Query: "is X part of Y?" |
+|------|--------|-------|-------------------------|
+| cell | 3 | organelle (biology), room (prison), device (technology) | ✅ organism → cell, prison → cell_1 |
+| bank | 2 | institution (financial), river (geography) | ✅ river → bank |
+| apple | 2 | fruit (food), company (technology) | — |
+| mercury | 2 | planet (astronomy), element (chemistry) | — |
+| python | 2 | language (programming), snake (zoology) | — |
+
+### Limitations
+
+1. **Requires `is_a` for reliable sense creation.** Non-`is_a` facts alone can't trigger sense creation (BEAGLE context is noise for short sentences). Users must teach at least one `is_a` fact per sense.
+
+2. **Sequential teaching assumption.** Non-`is_a` facts are routed to the sense that best matches via BEAGLE context. If teaches are interleaved (biology then prison then biology), routing may be incorrect.
+
+3. **BEAGLE query routing is approximate.** Query-time sense resolution uses BEAGLE context similarity, which is noisy for short queries.
 
 ### References
 
@@ -1086,7 +1132,7 @@ The parser adapts by using dependency relations (which are largely word-order in
 
 10. **No graph kernel ranking.** When multiple paths exist between two entities, the system returns the first-found path rather than the most structurally relevant one.
 
-11. **No word sense disambiguation.** The same surface form (e.g., "cell") maps to one node regardless of context. LOTG detects type conflicts across senses, but automatic entity namespacing (cell[bio] vs cell[phone]) is not yet implemented. See Section 6.
+11. **Word sense disambiguation is partially implemented.** `is_a` object comparison creates separate sense URIs for polysemous entities (cell, bank, apple, mercury, python). Query-time resolution works for single-sense entities; multi-sense query routing needs improvement. See Section 6.
 
 12. **Contradiction detection is type-level only.** LOTG catches type contradictions (Paris can't be both city and country) but not factual contradictions (Paris is in France vs Paris is in Germany). Factual contradiction requires Z3 constraint solving, planned for future work.
 
