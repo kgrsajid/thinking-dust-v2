@@ -317,6 +317,19 @@ extract_triples_spacy(text):
 | Sahaj Software, "Knowledge graphs from complex text" | 2023 | Verb-based sentence splitting via spaCy dependency tree |
 | Manning & Schütze, "Foundations of Statistical NLP" | 1999 | Coordinated noun phrase extraction (Ch. 5) |
 | spaCy dependency labels | 2017 | Universal Dependencies v2 |
+| Min et al., "Towards Practical GraphRAG" | 2025 | ccomp as subject propagation boundary |
+| UDASTE, "Unsupervised Dependency parsing Aided Semantic Triple Extraction" | 2023 | Compound expansion via dependency subtree |
+| Stanford OpenIE (Angeli et al.) | 2015 | Verb-PP separate triples for spatial/temporal context |
+| Bohnet et al. | 2020 | Coordination expansion preserves dependency path |
+
+### Parser Quality Fixes (2026-07-09)
+
+| Bug | Example | Before | After |
+|-----|---------|--------|-------|
+| Compound noun | "cell membrane controls..." | (cell membrane, exits, cell) | Eliminated |
+| amod chains | "jelly-like substance" | substance (drops "jelly-like") | jelly-like substance |
+| Spatial PP | "synthesize proteins inside the cell" | (synthesize, proteins) | + (synthesize_inside, cell) |
+| Coordination | "divide through mitosis and meiosis" | divide_through + divide | divide_through + divide_through |
 
 ### File
 
