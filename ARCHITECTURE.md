@@ -941,14 +941,23 @@ teach: cell is_a device        → device ≠ organelle, device ≠ room → NEW
 
 | Approach | Reference | Feasibility for TD v2 |
 |----------|-----------|----------------------|
-| **BERT contextualized embeddings** | Devlin et al. (2019) | ❌ Requires 110M+ params, GPU |
-| **Sentence-transformers** | Sumanathilaka et al. (2026) | ❌ Requires pre-trained model |
-| **Attention contextual vectors** | Romanian WSD paper (2025) | ❌ Requires BERT attention heads |
-| **Domain-specific corpus expansion** | — | ✅ Add prison/finance/food to 10K corpus |
-| **SpaCy dependency-based context** | — | ✅ Use syntactic neighbors, not all words |
-| **TF-IDF weighted context** | Salton & Buckley (1988) | ⚠️ Helps with common words, not enough alone |
+| **BSC-WSD (HDC binary vectors)** | **McInnes et al. (2012, 2013)** | **✅ CPU-only, 94.55% accuracy, uses existing HDC infrastructure** |
+| **5 sentences per sense** | **Romanian WSD (2025)** | **✅ Teach-from-zero compatible** |
+| Sentence-transformers | Sumanathilaka et al. (2026) | ❌ Requires pre-trained model |
+| BERT contextualized embeddings | Devlin et al. (2019) | ❌ Requires 110M+ params, GPU |
+| SpaCy dependency-based context | — | ✅ Use syntactic neighbors, not all words |
+| Domain-specific corpus expansion | — | ✅ Add missing domains to corpus |
 
-**Most promising for TD v2:** SpaCy dependency-based context extraction. Instead of using ALL context words (noisy), extract only syntactically connected words (subject, object, modifiers). This is more precise than bag-of-words and fits TD v2's existing spaCy infrastructure.
+**Most promising for TD v2: BSC-WSD (McInnes et al., 2012)**
+
+The BSC-WSD algorithm uses HDC binary vectors for WSD — the SAME infrastructure TD v2 already has. It achieves 94.55% accuracy on clinical abbreviation disambiguation using:
+- Random elemental vectors for each sense
+- Binding: `S(context_word) += E(ambiguous) ⊗ E(sense)`
+- Unbinding: `S(context) ∅ E(ambiguous) ≈ E(sense)`
+- CPU-only, <1ms per disambiguation
+- 5 example sentences per sense sufficient (Romanian WSD, 2025)
+
+**Reference:** McInnes, B.T. et al. "Hyperdimensional Computing Approach to Word Sense Disambiguation." *AMIA Annual Symposium*, 2012. PMC3540565. One-to-one BSC-WSD: 94.55%. One-to-many: 93.91%.
 
 ### References
 
