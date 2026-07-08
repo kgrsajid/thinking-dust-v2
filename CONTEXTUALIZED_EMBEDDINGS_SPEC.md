@@ -697,20 +697,58 @@ Create `td/contextual/` directory with a common interface:
 # td/contextual/__init__.py
 
 class Contextualizer:
-    """Base class for contextualized word vector providers."""
+    """Base class for contextualized word vector providers.
 
-    def get_context_vector(self, sentence: str, target_word: str,
-                           wvm: WordVectorModel) -> np.ndarray:
-        """Return a contextualized vector for target_word in sentence."""
+    Design decisions (from Gemini code review):
+    - Tokenization is the CALLER's responsibility (SRP)
+    - WVM injected via constructor (Dependency Injection)
+    - Training supports both online (train_step) and batch (finalize)
+    - Factory pattern for runtime switching
+    """
+
+    def __init__(self, wvm: WordVectorModel, dim: int = 10000):
+        self.wvm = wvm
+        self.dim = dim
+
+    def get_context_vector(self, tokens: list[str], target_idx: int) -> np.ndarray:
+        """Return a contextualized vector for tokens[target_idx].
+
+        Args:
+            tokens: Pre-tokenized sentence (caller handles tokenization)
+            target_idx: Index of the target word in tokens
+
+        Returns:
+            Contextualized vector (dim,)
+        """
         raise NotImplementedError
 
-    def train_step(self, sentence: str, target_word: str,
-                   sense_label: int, **kwargs):
-        """Train on a single (sentence, word, sense) example."""
+    def train_step(self, tokens: list[str], target_idx: int, sense_label: int):
+        """Online training: accumulate a single example.
+
+        For batch methods (NG-RC): accumulates internally.
+        Call finalize_training() after all train_steps.
+        """
+        pass
+
+    def finalize_training(self):
+        """Batch training: run optimization on accumulated examples.
+        For online methods (AERC, BiLSTM): no-op.
+        For batch methods (NG-RC): runs ridge regression.
+        """
         pass
 
     def save(self, path: str): ...
     def load(self, path: str): ...
+
+
+# Factory pattern for runtime switching
+CONTEXTUALIZERS = {}
+
+def register_contextualizer(name: str, cls: type):
+    CONTEXTUALIZERS[name] = cls
+
+def create_contextualizer(name: str, wvm: WordVectorModel, **kwargs) -> Contextualizer:
+    return CONTEXTUALIZERS[name](wvm=wvm, **kwargs)
 ```
 
 ### Phase 2: Implement All 5 (Days 2–6)
@@ -796,6 +834,107 @@ After benchmarking all 5 approaches:
 | 6 | Kanerva, "Hyperdimensional Computing" | 2009 | IEEE CIM | HDC algebra |
 | 7 | Jones & Mewhort, "BEAGLE" | 2007 | Psychological Review | Static vectors |
 | 8 | Peters et al., "ELMo" | 2018 | NAACL | BiLSTM contextualization |
+
+---
+
+## 13. Critical Issues & Fixes (Code Review Findings)
+
+### 13.1 Architecture Fixes (from Gemini review)
+
+| Issue | Fix |
+|-------|-----|
+| Each contextualizer handles its own tokenization | Move to caller. Interface: `get_context_vector(tokens, target_idx)` |
+| Training interface inconsistency (online vs batch) | Add `finalize_training()` for batch methods. `train_step()` accumulates. |
+| WVM passed to every call | Inject via constructor (DI) |
+| Hardcoded winner in Phase 4 | Factory Pattern: `create_contextualizer("aerc", wvm)` |
+| No shape assertions | Add `assert r.shape == (self.N,)` after every matrix op |
+| HDC position limit = 64 | Generate position vectors dynamically, cache them |
+
+### 13.2 Technical Risks (from self-review)
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| **NG-RC quadratic features explode for 10K-dim vectors** | `O(d²k²)` = 100M params for d=10K, k=3 | Dimensionality reduction: random project 10K→100 before NG-RC. Features become 10K instead of 100M. |
+| **AERC uses tanh reservoir, TD v2 uses CA (Rule 90)** | Different dynamics, may not transfer | Test both: (a) use tanh reservoir for AERC, (b) adapt CA to AERC-style attention readout |
+| **Pseudo-BiLM's forward is static** | BEAGLE doesn't change per-sentence | Accept limitation: backward LSTM provides the contextualization. Forward is "background knowledge." |
+| **Cold-start: not enough labeled data** | Early teach() won't have enough (sentence, word, sense) triples | Generate synthetic WSD data from 10K corpus. Label words appearing in multiple domains. |
+| **NG-RC designed for time-series, not NLP** | "Time-delay" = context window, but semantics differ | Adapt: use word positions as time steps, not actual time |
+
+### 13.3 New Ideas
+
+| Idea | Source | Description |
+|------|--------|-------------|
+| **Dimensionality reduction for NG-RC** | Self | Random project 10K→100 before NG-RC. Reduces quadratic features from 100M to 10K. |
+| **Hybrid: HDC position + AERC context** | Self | Use HDC bind for position encoding, AERC for context. Best of both. |
+| **Synthetic WSD data from corpus** | Self | Label words in 10K corpus that appear in multiple domains (cell, bank, python, mercury). Generate (sentence, word, sense_idx) triples automatically. |
+| **Ensemble: vote across approaches** | Gemini | Don't pick one winner — ensemble the top 2-3 for robustness. |
+
+---
+
+## 14. Updated Implementation Plan
+
+### Phase 0: Data Preparation (Day 0)
+
+Generate synthetic WSD training data from the 10K corpus:
+
+```python
+# Identify polysemous words in corpus
+# Label each occurrence with its domain sense
+# Output: list of (sentence, word, sense_idx) triples
+```
+
+### Phase 1: Module Interface (Day 1)
+
+Create `td/contextual/` with:
+- `__init__.py` — base class + factory
+- Common tokenization (caller-side)
+- Shape assertion decorator
+
+### Phase 2: Implement All 5 (Days 2–6)
+
+Each module implements:
+- `__init__(wvm, dim, **kwargs)` — constructor with DI
+- `get_context_vector(tokens, target_idx)` — main method
+- `train_step(tokens, target_idx, sense_label)` — online training
+- `finalize_training()` — batch finalization (if needed)
+- `save(path)` / `load(path)` — persistence
+
+### Phase 3: Benchmark Suite (Day 7)
+
+```python
+# Baselines:
+#   (a) Static BEAGLE (current)
+#   (b) Random context vectors
+
+# Test set:
+#   cell (3 senses), bank (2), apple (2), mercury (2), python (2)
+
+# Metrics:
+#   - WSD accuracy (% correct sense assignment)
+#   - Context discrimination (cosine separation)
+#   - Inference latency (ms per sentence)
+#   - Parameter count
+#   - Training convergence
+```
+
+### Phase 4: Integration (Day 8)
+
+```python
+# Factory pattern — no hardcoding
+self.contextualizer = create_contextualizer(
+    config.context_model_type,  # "aerc", "ng_rc", "pseudo_bilm", etc.
+    wvm=self.wvm,
+    dim=self.dim,
+)
+```
+
+### Phase 5: Documentation (Day 9)
+
+Update ARCHITECTURE.md, DEVELOPMENT.md with:
+- Winner and why
+- Benchmark results table
+- Integration guide
+- Known limitations
 
 ---
 
