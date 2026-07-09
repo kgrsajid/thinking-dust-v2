@@ -911,68 +911,6 @@ class GenericThinkingDust:
 
     # ─── Teach ────────────────────────────────────────────────────────
 
-    def simplify_for_teach(self, text: str) -> list[str]:
-        """Simplify a complex sentence into atomic sentences for teaching.
-
-        Uses spaCy dependency parsing to detect coordination, then the
-        clause segmenter to split compound/complex sentences into simple
-        SVO clauses. Each clause is returned as a separate sentence.
-
-        For simple sentences (no coordination), returns [text] unchanged.
-
-        IMPORTANT: Does NOT split sentences with temporal connectives
-        (then, after, before, next, finally). These need to stay as one
-        unit so the temporal extractor can capture the ordering:
-          "Alice went to Paris and then invested in stocks"
-          → Event1 BEFORE Event2 (requires both clauses in one sentence)
-
-        Reference: GraphRAG (Min et al., 2025) — sentence simplification
-        improves KG extraction by 18%.
-        Reference: UDASTE (2023) — complex sentences are the primary
-        source of extraction errors.
-        Reference: Allen (1983), "Maintaining Knowledge about Temporal Intervals"
-
-        Args:
-            text: Input sentence (may be complex)
-
-        Returns:
-            List of simplified sentences (one per clause).
-            If no simplification needed, returns [text].
-        """
-        if not self.parser.nlp:
-            return [text]
-
-        doc = self.parser.nlp(text)
-
-        # Check for coordination or relative clauses
-        has_coordination = any(
-            token.dep_ in ("conj", "relcl") for token in doc
-        )
-
-        if not has_coordination:
-            return [text]
-
-        # Don't split sentences with temporal connectives — the temporal
-        # extractor needs both clauses in one sentence to capture ordering.
-        # "Alice went to Paris and then invested in stocks" → BEFORE relation
-        # Uses language-specific connectives from temporal_connectives registry.
-        from td.perception.temporal_connectives import get_connectives
-        lang = self.parser.lang_config.code
-        temporal_words = set(get_connectives(lang).keys())
-        tokens_lower = {t.text.lower() for t in doc}
-        if tokens_lower & temporal_words:
-            return [text]
-
-        # Use clause segmenter to split
-        from td.perception.clause_segmenter import segment_clauses
-        clauses = segment_clauses(doc)
-
-        if len(clauses) <= 1:
-            return [text]
-
-        # Return each clause as a separate sentence
-        return [clause.source_text for clause in clauses if clause.subject]
-
     def teach(self, problem_text, solution_text, constraint_template=None, metadata=None):
         # Use semantic key for storage (enables paraphrase matching)
         problem_hdc = self._encode_key(problem_text)
@@ -992,16 +930,10 @@ class GenericThinkingDust:
         self.total_learned += 1
 
         # Try to extract knowledge graph triples
-        # Simplify complex sentences first — clause segmenter splits
-        # compound/complex sentences into simple SVO clauses.
-        # Reference: GraphRAG (Min et al., 2025) — sentence simplification
-        # Reference: UDASTE (2023) — complex sentences = primary extraction errors
-        simplified = self.simplify_for_teach(problem_text)
-        all_raw_triples = []
-        for simple_sent in simplified:
-            all_raw_triples.extend(self._extract_triples(simple_sent, solution_text))
-        triples = all_raw_triples
-
+        # WSD routing happens BEFORE BEAGLE update to preserve clean vectors.
+        # Reference: Ruas et al. (2020) — sentence-level context for WSD
+        # Reference: Jones & Mewhort (2007) — BEAGLE context vectors
+        triples = self._extract_triples(problem_text, solution_text)
         contradictions = []
         resolved_triples = []
 
