@@ -639,18 +639,34 @@ class GenericNLParser:
                 if attrs:
                     attr = attrs[0]
                     # Check if attr has its own prep chain: "part of Y", "married to Y"
+                    # Also handles pcomp: "tool for starting a fire" → (match, is, tool)
                     attr_preps = [c for c in attr.children if c.dep_ == "prep"]
                     if attr_preps:
                         prep = attr_preps[0]
-                        pobj = [c for c in prep.children if c.dep_ == "pobj"]
+                        # Check both pobj and pcomp
+                        # pobj: "part of France" → France is pobj
+                        # pcomp: "tool for starting a fire" → starting is pcomp
+                        pobj = [c for c in prep.children if c.dep_ in ("pobj", "pcomp")]
                         if pobj:
-                            obj_text = self._get_chunk_text(doc, pobj[0])
-                            # Use chunk text for attr to preserve amod chains
-                            # "jelly-like substance inside cell" → attr_chunk = "jelly-like substance"
-                            attr_chunk = self._get_chunk_text(doc, attr)
-                            rel = f"{attr_chunk.lower()}_{prep.lemma_}"
-                            for subj_text in subj_texts:
-                                triples.append((subj_text, rel, obj_text))
+                            obj_token = pobj[0]
+                            # For pcomp, get the verb's dobj as the real object
+                            # "for starting a fire" → object is "fire", not "starting"
+                            if obj_token.dep_ == "pcomp":
+                                dobj = [c for c in obj_token.children if c.dep_ == "dobj"]
+                                if dobj:
+                                    obj_token = dobj[0]
+                            obj_text = self._get_chunk_text(doc, obj_token)
+                            # Use attr TEXT only (not chunk) for relation
+                            rel = f"{attr.text.lower()}_{prep.lemma_}"
+                            # Expand coordinated objects inline
+                            conj_chain = [obj_token]
+                            for child in obj_token.children:
+                                if child.dep_ == "conj":
+                                    conj_chain.append(child)
+                            for tok in conj_chain:
+                                tok_text = self._get_chunk_text(doc, tok)
+                                for subj_text in subj_texts:
+                                    triples.append((subj_text, rel, tok_text))
                             continue
 
                     # Check for xcomp: "are central to computer science"
