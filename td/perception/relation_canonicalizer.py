@@ -132,19 +132,35 @@ def relation_specificity(relation: str) -> int:
     return 1  # Bare verb is least specific
 
 
+# Articles stripped from entity strings during dedup key computation.
+# Aligns clause segmenter output (which now strips determiners) with
+# main parser output (which always strips them).
+_ARTICLES = frozenset({"the", "a", "an"})
+
+
+def _normalize_entity(text: str) -> str:
+    """Strip leading articles from entity text for dedup key."""
+    words = text.lower().split()
+    while words and words[0] in _ARTICLES:
+        words = words[1:]
+    return " ".join(words)
+
+
 def deduplicate_triples(triples: list[tuple[str, str, str]],
                         nlp=None) -> list[tuple[str, str, str]]:
-    """Deduplicate triples using relation canonicalization.
+    """Deduplicate triples using relation canonicalization + entity normalization.
 
     When two triples have the same (subject, canonical_relation, object),
     keeps the one with the more specific original relation.
+    Entity strings are normalized (leading articles stripped) before
+    comparison to catch near-duplicates from the dual extraction paths.
     """
     seen: dict[tuple[str, str, str], tuple[tuple[str, str, str], int]] = {}
 
     for triple in triples:
         s, r, o = triple
         canonical = canonicalize_relation(r, nlp)
-        key = (s, canonical, o)
+        key = (_normalize_entity(s), canonical, _normalize_entity(o))
         spec = relation_specificity(r)
 
         if key not in seen:

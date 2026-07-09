@@ -98,39 +98,39 @@ def _get_objects(verb) -> list[tuple]:
 
 
 def _get_verb_text(verb) -> str:
-    """Get the verb text, excluding passive auxiliaries.
+    """Get the bare verb text, excluding ALL auxiliaries.
 
-    spaCy marks passive auxiliaries with dep='auxpass' (e.g., "is" in
-    "is designed"). These are syntactic markers — the passive voice is
-    already encoded in the verb form ("designed" = past participle).
-    Including them creates "is designed" which doesn't match "designed_for"
-    during canonicalization.
+    Both aux (can, may, should) and auxpass (be, is) are syntactic markers.
+    The main parser uses bare token.text for the same reason — these don't
+    carry semantic content for relation extraction. "can be compressed" and
+    "compressed" should produce the same relation string.
 
-    Modal auxiliaries (dep='aux': "may", "can", "should") and negation
-    ("not") are kept — they carry semantic meaning.
+    Only negation ("not") is kept — it carries semantic meaning (NOT_ prefix).
 
-    This is language-agnostic: it uses spaCy's Universal Dependencies
-    labels, not hardcoded English words. 'auxpass' is a UD standard label
-    that works across all spaCy-supported languages.
+    This aligns clause segmenter output with main parser output, enabling
+    deduplication via relation_canonicalizer.py.
 
-    Reference: Universal Dependencies — auxpass dependency label
+    Reference: Universal Dependencies — aux/auxpass dependency labels
     Reference: de Marneffe et al. (2014), "Universal Stanford Dependencies"
     """
     parts = []
     for child in verb.children:
-        if child.dep_ in ("aux", "neg"):
+        if child.dep_ == "neg":
             parts.append(child.text)
-        # Skip auxpass — passive marker, not semantic content
+        # Skip all auxiliaries (aux + auxpass) — syntactic markers only
     parts.append(verb.text)
     return " ".join(parts)
 
 
 def _get_object_text(obj) -> str:
-    """Get the full noun phrase for an object.
+    """Get the full noun phrase for an object (determiners stripped).
 
     Recursively collects modifier text to handle nested amod/advmod chains.
     'jelly-like substance' → 'jelly-like substance' (not just 'substance')
-    'a story' → 'a story'
+    'a story' → 'story' (determiners stripped to match main parser output)
+
+    Determiners are stripped so clause segmenter and main parser produce
+    the same entity strings, enabling deduplication.
 
     Reference: UDASTE (ScienceDirect, 2023) — compound expansion via
     dependency subtree collects amod, compound, nummod children.
@@ -139,7 +139,7 @@ def _get_object_text(obj) -> str:
     parts = []
     for child in obj.children:
         if child.dep_ == "det":
-            parts.append(child.text)
+            continue  # Strip determiners — match main parser behavior
         elif child.dep_ in ("amod", "compound", "nummod", "poss", "advmod"):
             # Recurse: collect modifiers of modifiers
             # "jelly-like substance" → like is amod of substance,
@@ -169,14 +169,15 @@ def _collect_modifiers_recursive(token) -> str:
 
 
 def _get_subject_text(subj) -> str:
-    """Get the full noun phrase for a subject.
+    """Get the full noun phrase for a subject (determiners stripped).
 
-    Same recursive approach as _get_object_text.
+    Same recursive approach as _get_object_text. Determiners stripped
+    to match main parser output for deduplication.
     """
     parts = []
     for child in subj.children:
         if child.dep_ == "det":
-            parts.append(child.text)
+            continue  # Strip determiners — match main parser behavior
         elif child.dep_ in ("amod", "compound", "nummod", "poss", "advmod"):
             sub_text = _collect_modifiers_recursive(child)
             parts.append(sub_text)

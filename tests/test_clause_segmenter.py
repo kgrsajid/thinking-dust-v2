@@ -28,20 +28,20 @@ class TestCoordinatedObjects:
     """Split sentences with coordinated objects into multiple clauses."""
 
     def test_two_objects(self, nlp):
-        """'Games have music and story' → 2 clauses."""
+        """'Games have music and story' → 2 clauses (determiners stripped)."""
         clauses = segment_text("Games have music and a story.", nlp)
         subjects = [c.subject for c in clauses]
         objects = [c.obj for c in clauses]
         assert "games" in subjects
         assert "music" in objects
-        assert "a story" in objects
+        assert "story" in objects  # determiners stripped — matches main parser
 
     def test_three_objects(self, nlp):
-        """'Games have music, a story and visuals' → 3 clauses."""
+        """'Games have music, a story and visuals' → 3 clauses (determiners stripped)."""
         clauses = segment_text("Games have music, a story and visuals.", nlp)
         objects = [c.obj for c in clauses]
         assert "music" in objects
-        assert "a story" in objects
+        assert "story" in objects  # determiners stripped — matches main parser
         assert "visuals" in objects
 
     def test_four_objects(self, nlp):
