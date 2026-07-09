@@ -27,15 +27,22 @@ Example:
 **BEAGLE similarity code exists** at ~line 1690 in thinking.py — should match "used" to "tool_for" via word vector similarity. But:
 1. BEAGLE vectors never loaded (self.wvm was None) — FIXED in f7ac116
 2. BEAGLE vocabulary too small (1992 words) — "used", "for", "match" not in vocab
-3. Added spaCy similarity fallback — working for some queries (football~game=0.70)
+3. Added spaCy similarity fallback — but en_core_web_sm has NO real word vectors (context tensors only, unreliable)
 
 **What's still broken:**
-- Declarative sentences like "the team won the match" still return "unknown"
-- Questions with completely different phrasing don't match stored facts
-- Answer text is a dict — keyword matching fails on dict str() representation
-- For single-entity + question mark queries, should try ALL facts about that entity
+- **`direct` method returns WRONG fact** — "what is a match used for?" → "is(match) → competitive game" instead of "tool_for(match) → fire". The SPARQL open query returns the first fact about "match" without using similarity.
+- **spaCy vectors unreliable** — en_core_web_sm has "no word vectors loaded". Similarities are context tensors from tagger/parser, NOT real word vectors. Need en_core_web_lg (685MB) for real vectors.
+- **Context-enriched questions WORK** — "what is a match used for in starting a fire?" → correct answer because "fire" is a KG entity and the path is found. The pipeline needs KG entities in the question to find the right path.
+- **Declarative sentences** like "the team won the match" still return "unknown"
+- **Answer text is a dict** — keyword matching fails on dict str() representation
 
 **Files:** `td/thinking.py` — `_query_knowledge_graph` (line 1570)
+
+**Tomorrow's fix plan:**
+1. Upgrade to en_core_web_lg for real word vectors (or use BEAGLE with larger corpus)
+2. When `direct` finds a result, also try similarity and compare confidences
+3. For single-entity queries, try ALL facts about that entity ranked by relevance
+4. Extract formatted proof trace for keyword matching (not dict str())
 
 ---
 
