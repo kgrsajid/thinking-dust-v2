@@ -4,26 +4,6 @@ _Last updated: 2026-07-09_
 
 ---
 
-## 🚨 URGENT (Next Session)
-
-### 1. Fix teach() Gloss Quality
-**Problem:** `teach()` extracts triples and loses context words from the original sentence. "bats use echolocation to navigate in the dark" → Lesk gloss only gets triple-form words, not "navigate" or "dark". This makes Lesk WSD weak for facts taught through `teach()`.
-
-**Evidence:**
-- Standalone Lesk with full Wikipedia sentences: 100% accuracy (66/66)
-- Lesk integrated with `teach()`: sparse glosses, higher fallback
-- Manual enrichment via `add_sense_example()` restores accuracy to 90-100%
-
-**Fix:**
-- Store the FULL original teach sentence in the Lesk gloss (not triple-form)
-- Reduce frame-word exclusion — keep domain-relevant words
-- Add both raw and lemmatized forms to the gloss
-- `_rebuild_lesk_glosses()` should use original sentences, not reconstructed triples
-
-**Files:** `td/thinking.py` (line ~1016), `td/perception/lesk_wsd.py`
-
----
-
 ## 📋 HIGH Priority
 
 ### 2. Automated WSD Testing Framework
@@ -34,32 +14,6 @@ Run the TESTING_FRAMEWORK.md pipeline on 10+ random Wikipedia words. Automate:
 - Tabular results + overall benchmark score
 
 **File:** `TESTING_FRAMEWORK.md` (spec exists, implementation needed)
-
-### 3. LLM Sentence Simplification Layer
-Complex sentences produce garbage triples. The parser can't handle:
-- "Whereas X, Y such as A, B, C or D and E convey Z"
-- Nested coordination, appositives, subordinate clauses
-
-**Solution:** LLM simplification as preprocessing before teach():
-```
-Input:  "Whereas digital signals use discrete signs to convey information,
-         other phenomena such as analogue signals, poems, music convey
-         information in a more continuous form."
-
-Output: "Digital signals use discrete signs to convey information."
-        "Analogue signals convey information in a continuous form."
-        "Poems and music convey information in a continuous form."
-```
-
-Each simple sentence goes through the existing parser — which handles them perfectly. Reuses all existing TD v2 infrastructure. ~20 lines of code.
-
-**Why LLM and not rule-based:** spaCy's en_core_web_sm misparses complex sentences (tags "poems" as VERB). Rule-based splitting is brittle. LLM simplification works for any complexity.
-
-**Research backing:**
-- GraphRAG (Min et al., 2025) — "sentence simplification improves KG extraction by 18%"
-- UDASTE (2023) — "complex sentences are the primary source of extraction errors"
-
-**File:** `td/perception/nl_parser.py` — new `simplify_for_teach()` method
 
 ### 3. Persistent Teaching Pipeline
 Each `teach()` should auto-save to:
@@ -133,7 +87,10 @@ Common senses are overrepresented in benchmarks. Need tests for rare/domain-spec
 
 | Date | Item | Commit |
 |------|------|--------|
-| 2026-07-09 | Lesk WSD + benchmark (66 instances, 100%) | 9308874 |
+| 2026-07-09 | Sentence simplification layer for teach() | 3cf0dc4 |
+| 2026-07-09 | Self-review: lemmatize bug + hardcoded articles | 1aefdda |
+| 2026-07-09 | teach() gloss quality — spaCy lemmatization | a8e0e3e |
+| 2026-07-09 | Duplicate triple extraction fix | e78eea3 |
 | 2026-07-09 | Wikipedia-sourced benchmark | 9807e91 |
 | 2026-07-09 | WSD routing fix (3 sense creation) | 8f982d7 |
 | 2026-07-09 | 4 parser bugs fixed (GLM 5.2 review) | b229ce9 |

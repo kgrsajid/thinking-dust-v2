@@ -955,12 +955,12 @@ class GenericThinkingDust:
         # Don't split sentences with temporal connectives — the temporal
         # extractor needs both clauses in one sentence to capture ordering.
         # "Alice went to Paris and then invested in stocks" → BEFORE relation
-        TEMPORAL_CONNECTIVES = {
-            "then", "after", "before", "next", "finally", "subsequently",
-            "previously", "afterwards", "meanwhile", "later", "earlier",
-        }
+        # Uses language-specific connectives from temporal_connectives registry.
+        from td.perception.temporal_connectives import get_connectives
+        lang = self.parser.lang_config.code
+        temporal_words = set(get_connectives(lang).keys())
         tokens_lower = {t.text.lower() for t in doc}
-        if tokens_lower & TEMPORAL_CONNECTIVES:
+        if tokens_lower & temporal_words:
             return [text]
 
         # Use clause segmenter to split
