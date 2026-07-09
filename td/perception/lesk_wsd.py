@@ -40,28 +40,36 @@ def _lemmatize(word: str, nlp=None) -> str:
     "organism" (not "organism"). The hand-rolled fallback is only used
     when spaCy is unavailable.
 
+    CRITICAL: when spaCy is available, ALWAYS trust its lemma. The old
+    code fell through to suffix stripping when spaCy returned the same
+    word, corrupting "prisoner" → "prison" and "wireless" → "wireles".
+
     Reference: Honnibal & Montani (2017), "spaCy 2"
     """
     w = word.lower()
-    # Try spaCy first (fast, accurate)
-    if nlp is not None:
-        doc = nlp(w)
-        if doc and doc[0].lemma_ != w:
-            return doc[0].lemma_
-    elif nlp is None:
-        # Lazy-load singleton
+
+    # Use spaCy if available — always trust its lemma
+    model = nlp
+    if model is None:
+        # Lazy-load singleton (only loaded once)
         try:
-            import spacy as _spacy
             if not hasattr(_lemmatize, '_nlp'):
-                _lemmatize._nlp = _spacy.load('en_core_web_sm')
-            if _lemmatize._nlp is not False:
-                doc = _lemmatize._nlp(w)
-                if doc and doc[0].lemma_ != w:
-                    return doc[0].lemma_
+                import spacy as _spacy
+                try:
+                    _lemmatize._nlp = _spacy.load('en_core_web_sm')
+                except (ImportError, OSError):
+                    _lemmatize._nlp = False
+            model = _lemmatize._nlp
         except (ImportError, OSError):
             _lemmatize._nlp = False
+            model = False
 
-    # Fallback: strip common suffixes (ordered by length, longest first)
+    if model and model is not False:
+        doc = model(w)
+        if doc:
+            return doc[0].lemma_  # Always trust spaCy — don't fall through
+
+    # Fallback: strip common suffixes (only when spaCy unavailable)
     for suffix in ("tion", "sion", "ment", "ness", "ance", "ence",
                    "ing", "ied", "ies", "ers", "est", "ity",
                    "ed", "er", "es", "ly", "al", "s"):

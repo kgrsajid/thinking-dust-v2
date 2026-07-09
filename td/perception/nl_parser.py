@@ -946,7 +946,10 @@ class GenericNLParser:
         # Reference: Zhang & Soh (2024), "Extract, Define, Canonicalize"
         # Reference: UDASTE (ScienceDirect, 2023)
         from .relation_canonicalizer import deduplicate_triples
-        triples = deduplicate_triples(triples, nlp=self.nlp)
+        triples = deduplicate_triples(
+            triples, nlp=self.nlp,
+            articles=self.lang_config.articles,
+        )
 
         return triples
 
