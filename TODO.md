@@ -6,7 +6,15 @@ _Last updated: 2026-07-09_
 
 ## 📋 HIGH Priority
 
-### 2. Automated WSD Testing Framework
+### 2. Sentence Simplification (REVERTED — needs proper fix)
+The clause segmenter's `source_text` strips articles and loses subjects.
+"a spring is a flexible elastic device" → "spring is flexible elastic device"
+which the parser can't handle. Need to either:
+- Fix clause segmenter source_text to preserve original text
+- Or use a different approach (LLM simplification externally)
+- Or detect when simplification would produce low-quality output and skip
+
+### 3. Automated WSD Testing Framework
 Run the TESTING_FRAMEWORK.md pipeline on 10+ random Wikipedia words. Automate:
 - Random word selection from Wikipedia
 - Dynamic gloss gathering from Wikipedia articles
@@ -87,7 +95,7 @@ Common senses are overrepresented in benchmarks. Need tests for rare/domain-spec
 
 | Date | Item | Commit |
 |------|------|--------|
-| 2026-07-09 | Sentence simplification layer for teach() | 3cf0dc4 |
+| 2026-07-10 | Revert: remove broken simplification layer | a08d50e |
 | 2026-07-09 | Self-review: lemmatize bug + hardcoded articles | 1aefdda |
 | 2026-07-09 | teach() gloss quality — spaCy lemmatization | a8e0e3e |
 | 2026-07-09 | Duplicate triple extraction fix | e78eea3 |

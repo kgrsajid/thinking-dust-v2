@@ -113,7 +113,51 @@ After each code change:
 3. If accuracy drops >5%, flag as regression
 4. Investigate: is it a code bug or a test quality issue?
 
-## 8. Example Run Output
+## 8. Required Output Format
+
+Every benchmark run MUST produce two tables:
+
+### Table 1: Teaching Triples
+
+```
+═══════════════════════════════════════════════════════════════
+  PHASE 1: TEACH — sentence → triple → KG
+═══════════════════════════════════════════════════════════════
+
+    # Sense        Teach Sentence                              Extracted Triple
+  --- ------------ ------------------------------------------- ---------------------------
+    1 fire         matches are made of small wooden sticks      (matches, made_of, small wooden sticks)
+    2 fire         wooden matches are packaged in matchboxes    (wooden matches, packaged_in, matchboxes)
+    3 sports       a match is a competitive game between playe  (match, is, competitive game)
+    ...
+```
+
+Columns: `#` (row number), `Sense` (expected sense label), `Teach Sentence` (input), `Extracted Triple` (s, r, o) or "(no triple)".
+
+### Table 2: Questions & Answers
+
+```
+═══════════════════════════════════════════════════════════════
+  PHASE 2: QUESTIONS & ANSWERS
+═══════════════════════════════════════════════════════════════
+
+    # Expected      OK?  Conf  Method              Question                               Answer
+  --- ------------ ---- ------ -------------------- -------------------------------------- -------------------------
+    1 fire            ✓   0.7  z3_ordered           what is a match used for?              {'type': 'generic_csp'...}
+    2 sports          ✗  0.15  unknown              the team won the match                 {'type': 'unknown'...}
+    ...
+```
+
+Columns: `#`, `Expected` (expected sense), `OK?` (✓/✗), `Conf` (confidence), `Method` (retrieval/sparql/z3/etc.), `Question`, `Answer` (truncated).
+
+### Summary
+
+```
+  SCORE: 5/12 = 41.7%
+  Random baseline: 33.3%
+```
+
+## 9. Example Run Output
 
 ```
 ╔══════════════════════════════════════════════════════════════════╗
