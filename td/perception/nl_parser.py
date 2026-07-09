@@ -669,6 +669,29 @@ class GenericNLParser:
                                     triples.append((subj_text, rel, tok_text))
                             continue
 
+                    # Check for acl: "is a technique comparing X"
+                    # attr=technique, acl=comparing, dobj of acl=units
+                    # → (subj, technique_comparing, units)
+                    # Reference: UD relation `acl` — clausal modifier of noun
+                    acl_children = [c for c in attr.children if c.dep_ == "acl"]
+                    if acl_children:
+                        acl = acl_children[0]
+                        acl_dobj = [c for c in acl.children if c.dep_ == "dobj"]
+                        if acl_dobj:
+                            obj_token = acl_dobj[0]
+                            obj_text = self._get_chunk_text(doc, obj_token)
+                            rel = f"{attr.text.lower()}_{acl.lemma_}"
+                            # Expand coordinated objects inline
+                            conj_chain = [obj_token]
+                            for child in obj_token.children:
+                                if child.dep_ == "conj":
+                                    conj_chain.append(child)
+                            for tok in conj_chain:
+                                tok_text = self._get_chunk_text(doc, tok)
+                                for subj_text in subj_texts:
+                                    triples.append((subj_text, rel, tok_text))
+                            continue
+
                     # Check for xcomp: "are central to computer science"
                     # acomp=central, xcomp=computer (with aux=to, dobj=science)
                     xcomps = [c for c in token.children if c.dep_ == "xcomp"]
@@ -1002,9 +1025,11 @@ class GenericNLParser:
                         if child.dep_ == "prep":
                             for gc in child.children:
                                 if gc.dep_ == "pobj":
-                                    # Only include if pobj has compounds
-                                    # (suggesting it's part of a larger entity)
-                                    pobj_compounds = [c for c in gc.children if c.dep_ in ("compound", "nummod")]
+                                    # Only include if pobj has compound modifiers
+                                    # (suggesting it's part of a larger entity name)
+                                    # nummod does NOT count — "teams of eleven players"
+                                    # is NOT an entity name, just a quantified NP
+                                    pobj_compounds = [c for c in gc.children if c.dep_ == "compound"]
                                     if pobj_compounds:
                                         prep_phrase = f"{child.text.lower()} {gc.text.lower()}"
                                         for ggc in gc.children:

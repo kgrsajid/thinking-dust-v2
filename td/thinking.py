@@ -1645,10 +1645,31 @@ class GenericThinkingDust:
                     has_interrogative = self._is_interrogative(text)
                     has_question_mark = text.rstrip().endswith("?")
 
+                    # For declarative sentences, only proceed if a token
+                    # matches a KG relation (e.g., "the team won the match"
+                    # — "won" doesn't match, so skip)
                     if not has_interrogative and not has_question_mark:
-                        return None
+                        # Check if any token matches a KG relation
+                        kg_relations = set(t.relation for t in self.kg.triples)
+                        kg_relations.update(self.kg.relation_properties.keys())
+                        has_relation_match = any(t in kg_relations for t in tokens)
+                        if not has_relation_match:
+                            return None
 
                     entity = entities_in_query[0]
+
+                    # For copula questions ("is X Y?"), the entity after
+                    # "is" is the subject. If that subject is not in the KG,
+                    # don't return facts about other entities.
+                    # "is Germany in the EU" → subject is Germany, not EU
+                    if not has_interrogative and not has_question_mark:
+                        doc = self.parser.nlp(text) if self.parser.nlp else None
+                        if doc:
+                            for tok in doc:
+                                if tok.dep_ == "nsubj" and tok.head.lemma_ in self.parser.lang_config.copula_verbs:
+                                    subj_text = tok.text.lower()
+                                    if subj_text not in kg_entities and subj_text != entity:
+                                        return None
 
                     kg_relations = set(t.relation for t in self.kg.triples)
                     kg_relations.update(self.kg.relation_properties.keys())
@@ -1690,6 +1711,32 @@ class GenericThinkingDust:
                                             "confidence": result.confidence,
                                             "method": result.method,
                                         }
+
+                    # ── BEAGLE similarity for relation matching ──────
+                    # "used for" should match "tool_for" via semantic similarity.
+                    # Reference: Jones & Mewhort (2007) — BEAGLE context vectors
+                    if self.wvm is not None:
+                        best_rel = None
+                        best_sim = 0.0
+                        for rel in kg_relations:
+                            rel_words = rel.split("_")
+                            for token in tokens:
+                                for rw in rel_words:
+                                    sim = self.wvm.similarity(token, rw)
+                                    if sim > best_sim:
+                                        best_sim = sim
+                                        best_rel = rel
+                        # Threshold: 0.3 is conservative but catches morphological
+                        # and semantic variants (e.g., "used" ~ "tool_for")
+                        if best_rel and best_sim >= 0.3:
+                            result = _try_inverse_query(best_rel)
+                            if result and result.answer is not None:
+                                return {
+                                    "type": "inferred",
+                                    "formatted": result.proof_trace,
+                                    "confidence": result.confidence * (0.7 + 0.3 * best_sim),
+                                    "method": f"{result.method}_beagle",
+                                }
 
                     # ─── Open query: try ALL relations (language-agnostic) ──
                     # No hardcoded mapping. SPARQL handles any relation.
@@ -1796,6 +1843,24 @@ class GenericThinkingDust:
                     if best >= 0.75:
                         relation_in_query = rel
                         break
+
+        # BEAGLE similarity fallback: catches semantic matches that
+        # SequenceMatcher misses (different word forms/roots).
+        # "used for" → matches "tool_for" via context vector similarity.
+        # Reference: Jones & Mewhort (2007) — BEAGLE context vectors
+        if not relation_in_query and self.wvm is not None:
+            best_rel = None
+            best_sim = 0.0
+            for rel in kg_relations:
+                rel_words = rel.split("_")
+                for token in tokens:
+                    for rw in rel_words:
+                        sim = self.wvm.similarity(token, rw)
+                        if sim > best_sim:
+                            best_sim = sim
+                            best_rel = rel
+            if best_rel and best_sim >= 0.3:
+                relation_in_query = best_rel
 
         # Check "are X and Y the same?" — special case for functional comparison
         # Uses language registry for equality signals.
