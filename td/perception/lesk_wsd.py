@@ -32,14 +32,36 @@ from collections import Counter
 from td.perception.word_vectors import tokenize, content_words
 
 
-def _lemmatize(word: str) -> str:
-    """Simple lemmatization: strip common suffixes.
+def _lemmatize(word: str, nlp=None) -> str:
+    """Lemmatize a word using spaCy when available, else strip common suffixes.
 
-    Not as good as spaCy, but zero-dependency and fast.
-    For production: use spaCy token.lemma_.
+    spaCy lemmatization is dramatically better: "enters" → "enter"
+    (not "ent"), "wireless" → "wireless" (not "wireles"), "organisms" →
+    "organism" (not "organism"). The hand-rolled fallback is only used
+    when spaCy is unavailable.
+
+    Reference: Honnibal & Montani (2017), "spaCy 2"
     """
     w = word.lower()
-    # Strip common suffixes (ordered by length, longest first)
+    # Try spaCy first (fast, accurate)
+    if nlp is not None:
+        doc = nlp(w)
+        if doc and doc[0].lemma_ != w:
+            return doc[0].lemma_
+    elif nlp is None:
+        # Lazy-load singleton
+        try:
+            import spacy as _spacy
+            if not hasattr(_lemmatize, '_nlp'):
+                _lemmatize._nlp = _spacy.load('en_core_web_sm')
+            if _lemmatize._nlp is not False:
+                doc = _lemmatize._nlp(w)
+                if doc and doc[0].lemma_ != w:
+                    return doc[0].lemma_
+        except (ImportError, OSError):
+            _lemmatize._nlp = False
+
+    # Fallback: strip common suffixes (ordered by length, longest first)
     for suffix in ("tion", "sion", "ment", "ness", "ance", "ence",
                    "ing", "ied", "ies", "ers", "est", "ity",
                    "ed", "er", "es", "ly", "al", "s"):
@@ -70,6 +92,10 @@ class LeskWSD:
         gloss words for later matching. This is the Extended Lesk
         approach (Banerjee & Pedersen, 2002).
 
+        Both lemmatized AND raw content words are stored. The raw forms
+        catch cases where lemmatization is too aggressive (e.g., spaCy
+        lemmatizes "organism" correctly but might normalize domain terms).
+
         Args:
             entity: The polysemous word (e.g., "cell")
             sense_idx: Which sense (0 = first/default, 1 = second, etc.)
@@ -85,15 +111,16 @@ class LeskWSD:
         while len(self.sense_glosses[entity]) <= sense_idx:
             self.sense_glosses[entity].append(Counter())
 
-        # Add lemmatized words AND raw words (for better matching)
+        # Add lemmatized words
         self.sense_glosses[entity][sense_idx].update(words)
+
         # Also add raw content words (handles cases where lemmatization
-        # strips useful suffixes like "prisoner" → "prison")
+        # strips useful suffixes: "prisoner" should not become "prison")
         tokens = tokenize(sentence)
         raw_words = content_words(tokens)
+        # Minimal frame exclusion — same as _extract_context_words
         frame = {entity, "is", "are", "was", "were", "be", "been",
-                 "the", "a", "an", "has", "have", "had", "do", "does",
-                 "is_a", "part", "part_of", "type", "kind", "sort"}
+                 "the", "a", "an", "has", "have", "had", "do", "does", "did"}
         raw = [w for w in raw_words if w not in frame]
         self.sense_glosses[entity][sense_idx].update(raw)
 
@@ -266,17 +293,27 @@ class LeskWSD:
     def _extract_context_words(self, sentence: str, exclude: str) -> list[str]:
         """Extract content words from a sentence, excluding the target entity.
 
-        Uses lemmatization to handle morphological variants.
-        Also excludes common structural/frame words that are NOT
-        sense discriminators (is_a, part, type, etc.)
+        Uses spaCy lemmatization when available (much better than hand-rolled).
+        Only excludes true structural/frame words — NOT domain-relevant words
+        like "part" or "type" which can be sense discriminators in context.
+
+        Reference: Honnibal & Montani (2017), "spaCy 2"
+        Reference: Lesk (1986), "Automatic Sense Disambiguation"
         """
         tokens = tokenize(sentence)
         words = content_words(tokens)
-        # Exclude entity + frame words (not sense-discriminating)
-        frame_words = {exclude, "is", "are", "was", "were", "be", "been",
-                       "the", "a", "an", "has", "have", "had", "do", "does",
-                       # Structural words that appear in ALL senses
-                       "is_a", "part", "part_of", "type", "kind", "sort"}
+        # Exclude entity + minimal structural frame words only
+        # Previously excluded "part", "type", "kind", "sort" — these CAN be
+        # sense discriminators: "match type" = sports, "cell type" = biology
+        frame_words = {
+            exclude,
+            # Copular verbs (not discriminative)
+            "is", "are", "was", "were", "be", "been",
+            # Articles (not discriminative)
+            "the", "a", "an",
+            # Light verbs (not discriminative)
+            "has", "have", "had", "do", "does", "did",
+        }
         return [_lemmatize(w) for w in words if w not in frame_words]
 
     def save(self, path: str) -> None:
