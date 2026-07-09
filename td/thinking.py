@@ -642,9 +642,24 @@ class GenericThinkingDust:
         self.pure_mode = pure_mode
 
         # Semantic word vectors (BEAGLE-style, trained on corpus)
-        # If None, fall back to parser.parse() for MHN keys
-        # If loaded, use encode_query() for position-independent semantic keys
+        # If None, try to auto-load from data/word_vectors_10k.pkl
+        # Used for: BEAGLE relation matching, paraphrase retrieval, WSD context
         self.wvm = word_vectors
+        if self.wvm is None:
+            import os
+            candidates = [
+                os.path.join(os.path.dirname(__file__), "..", "data", "word_vectors_10k.pkl"),
+                os.path.join(os.getcwd(), "data", "word_vectors_10k.pkl"),
+            ]
+            for wv_path in candidates:
+                if os.path.exists(wv_path):
+                    try:
+                        from .perception.word_vectors import WordVectorModel
+                        self.wvm = WordVectorModel(dim=dim)
+                        self.wvm.load(wv_path)
+                        break
+                    except Exception:
+                        pass
 
         # Knowledge Graph for multi-hop inference (the "thinking" layer)
         from .kg import KnowledgeGraph
@@ -1712,31 +1727,48 @@ class GenericThinkingDust:
                                             "method": result.method,
                                         }
 
-                    # ── BEAGLE similarity for relation matching ──────
+                    # ── BEAGLE/spaCy similarity for relation matching ──
                     # "used for" should match "tool_for" via semantic similarity.
                     # Reference: Jones & Mewhort (2007) — BEAGLE context vectors
-                    if self.wvm is not None:
-                        best_rel = None
-                        best_sim = 0.0
-                        for rel in kg_relations:
-                            rel_words = rel.split("_")
-                            for token in tokens:
-                                for rw in rel_words:
+                    # Fallback: spaCy vectors when BEAGLE vocab too small
+                    import numpy as _np
+                    best_rel = None
+                    best_sim = 0.0
+                    # Pre-compute spaCy vectors for query tokens (one parse)
+                    spacy_vecs = {}
+                    if self.parser.nlp:
+                        doc = self.parser.nlp(" ".join(tokens))
+                        for tok in doc:
+                            if tok.has_vector:
+                                spacy_vecs[tok.text] = tok.vector
+                    for rel in kg_relations:
+                        rel_words = rel.split("_")
+                        for token in tokens:
+                            for rw in rel_words:
+                                sim = 0.0
+                                # Try BEAGLE first
+                                if self.wvm is not None:
                                     sim = self.wvm.similarity(token, rw)
-                                    if sim > best_sim:
-                                        best_sim = sim
-                                        best_rel = rel
-                        # Threshold: 0.3 is conservative but catches morphological
-                        # and semantic variants (e.g., "used" ~ "tool_for")
-                        if best_rel and best_sim >= 0.3:
-                            result = _try_inverse_query(best_rel)
-                            if result and result.answer is not None:
-                                return {
-                                    "type": "inferred",
-                                    "formatted": result.proof_trace,
-                                    "confidence": result.confidence * (0.7 + 0.3 * best_sim),
-                                    "method": f"{result.method}_beagle",
-                                }
+                                # Fallback to spaCy if BEAGLE returns 0
+                                if sim == 0.0 and token in spacy_vecs:
+                                    rw_doc = self.parser.nlp(rw)
+                                    if rw_doc and rw_doc[0].has_vector:
+                                        v1, v2 = spacy_vecs[token], rw_doc[0].vector
+                                        norm = _np.linalg.norm(v1) * _np.linalg.norm(v2)
+                                        sim = float(_np.dot(v1, v2) / norm) if norm > 0 else 0.0
+                                if sim > best_sim:
+                                    best_sim = sim
+                                    best_rel = rel
+                    # Threshold: 0.15 — works for both BEAGLE and spaCy
+                    if best_rel and best_sim >= 0.15:
+                        result = _try_inverse_query(best_rel)
+                        if result and result.answer is not None:
+                            return {
+                                "type": "inferred",
+                                "formatted": result.proof_trace,
+                                "confidence": result.confidence * (0.7 + 0.3 * best_sim),
+                                "method": f"{result.method}_sim",
+                            }
 
                     # ─── Open query: try ALL relations (language-agnostic) ──
                     # No hardcoded mapping. SPARQL handles any relation.
@@ -1848,18 +1880,34 @@ class GenericThinkingDust:
         # SequenceMatcher misses (different word forms/roots).
         # "used for" → matches "tool_for" via context vector similarity.
         # Reference: Jones & Mewhort (2007) — BEAGLE context vectors
-        if not relation_in_query and self.wvm is not None:
+        # Fallback: spaCy vectors when BEAGLE vocab too small
+        if not relation_in_query:
             best_rel = None
             best_sim = 0.0
+            best_source = "beagle"
             for rel in kg_relations:
                 rel_words = rel.split("_")
                 for token in tokens:
                     for rw in rel_words:
-                        sim = self.wvm.similarity(token, rw)
+                        sim = 0.0
+                        src = "beagle"
+                        # Try BEAGLE first
+                        if self.wvm is not None:
+                            sim = self.wvm.similarity(token, rw)
+                        # Fallback to spaCy if BEAGLE has no vector or returns 0
+                        if sim == 0.0 and self.parser.nlp:
+                            t1 = self.parser.nlp(token)[0]
+                            t2 = self.parser.nlp(rw)[0]
+                            if t1.has_vector and t2.has_vector:
+                                sim = t1.similarity(t2)
+                                src = "spacy"
                         if sim > best_sim:
                             best_sim = sim
                             best_rel = rel
-            if best_rel and best_sim >= 0.3:
+                            best_source = src
+            # Threshold: 0.3 for BEAGLE, 0.15 for spaCy fallback
+            threshold = 0.3 if best_source == "beagle" else 0.15
+            if best_rel and best_sim >= threshold:
                 relation_in_query = best_rel
 
         # Check "are X and Y the same?" — special case for functional comparison
