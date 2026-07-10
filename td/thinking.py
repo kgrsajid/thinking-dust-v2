@@ -1701,74 +1701,100 @@ class GenericThinkingDust:
                                 return self.kg.query(t.subject, rel, entity)
                         return None
 
-                    # Try matching tokens to KG relations first
+                    # Collect ALL candidate relations (exact + compound + BEAGLE)
+                    # and rank by confidence. Don't short-circuit on first match.
+                    # Reference: Esposito et al. (2019) — hybrid QE approach
+                    import numpy as _np
+                    candidates_with_score = []
+
+                    # Exact token match (score = 1.0)
                     for token in tokens:
                         if token in kg_relations:
                             result = _try_inverse_query(token)
                             if result and result.answer is not None:
-                                return {
-                                    "type": "inferred",
-                                    "formatted": result.proof_trace,
-                                    "confidence": result.confidence,
-                                    "method": result.method,
-                                }
-                    # Check compound relations
+                                candidates_with_score.append((token, 1.0, result))
+
+                    # Compound match: "is" + "a" = "is_a" (score = 0.5)
+                    # Low score because compound matches from question structure
+                    # are unreliable (e.g., "is a match" → "is_a" is a false match).
+                    # BEAGLE semantic similarity should outrank these.
+                    copula_verbs = self.parser.lang_config.copula_verbs
                     for i, token in enumerate(tokens):
+                        # Skip copula verbs — they're question structure, not relations
+                        if token in copula_verbs:
+                            continue
                         for rel in kg_relations:
                             parts = rel.split("_")
                             if len(parts) == 2 and i + 1 < len(tokens):
                                 if token == parts[0] and tokens[i + 1] == parts[1]:
                                     result = _try_inverse_query(rel)
                                     if result and result.answer is not None:
-                                        return {
-                                            "type": "inferred",
-                                            "formatted": result.proof_trace,
-                                            "confidence": result.confidence,
-                                            "method": result.method,
-                                        }
+                                        candidates_with_score.append((rel, 0.5, result))
 
-                    # ── BEAGLE/spaCy similarity for relation matching ──
-                    # "used for" should match "tool_for" via semantic similarity.
-                    # Reference: Jones & Mewhort (2007) — BEAGLE context vectors
-                    # Fallback: spaCy vectors when BEAGLE vocab too small
-                    import numpy as _np
-                    best_rel = None
-                    best_sim = 0.0
-                    # Pre-compute spaCy vectors for query tokens (one parse)
+                    # BEAGLE similarity match (score = similarity)
+                    # Expands query tokens via nearest neighbors
+                    # "used" → expand → "tool" → match "tool_for"
                     spacy_vecs = {}
                     if self.parser.nlp:
                         doc = self.parser.nlp(" ".join(tokens))
                         for tok in doc:
                             if tok.has_vector:
                                 spacy_vecs[tok.text] = tok.vector
+
+                    # Build expanded token set
+                    expanded_tokens = {}
+                    content_tokens = [t for t in tokens
+                                      if t not in self.parser.lang_config.beagle_stop_words
+                                      and len(t) > 1]
+                    for ct in content_tokens:
+                        expanded_tokens[ct] = 1.0
+                        if self.wvm is not None:
+                            neighbors = self.wvm.nearest_neighbors(ct, top_k=5)
+                            for neighbor, sim in neighbors:
+                                if sim >= 0.15:
+                                    expanded_tokens[neighbor] = max(
+                                        expanded_tokens.get(neighbor, 0), sim)
+                    # Also include query entities — they carry strong
+                    # BEAGLE signal for relation matching.
+                    # "match" → sim(match, tool)=0.895 → boosts "tool_for"
+                    for entity in entities_in_query:
+                        if entity not in expanded_tokens:
+                            expanded_tokens[entity] = 1.0
+
                     for rel in kg_relations:
+                        # Skip if already found via exact/compound match
+                        if any(c[0] == rel for c in candidates_with_score):
+                            continue
                         rel_words = rel.split("_")
-                        for token in tokens:
+                        best_rel_sim = 0.0
+                        for etoken, expand_sim in expanded_tokens.items():
                             for rw in rel_words:
                                 sim = 0.0
-                                # Try BEAGLE first
                                 if self.wvm is not None:
-                                    sim = self.wvm.similarity(token, rw)
-                                # Fallback to spaCy if BEAGLE returns 0
-                                if sim == 0.0 and token in spacy_vecs:
+                                    sim = self.wvm.similarity(etoken, rw)
+                                if sim == 0.0 and etoken in spacy_vecs:
                                     rw_doc = self.parser.nlp(rw)
                                     if rw_doc and rw_doc[0].has_vector:
-                                        v1, v2 = spacy_vecs[token], rw_doc[0].vector
+                                        v1, v2 = spacy_vecs[etoken], rw_doc[0].vector
                                         norm = _np.linalg.norm(v1) * _np.linalg.norm(v2)
                                         sim = float(_np.dot(v1, v2) / norm) if norm > 0 else 0.0
-                                if sim > best_sim:
-                                    best_sim = sim
-                                    best_rel = rel
-                    # Threshold: 0.15 — works for both BEAGLE and spaCy
-                    if best_rel and best_sim >= 0.15:
-                        result = _try_inverse_query(best_rel)
-                        if result and result.answer is not None:
-                            return {
-                                "type": "inferred",
-                                "formatted": result.proof_trace,
-                                "confidence": result.confidence * (0.7 + 0.3 * best_sim),
-                                "method": f"{result.method}_sim",
-                            }
+                                weighted_sim = sim * expand_sim
+                                best_rel_sim = max(best_rel_sim, weighted_sim)
+                        if best_rel_sim >= 0.15:
+                            result = _try_inverse_query(rel)
+                            if result and result.answer is not None:
+                                candidates_with_score.append((rel, best_rel_sim, result))
+
+                    # Return the highest-scoring candidate
+                    if candidates_with_score:
+                        candidates_with_score.sort(key=lambda x: x[1], reverse=True)
+                        best_rel, best_score, best_result = candidates_with_score[0]
+                        return {
+                            "type": "inferred",
+                            "formatted": best_result.proof_trace,
+                            "confidence": best_result.confidence * (0.7 + 0.3 * best_score),
+                            "method": f"{best_result.method}_sim" if best_score < 1.0 else best_result.method,
+                        }
 
                     # ─── Open query: try ALL relations (language-agnostic) ──
                     # No hardcoded mapping. SPARQL handles any relation.
@@ -1803,27 +1829,58 @@ class GenericThinkingDust:
                                     candidates.append(("inverse", subj, rel, entity))
 
                         if candidates:
-                            # Rank using TF-IDF scoring (Salton & Buckley, 1988).
+                            # Rank using TF-IDF + BEAGLE similarity scoring.
                             # - IDF: rarer relations are more specific/informative
                             # - Query match: prefer relations that appear in the query
                             # - Forward preference: entity-as-subject is more natural
+                            # - BEAGLE sim: prefer relations semantically similar to query
                             #
-                            # This is the standard IR ranking approach, adapted for KG.
-                            # Reference: Salton & Buckley (1988), "Term-weighting
-                            #   approaches in automatic text retrieval." IP&M 24(5).
+                            # References:
+                            # - Salton & Buckley (1988), IP&M 24(5) — TF-IDF
+                            # - Jones & Mewhort (2007), Psych Review — BEAGLE
+                            # - Esposito et al. (2019), Info Sciences — hybrid QE
                             total_triples = len(self.kg.triples) if self.kg.triples else 1
                             rel_freq = {}
                             for t in self.kg.triples:
                                 rel_freq[t.relation] = rel_freq.get(t.relation, 0) + 1
 
-                            def _score(candidate, _text=text.lower(), _rf=rel_freq, _tt=total_triples):
+                            # Pre-compute BEAGLE query expansion for ranking
+                            # Expands query tokens via nearest neighbors to find
+                            # semantic matches with KG relations.
+                            # Reference: Esposito et al. (2019) — hybrid QE
+                            beagle_expansion = {}
+                            if self.wvm is not None:
+                                content_tokens = [t for t in tokens
+                                                  if t not in self.parser.lang_config.beagle_stop_words
+                                                  and len(t) > 1]
+                                for ct in content_tokens:
+                                    neighbors = self.wvm.nearest_neighbors(ct, top_k=5)
+                                    for neighbor, sim in neighbors:
+                                        if sim >= 0.15:
+                                            beagle_expansion[neighbor] = max(
+                                                beagle_expansion.get(neighbor, 0), sim)
+
+                            def _score(candidate, _text=text.lower(), _rf=rel_freq,
+                                       _tt=total_triples, _be=beagle_expansion):
                                 import math
                                 direction, s, r, o = candidate
                                 freq = _rf.get(r, 1)
                                 idf = math.log(_tt / freq) if freq > 0 else 0
                                 query_bonus = 1.0 if r.replace("_", " ") in _text else 0.0
                                 fwd_bonus = 0.5 if direction == "forward" else 0.0
-                                return idf + query_bonus + fwd_bonus
+                                # BEAGLE similarity: query expansion matches relation words
+                                # "used" expands to ["tool", ...] → matches "tool_for"
+                                beagle_sim = 0.0
+                                rel_words = set(r.split("_"))
+                                for rw in rel_words:
+                                    if rw in _be:
+                                        beagle_sim = max(beagle_sim, _be[rw])
+                                    # Also direct similarity to query tokens
+                                    for ct in _be:
+                                        if self.wvm is not None:
+                                            direct_sim = self.wvm.similarity(ct, rw)
+                                            beagle_sim = max(beagle_sim, direct_sim)
+                                return idf + query_bonus + fwd_bonus + (2.0 * beagle_sim)
 
                             candidates.sort(key=_score, reverse=True)
                             direction, s, r, o = candidates[0]
@@ -1876,37 +1933,55 @@ class GenericThinkingDust:
                         relation_in_query = rel
                         break
 
-        # BEAGLE similarity fallback: catches semantic matches that
-        # SequenceMatcher misses (different word forms/roots).
-        # "used for" → matches "tool_for" via context vector similarity.
+        # BEAGLE similarity with query expansion: catches semantic matches
+        # that SequenceMatcher misses. Expands query tokens via BEAGLE
+        # nearest neighbors before matching against KG relations.
+        # "used for" → expand "used" → ["tool", ...] → match "tool_for"
         # Reference: Jones & Mewhort (2007) — BEAGLE context vectors
-        # Fallback: spaCy vectors when BEAGLE vocab too small
+        # Reference: Esposito et al. (2019) — hybrid QE with word embeddings
         if not relation_in_query:
             best_rel = None
             best_sim = 0.0
             best_source = "beagle"
+
+            # Build expanded token set: original tokens + BEAGLE neighbors
+            expanded_tokens = {}  # token -> max similarity to any query token
+            if self.wvm is not None:
+                content_tokens = [t for t in tokens
+                                  if t not in self.parser.lang_config.beagle_stop_words
+                                  and len(t) > 1]
+                for ct in content_tokens:
+                    expanded_tokens[ct] = 1.0  # original token = sim 1.0
+                    neighbors = self.wvm.nearest_neighbors(ct, top_k=5)
+                    for neighbor, sim in neighbors:
+                        if sim >= 0.15:
+                            expanded_tokens[neighbor] = max(
+                                expanded_tokens.get(neighbor, 0), sim)
+
             for rel in kg_relations:
                 rel_words = rel.split("_")
-                for token in tokens:
+                for etoken, expand_sim in expanded_tokens.items():
                     for rw in rel_words:
                         sim = 0.0
                         src = "beagle"
                         # Try BEAGLE first
                         if self.wvm is not None:
-                            sim = self.wvm.similarity(token, rw)
+                            sim = self.wvm.similarity(etoken, rw)
                         # Fallback to spaCy if BEAGLE has no vector or returns 0
                         if sim == 0.0 and self.parser.nlp:
-                            t1 = self.parser.nlp(token)[0]
+                            t1 = self.parser.nlp(etoken)[0]
                             t2 = self.parser.nlp(rw)[0]
                             if t1.has_vector and t2.has_vector:
                                 sim = t1.similarity(t2)
                                 src = "spacy"
-                        if sim > best_sim:
-                            best_sim = sim
+                        # Weight by expansion confidence
+                        weighted_sim = sim * expand_sim
+                        if weighted_sim > best_sim:
+                            best_sim = weighted_sim
                             best_rel = rel
                             best_source = src
-            # Threshold: 0.3 for BEAGLE, 0.15 for spaCy fallback
-            threshold = 0.3 if best_source == "beagle" else 0.15
+            # Threshold: 0.15 for BEAGLE (lower because expansion adds noise)
+            threshold = 0.15
             if best_rel and best_sim >= threshold:
                 relation_in_query = best_rel
 
