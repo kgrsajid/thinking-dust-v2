@@ -7,7 +7,7 @@ _Last updated: 2026-07-10_
 ## ✅ MAJOR MILESTONE: Query Pipeline Fixed (2026-07-10)
 
 **Before:** 25% accuracy on benchmark queries
-**After:** 100% accuracy on benchmark queries
+**After:** 92.9% on fresh Wikipedia topics (crane, spring, port, court, seal)
 
 **What was done:**
 - BEAGLE corpus scaling: 10K → 118K sentences (2890 vocab, 12 domains)
@@ -16,7 +16,14 @@ _Last updated: 2026-07-10_
 - YES formatting for yes/no questions
 - O(n²) fix: pre-compute BEAGLE similarities
 - Language isolation: no hardcoded English in core logic
-- 16 new research references (query expansion, HDC scaling, KG QA)
+- 4 parser bugs fixed (copular attr, advmod guard, acl prep, passive agent)
+- is→is_a canonicalization via language config
+- Regex fallback: underscore-only guard (no magic numbers)
+- equality_signals from lang_config.relation_prototypes
+- BEAGLE weight 2.0 documented as calibration constant
+- Skipped sentence logging (data/skipped_sentences.log)
+- 16 new research references (#56-71)
+- Layer 0 preprocessing architecture documented
 
 **Caveat:** Benchmark uses clean, crafted queries. Real-world performance unknown.
 
@@ -40,7 +47,6 @@ Remove filler, resolve anaphora, extract intent.
 Query: '{user_input}'
 Output: clean, structured query."
 ```
-This lets us focus on the core reasoning engine. Production can use rule-based + spaCy.
 
 **What's missing:**
 - **Preprocessing layer** — LLM-based (bootstrap) or rule-based + spaCy (production)
@@ -60,77 +66,6 @@ which the parser can't handle. Need to either:
 - Fix clause segmenter source_text to preserve original text
 - Or use a different approach (LLM simplification externally)
 - Or detect when simplification would produce low-quality output and skip
-
-### 2a. Parser Bugs Found (2026-07-10) — DONE ✅
-
-**Bug 1: Missing copular attribute triple** ✅ Fixed
-- Emit `(subj, is_a, attr)` before `continue` in attr_preps branch
-- Reference: UD `attr` — nominal predicate of copular construction
-
-**Bug 2: Adverb leaking into extraction** ✅ Fixed
-- POS guard: only accept NOUN/PROPN advmod as subject
-- Reference: UD `advmod` — adverbs are NOT entities
-
-**Bug 3: No triple from copular + reduced relative clause** ✅ Fixed
-- Added prep chain handling for acl verbs + fallback is_a
-- Reference: TEA Nets (arXiv, Apr 2026) — cascading extraction
-
-**Bug 4: No triple from passive voice with agent** ✅ Fixed
-- Accept `pcomp` alongside `pobj` in agent dependency
-- Reference: TEA Nets (2026) — nsubjpass + agent dep swap
-
-**Additional fixes:**
-- `is` → `is_a` canonicalization via `lang_config.copula_to_isa`
-- Regex fallback: underscore-only guard (no magic numbers)
-- `equality_signals` from `lang_config.relation_prototypes`
-- BEAGLE weight 2.0 documented as calibration constant
-
-**GLM 5.2 code review:** 2 actionable findings fixed (equality_signals, BEAGLE weight docs). `_extract_triples_regex()` hardcoded English documented as "English-only fallback".
-
-**Commits:** 4f5e98a, b0cce9c, 33c8e65, d1d1527, bd690bf, f4109b3, 4e3add7, c9f63bd
-
-### 2b. Skipped Sentence Logging
-When spaCy can't extract triples, log the sentence for future parser improvement.
-Track: sentence, reason (no_triple, complex_structure, passive_voice, etc.)
-File: `data/skipped_sentences.log` (append-only)
-
-**Bug 1: Missing copular attribute triple**
-```
-Input:    "a cell is a small room in a prison"
-Extracted: (cell, room_in, prison)
-Missing:   (cell, is_a, small room)
-```
-spaCy: cell=nsubj, is=ROOT, room=attr, small=amod(room)
-Root cause: parser doesn't extract `attr` dependency as (subject, is_a, attr).
-
-**Bug 2: Adverb leaking into extraction**
-```
-Input:    "the prisoner was locked in a cell overnight"
-Extracted: (prisoner, locked_in, cell) ← correct
-Issue: "overnight" (advmod) shouldn't be in training data
-```
-Root cause: advmod tokens aren't filtered from triple extraction.
-
-**Bug 3: No triple from copular + reduced relative clause**
-```
-Input:    "mitochondria are organelles found in cells"
-Extracted: (none)
-Expected: (mitochondria, is_a, organelles)
-```
-spaCy: mitochondria=nsubj, are=ROOT, organelles=attr, found=acl(organelles)
-Root cause: parser doesn't handle copular + `acl` (reduced relative clause).
-
-**Bug 4: No triple from passive voice with agent**
-```
-Input:    "the river bank was eroded by flooding"
-Extracted: (none)
-Expected: (flooding, eroded, river bank)
-```
-spaCy: bank=nsubjpass, eroded=ROOT, by=agent(eroded), flooding=pcomp(by)
-Root cause: parser doesn't handle `agent` (by-phrase) in passive voice.
-Reference: TEA Nets (arXiv, Apr 2026) — nsubjpass + agent dep swap.
-
-**Status:** GLM 5.2 subagent investigating. Fixes needed in `td/perception/nl_parser.py`.
 
 ---
 
@@ -222,14 +157,21 @@ Common senses are overrepresented in benchmarks. Need tests for rare/domain-spec
 | Item | Commit |
 |------|--------|
 | Query expansion + ranking fix | 57694fc |
-| BEAGLE corpus scaling 10K→118K | efdbed4 |
-| Language isolation (no hardcoded English) | efdbed4 |
+| BEAGLE corpus scaling 10K→118K (2890 vocab, 12 domains) | efdbed4 |
+| Language isolation (no hardcoded English in primary paths) | efdbed4, d1d1527 |
 | YES formatting for yes/no questions | 128f87b |
 | O(n²) pre-compute BEAGLE similarities | 490dc04 |
-| BEAGLE weight research-backed (2.0) | a88960c |
-| All GLM 5.2 review findings fixed | 90455e6 |
+| BEAGLE weight research-backed (2.0) + documented | a88960c, c9f63bd |
+| Parser bugs 1-4 fixed (copular, advmod, acl, passive) | 4f5e98a, b0cce9c |
+| is→is_a canonicalization via lang_config.copula_to_isa | d1d1527 |
+| Regex fallback: underscore-only guard (no magic numbers) | 4e3add7 |
+| equality_signals from lang_config.relation_prototypes | c9f63bd |
+| Skipped sentence logging (data/skipped_sentences.log) | f5bbdb2 |
+| Layer 0 preprocessing architecture documented | 727321c, a78ea86 |
 | Research review (16 new refs #56-71) | efdbed4 |
 | ARCHITECTURE/DEVELOPMENT/TODO updated | efdbed4 |
+| GLM 5.2 code review findings addressed | 90455e6, c9f63bd |
+| All tests passing (54 passed, 0 failed) | 4e3add7 |
 
 ---
 
