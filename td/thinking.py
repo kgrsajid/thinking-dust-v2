@@ -1860,26 +1860,31 @@ class GenericThinkingDust:
                                             beagle_expansion[neighbor] = max(
                                                 beagle_expansion.get(neighbor, 0), sim)
 
+                            # Pre-compute BEAGLE similarity per relation (O(n) not O(n²))
+                            # Avoids calling wvm.similarity() inside _score() per candidate
+                            rel_beagle_scores = {}
+                            for _, _, r, _ in candidates:
+                                if r not in rel_beagle_scores:
+                                    best_sim = 0.0
+                                    rel_words = set(r.split("_"))
+                                    for rw in rel_words:
+                                        if rw in beagle_expansion:
+                                            best_sim = max(best_sim, beagle_expansion[rw])
+                                        for ct in beagle_expansion:
+                                            if self.wvm is not None:
+                                                direct_sim = self.wvm.similarity(ct, rw)
+                                                best_sim = max(best_sim, direct_sim)
+                                    rel_beagle_scores[r] = best_sim
+
                             def _score(candidate, _text=text.lower(), _rf=rel_freq,
-                                       _tt=total_triples, _be=beagle_expansion):
+                                       _tt=total_triples, _rbs=rel_beagle_scores):
                                 import math
                                 direction, s, r, o = candidate
                                 freq = _rf.get(r, 1)
                                 idf = math.log(_tt / freq) if freq > 0 else 0
                                 query_bonus = 1.0 if r.replace("_", " ") in _text else 0.0
                                 fwd_bonus = 0.5 if direction == "forward" else 0.0
-                                # BEAGLE similarity: query expansion matches relation words
-                                # "used" expands to ["tool", ...] → matches "tool_for"
-                                beagle_sim = 0.0
-                                rel_words = set(r.split("_"))
-                                for rw in rel_words:
-                                    if rw in _be:
-                                        beagle_sim = max(beagle_sim, _be[rw])
-                                    # Also direct similarity to query tokens
-                                    for ct in _be:
-                                        if self.wvm is not None:
-                                            direct_sim = self.wvm.similarity(ct, rw)
-                                            beagle_sim = max(beagle_sim, direct_sim)
+                                beagle_sim = _rbs.get(r, 0.0)
                                 return idf + query_bonus + fwd_bonus + (2.0 * beagle_sim)
 
                             candidates.sort(key=_score, reverse=True)
