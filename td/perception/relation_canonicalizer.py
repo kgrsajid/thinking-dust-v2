@@ -87,7 +87,7 @@ def _lemmatize_verb(verb: str, nlp=None) -> str:
     return verb
 
 
-def canonicalize_relation(relation: str, nlp=None) -> str:
+def canonicalize_relation(relation: str, nlp=None, lang_config=None) -> str:
     """Canonicalize a relation by stripping preposition suffix and lemmatizing.
 
     This is the core deduplication function. Two relations that produce the
@@ -100,16 +100,17 @@ def canonicalize_relation(relation: str, nlp=None) -> str:
         "capital_of"    → "capital_of" (compound relation, keep as-is)
         "in"            → "in"     (not a verb+prep, keep as-is)
         "depends_on"    → "depends_on" (compound relation, keep as-is)
-        "is"            → "is_a"   (clause segmenter produces "is", dep parser produces "is_a")
+        "is"            → "is_a"   (via language config copula_to_isa mapping)
     """
     rel = relation.lower().strip()
 
-    # "is" → "is_a" canonicalization
-    # Clause segmenter produces (X, is, Y), dependency parser produces (X, is_a, Y).
-    # Both represent the same copular relationship. Canonicalize to "is_a".
+    # Copula → is_a canonicalization via language config
+    # Clause segmenter produces (X, copula, Y), dep parser produces (X, is_a, Y).
+    # Both represent the same copular relationship. Canonicalize via language mapping.
     # Reference: UD `attr` — nominal predicate of copular construction
-    if rel == "is":
-        return "is_a"
+    if lang_config and lang_config.copula_to_isa:
+        if rel in lang_config.copula_to_isa:
+            return lang_config.copula_to_isa[rel]
 
     # Compound relations are kept as-is
     if rel in COMPOUND_RELATIONS:
@@ -161,7 +162,8 @@ def _normalize_entity(text: str, articles: frozenset = DEFAULT_ARTICLES) -> str:
 
 def deduplicate_triples(triples: list[tuple[str, str, str]],
                         nlp=None,
-                        articles: frozenset = DEFAULT_ARTICLES) -> list[tuple[str, str, str]]:
+                        articles: frozenset = DEFAULT_ARTICLES,
+                        lang_config=None) -> list[tuple[str, str, str]]:
     """Deduplicate triples using relation canonicalization + entity normalization.
 
     When two triples have the same (subject, canonical_relation, object),
@@ -174,12 +176,13 @@ def deduplicate_triples(triples: list[tuple[str, str, str]],
         nlp: spaCy model for lemmatization (optional).
         articles: Language-specific articles for entity normalization.
                   Default: English. Pass lang_config.articles for other languages.
+        lang_config: Language config for copula_to_isa mapping (optional).
     """
     seen: dict[tuple[str, str, str], tuple[tuple[str, str, str], int]] = {}
 
     for triple in triples:
         s, r, o = triple
-        canonical = canonicalize_relation(r, nlp)
+        canonical = canonicalize_relation(r, nlp, lang_config)
         key = (_normalize_entity(s, articles), canonical, _normalize_entity(o, articles))
         spec = relation_specificity(r)
 

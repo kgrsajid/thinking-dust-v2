@@ -67,6 +67,12 @@ class LanguageConfig:
     # and function words that should not accumulate context vectors.
     # Used by td/perception/word_vectors.py — NEVER hardcoded.
     beagle_stop_words: FrozenSet[str] = frozenset()
+    # Copula-to-is_a mapping for relation canonicalization.
+    # Clause segmenter produces (X, copula, Y), dep parser produces (X, is_a, Y).
+    # Both represent the same copular relationship.
+    # Key: copula word (e.g., "is"), Value: canonical relation (e.g., "is_a")
+    # Reference: UD `attr` — nominal predicate of copular construction
+    copula_to_isa: Dict[str, str] = field(default_factory=dict)
 
 
 # ── Language Registry ─────────────────────────────────────────────

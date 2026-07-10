@@ -146,6 +146,17 @@ GENITIVE_MARKERS = frozenset({"of"})
 # Reference: Jauhar et al. (2015), *SEM — two-stage approach
 DEMONSTRATIVE_PRONOUNS = frozenset({"this", "that", "it"})
 
+# ── English Copula → is_a Mapping ────────────────────────────────
+# Clause segmenter produces (X, "is", Y), dep parser produces (X, "is_a", Y).
+# Both represent the same copular relationship. Canonicalize to "is_a".
+# Reference: UD `attr` — nominal predicate of copular construction
+COPULA_TO_ISA = {
+    "is": "is_a",
+    "are": "is_a",
+    "was": "is_a",
+    "were": "is_a",
+}
+
 # ── English BEAGLE Stop Words ─────────────────────────────────────
 # Superset of parser stop words for word vector training.
 # Removes function words, pronouns, interrogatives, and auxiliaries
@@ -198,4 +209,5 @@ register_language(LanguageConfig(
     genitive_markers=GENITIVE_MARKERS,
     demonstrative_pronouns=DEMONSTRATIVE_PRONOUNS,
     beagle_stop_words=BEAGLE_STOP_WORDS,
+    copula_to_isa=COPULA_TO_ISA,
 ))

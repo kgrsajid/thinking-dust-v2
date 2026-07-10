@@ -1035,6 +1035,7 @@ class GenericNLParser:
         triples = deduplicate_triples(
             triples, nlp=self.nlp,
             articles=self.lang_config.articles,
+            lang_config=self.lang_config,
         )
 
         return triples

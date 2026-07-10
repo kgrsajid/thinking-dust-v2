@@ -948,32 +948,11 @@ class GenericThinkingDust:
         # Reference: Jones & Mewhort (2007) — BEAGLE context vectors
         triples = self._extract_triples(problem_text, solution_text)
 
-        # Only store MHN entry if triples were extracted OR solution_text
-        # is a real answer (not a sense label).
-        # If no triples AND solution_text looks like a sense label, skip —
-        # storing the sense label as "answer" creates false retrievals.
-        # GraphRAG (Min et al., 2025): if spaCy can't extract, skip.
-        #
-        # Heuristic: sense labels are single words that match known KG types.
-        # Real answers are longer or contain specific information.
-        _is_sense_label = (len(solution_text.split()) <= 2 and
-                          solution_text.lower() in ('biology', 'prison', 'finance',
-                            'geography', 'fire', 'sports', 'machine', 'season',
-                            'water', 'harbor', 'computer', 'law', 'animal',
-                            'stamp', 'bird', 'tool', 'food', 'technology',
-                            'astronomy', 'chemistry', 'programming', 'zoology'))
-        if triples or not _is_sense_label:
-            self.mhn.store(problem_hdc, solution_hdc, meta)
-            self.total_learned += 1
-        else:
-            # Log skipped sentences for future parser improvement
-            import os
-            log_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'skipped_sentences.log')
-            try:
-                with open(log_path, 'a') as f:
-                    f.write(f'{problem_text}\n')
-            except OSError:
-                pass  # silently skip if can't write
+        # Store MHN entry for all teach() calls.
+        # The sense label issue is solved at the caller level — don't pass
+        # sense labels as solution_text. Pass '' for facts without answers.
+        self.mhn.store(problem_hdc, solution_hdc, meta)
+        self.total_learned += 1
 
         contradictions = []
         resolved_triples = []
