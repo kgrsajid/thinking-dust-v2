@@ -948,11 +948,21 @@ class GenericThinkingDust:
         # Reference: Jones & Mewhort (2007) — BEAGLE context vectors
         triples = self._extract_triples(problem_text, solution_text)
 
-        # Only store MHN entry if triples were extracted.
-        # If no triples, the sentence is too complex for the parser —
+        # Only store MHN entry if triples were extracted OR solution_text
+        # is a real answer (not a sense label).
+        # If no triples AND solution_text looks like a sense label, skip —
         # storing the sense label as "answer" creates false retrievals.
         # GraphRAG (Min et al., 2025): if spaCy can't extract, skip.
-        if triples:
+        #
+        # Heuristic: sense labels are single words that match known KG types.
+        # Real answers are longer or contain specific information.
+        _is_sense_label = (len(solution_text.split()) <= 2 and
+                          solution_text.lower() in ('biology', 'prison', 'finance',
+                            'geography', 'fire', 'sports', 'machine', 'season',
+                            'water', 'harbor', 'computer', 'law', 'animal',
+                            'stamp', 'bird', 'tool', 'food', 'technology',
+                            'astronomy', 'chemistry', 'programming', 'zoology'))
+        if triples or not _is_sense_label:
             self.mhn.store(problem_hdc, solution_hdc, meta)
             self.total_learned += 1
         else:
@@ -1431,6 +1441,12 @@ class GenericThinkingDust:
         # Preserve original case for spaCy (lowercase confuses NER/POS)
         spacy_triples = self.parser.extract_triples_spacy(problem)
         if spacy_triples:
+            # Check if spaCy only extracted is_a (may have missed compound relations
+            # like "ceo_of" that it misparses as attr). If so, also try regex.
+            if all(r == "is_a" for _, r, _ in spacy_triples):
+                regex_triples = self._extract_triples_regex(text)
+                # Merge: regex triples + spaCy triples, dedup later
+                return spacy_triples + regex_triples
             return spacy_triples
 
         # Fallback: regex patterns (English-only, hardcoded)
@@ -1562,18 +1578,31 @@ class GenericThinkingDust:
                 s, r, o = m.group(1), m.group(2), m.group(3)
                 triples.append((s, r, o))
 
-        # Fallback: X relation Y (no "is" — e.g., "RiverA feeds_into RiverB")
-        # Only match if relation is not a common stop word.
-        # Uses parser.is_stop_word() when spaCy available, English fallback.
-        #
-        # Research-backed: GraphRAG (Min et al., 2025) shows spaCy dependency
-        # parsing achieves 94% of LLM-based KG extraction. If spaCy can't
-        # extract triples, the sentence is in the 6% that's genuinely hard.
-        # Regex fallback creates false triples from complex sentences
-        # (e.g., "the tennis match" → (the, tennis, match)).
-        # Skip sentences that spaCy can't handle — quality > quantity.
-        #
-        # Reference: Min et al. (2025), "Towards Practical GraphRAG", arXiv:2507.03226
+        # Fallback: X relation Y (e.g., "RiverA feeds_into RiverB", "Alice is ceo_of CompanyX")
+        # Two guards to prevent false triples:
+        # A. Underscore relation (compound like "ceo_of", "feeds_into") — always allow
+        # B. No underscore + short sentence (≤5 words) + no copula — allow for bare verbs
+        # This prevents (the, tennis, match) from long sentences while allowing
+        # (RiverA, feeds_into, RiverB) and (Device0, powers, Device1).
+        # GraphRAG (Min et al., 2025): spaCy achieves 94% — regex handles the 6%.
+        if not triples or all(r == "is_a" for _, r, _ in triples):
+            # Pattern 1: "X is compound_rel Y" (copular with compound relation)
+            # spaCy misparses "ceo_of" as attr → extracts is_a instead of ceo_of
+            m_copular = re.search(r'(\w+)\s+(?:is|are|was|were)\s+([a-z]+_[a-z]+)\s+(\w+)', text)
+            if m_copular:
+                s, r, o = m_copular.group(1), m_copular.group(2), m_copular.group(3)
+                triples.append((s, _lemmatize(r), o))
+            else:
+                # Pattern 2: "X relation Y" (no copula)
+                m = re.search(r'(\w+)\s+([a-z_]+)\s+(\w+)', text)
+                if m:
+                    s, r, o = m.group(1), m.group(2), m.group(3)
+                    has_underscore = '_' in r
+                    has_copula = any(w in text.split() for w in self.parser.lang_config.copula_verbs)
+                    is_short = len(text.split()) <= 5
+                    if not self.parser.is_stop_word(r) and len(r) > 1:
+                        if has_underscore or (is_short and not has_copula):
+                            triples.append((s, _lemmatize(r), o))
 
         return triples
 
