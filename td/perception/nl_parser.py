@@ -667,6 +667,12 @@ class GenericNLParser:
                                 tok_text = self._get_chunk_text(doc, tok)
                                 for subj_text in subj_texts:
                                     triples.append((subj_text, rel, tok_text))
+                            # Also emit base copular triple: (cell, is_a, small room)
+                            # Bug fix: continue skipped this, missing the classification triple.
+                            # Reference: UD `attr` — "nominal predicate of copular construction"
+                            attr_text = self._get_chunk_text(doc, attr)
+                            for subj_text in subj_texts:
+                                triples.append((subj_text, "is_a", attr_text))
                             continue
 
                     # Check for acl: "is a technique comparing X"
@@ -690,7 +696,36 @@ class GenericNLParser:
                                 tok_text = self._get_chunk_text(doc, tok)
                                 for subj_text in subj_texts:
                                     triples.append((subj_text, rel, tok_text))
+                            # Also emit base copular triple
+                            attr_text = self._get_chunk_text(doc, attr)
+                            for subj_text in subj_texts:
+                                triples.append((subj_text, "is_a", attr_text))
                             continue
+                        # Bug fix: also check prep chains on acl verb
+                        # "mitochondria are organelles found in cells"
+                        # found → prep(in) → pobj(cells)
+                        # Reference: TEA Nets (arXiv, Apr 2026) — cascading extraction
+                        acl_preps = [c for c in acl.children if c.dep_ == "prep"]
+                        if acl_preps:
+                            acl_prep = acl_preps[0]
+                            acl_pobj = [c for c in acl_prep.children if c.dep_ in ("pobj", "pcomp")]
+                            if acl_pobj:
+                                obj_text = self._get_chunk_text(doc, acl_pobj[0])
+                                rel = f"{acl.lemma_}_{acl_prep.lemma_}"
+                                for subj_text in subj_texts:
+                                    triples.append((subj_text, rel, obj_text))
+                                # Also emit base copular triple
+                                attr_text = self._get_chunk_text(doc, attr)
+                                for subj_text in subj_texts:
+                                    triples.append((subj_text, "is_a", attr_text))
+                                continue
+
+                    # Fallback: emit base (subj, is_a, attr) if no sub-branch matched
+                    # Bug fix: without this, copular sentences with complex attrs
+                    # (acl, xcomp) that don't match sub-branches produce zero triples.
+                    attr_text = self._get_chunk_text(doc, attr)
+                    for subj_text in subj_texts:
+                        triples.append((subj_text, "is_a", attr_text))
 
                     # Check for xcomp: "are central to computer science"
                     # acomp=central, xcomp=computer (with aux=to, dobj=science)
@@ -738,7 +773,11 @@ class GenericNLParser:
                     elif child.dep_ == "agent":
                         # "by Salesforce" — agent becomes the logical subject
                         for gc in child.children:
-                            if gc.dep_ == "pobj":
+                            # Bug fix: accept pcomp alongside pobj.
+                            # "by flooding" → by=agent, flooding=pcomp (gerund)
+                            # TEA Nets (arXiv, Apr 2026): agent captures logical subject
+                            # UD `agent`: complement can be nominal (pobj) or verbal (pcomp)
+                            if gc.dep_ in ("pobj", "pcomp"):
                                 agent_obj = gc
                                 break
                     elif child.dep_ in ("prep",):
@@ -751,10 +790,11 @@ class GenericNLParser:
                 # the logical subject. spaCy sometimes misparses plural noun
                 # subjects as advmod (e.g., "ribosomes synthesize proteins"
                 # → ribosomes=advmod, should be nsubj).
-                # Accept any advmod as subject when there's no nsubj/nsubjpass.
+                # Bug fix: only accept NOUN/PROPN advmod (not temporal adverbs like "overnight")
+                # UD `advmod`: adverbial modifier — by definition, NOT an entity.
                 if not subj:
                     for child in token.children:
-                        if child.dep_ == "advmod":
+                        if child.dep_ == "advmod" and child.pos_ in ("NOUN", "PROPN"):
                             subj = child
                             break
 
