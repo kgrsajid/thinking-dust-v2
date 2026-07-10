@@ -955,6 +955,15 @@ class GenericThinkingDust:
         if triples:
             self.mhn.store(problem_hdc, solution_hdc, meta)
             self.total_learned += 1
+        else:
+            # Log skipped sentences for future parser improvement
+            import os
+            log_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'skipped_sentences.log')
+            try:
+                with open(log_path, 'a') as f:
+                    f.write(f'{problem_text}\n')
+            except OSError:
+                pass  # silently skip if can't write
 
         contradictions = []
         resolved_triples = []

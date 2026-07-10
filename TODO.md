@@ -61,6 +61,89 @@ which the parser can't handle. Need to either:
 - Or use a different approach (LLM simplification externally)
 - Or detect when simplification would produce low-quality output and skip
 
+### 2a. Parser Bugs Found (2026-07-10)
+
+**Bug 1: Missing copular attribute triple**
+```
+Input:    "a cell is a small room in a prison"
+Extracted: (cell, room_in, prison)
+Missing:   (cell, is_a, small room)
+```
+spaCy: cell=nsubj, is=ROOT, room=attr, small=amod(room)
+Root cause: parser doesn't extract `attr` dependency as (subject, is_a, attr).
+
+**Bug 2: Adverb leaking into extraction**
+```
+Input:    "the prisoner was locked in a cell overnight"
+Extracted: (prisoner, locked_in, cell) ← correct
+Issue: "overnight" (advmod) shouldn't be in training data
+```
+Root cause: advmod tokens aren't filtered from triple extraction.
+
+**Bug 3: No triple from copular + reduced relative clause**
+```
+Input:    "mitochondria are organelles found in cells"
+Extracted: (none)
+Expected: (mitochondria, is_a, organelles)
+```
+spaCy: mitochondria=nsubj, are=ROOT, organelles=attr, found=acl(organelles)
+Root cause: parser doesn't handle copular + `acl` (reduced relative clause).
+
+**Bug 4: No triple from passive voice with agent**
+```
+Input:    "the river bank was eroded by flooding"
+Extracted: (none)
+Expected: (flooding, eroded, river bank)
+```
+spaCy: bank=nsubjpass, eroded=ROOT, by=agent(eroded), flooding=pcomp(by)
+Root cause: parser doesn't handle `agent` (by-phrase) in passive voice.
+Reference: TEA Nets (arXiv, Apr 2026) — nsubjpass + agent dep swap.
+
+**Status:** GLM 5.2 subagent investigating. Fixes needed in `td/perception/nl_parser.py`.
+
+### 2b. Skipped Sentence Logging
+When spaCy can't extract triples, log the sentence for future parser improvement.
+Track: sentence, reason (no_triple, complex_structure, passive_voice, etc.)
+File: `data/skipped_sentences.log` (append-only)
+
+**Bug 1: Missing copular attribute triple**
+```
+Input:    "a cell is a small room in a prison"
+Extracted: (cell, room_in, prison)
+Missing:   (cell, is_a, small room)
+```
+spaCy: cell=nsubj, is=ROOT, room=attr, small=amod(room)
+Root cause: parser doesn't extract `attr` dependency as (subject, is_a, attr).
+
+**Bug 2: Adverb leaking into extraction**
+```
+Input:    "the prisoner was locked in a cell overnight"
+Extracted: (prisoner, locked_in, cell) ← correct
+Issue: "overnight" (advmod) shouldn't be in training data
+```
+Root cause: advmod tokens aren't filtered from triple extraction.
+
+**Bug 3: No triple from copular + reduced relative clause**
+```
+Input:    "mitochondria are organelles found in cells"
+Extracted: (none)
+Expected: (mitochondria, is_a, organelles)
+```
+spaCy: mitochondria=nsubj, are=ROOT, organelles=attr, found=acl(organelles)
+Root cause: parser doesn't handle copular + `acl` (reduced relative clause).
+
+**Bug 4: No triple from passive voice with agent**
+```
+Input:    "the river bank was eroded by flooding"
+Extracted: (none)
+Expected: (flooding, eroded, river bank)
+```
+spaCy: bank=nsubjpass, eroded=ROOT, by=agent(eroded), flooding=pcomp(by)
+Root cause: parser doesn't handle `agent` (by-phrase) in passive voice.
+Reference: TEA Nets (arXiv, Apr 2026) — nsubjpass + agent dep swap.
+
+**Status:** GLM 5.2 subagent investigating. Fixes needed in `td/perception/nl_parser.py`.
+
 ---
 
 ## 📋 HIGH Priority
