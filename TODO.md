@@ -49,7 +49,7 @@ _Last updated: 2026-07-10_
 - "The cell in biology, what's it made of vs the one in prison?" → `["what is cell in biology made of", "what is cell in prison"]`
 - "seals are marine mammals that live in cold waters along the Atlantic coast and they haul out on rocks to rest" → 5 atomic sentences
 
-### 1. Real-World Query Handling — DONE ✅
+### 1. Real-World Query Handling — IN PROGRESS
 
 **Problem:** We tested with clean queries like "what is a match used for". Real users say:
 - "I was wondering, what do you use a match for when starting a fire?"
@@ -58,20 +58,19 @@ _Last updated: 2026-07-10_
 
 **Architecture:** TD v2 is a reasoning engine, NOT an NLP engine. A separate **preprocessing layer** handles messy human input before it reaches TD v2. Same pattern as ChatGPT o1/o3/R1: preprocess → reason → answer.
 
-**Solution implemented:**
-- LLM-based preprocessing with JSON output format
-- 14 few-shot examples covering all sentence types
-- Rule-based fallback (zero-cost, production mode)
-- Parser compatibility notes documented
+**What's done:**
+- ✅ Prompt designed (v1, tested against v2 via Gemini API)
+- ✅ Module skeleton created (`td/preprocessing/__init__.py`)
+- ✅ LLM model selected (Gemini — cleanest output, fastest)
+- ✅ `PREPROCESSING_PROMPT.md` documented with comparison results
 
-**Files:** `td/preprocessing/__init__.py`, `PREPROCESSING_PROMPT.md`
-
-**What it handles:**
-- Filler removal: "So I was curious" → stripped
-- Anaphora resolution: "that thing" → entity from context
-- Clause splitting: "X and Y verb Z" → two sentences
-- Subject repetition: "Alice and Bob went" → "Alice went" + "Bob went"
-- Relative clause simplification: "birds with long legs that migrate" → 3 sentences
+**What's NOT done:**
+- 🔲 Wire Gemini API call into `td/preprocessing/__init__.py`
+- 🔲 Add Gemini API key to environment
+- 🔲 Test with messy queries end-to-end
+- 🔲 Integrate into `demos/chat_flare.py`
+- 🔲 Anaphora resolution ("that thing" → "match")
+- 🔲 Multi-turn context ("what about prison?" → "cell in prison")
 
 ---
 
