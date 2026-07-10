@@ -31,6 +31,24 @@ _Last updated: 2026-07-10_
 
 ## 🚨 URGENT (RIGHT NOW)
 
+### 1. Implement Preprocessing Layer with Gemini — NEXT SESSION
+
+**Prompt:** v1 (confirmed as final, tested against v2 via Gemini API)
+**Model:** Gemini (selected over Kimi K2.7 Code and K2.6 — cleanest output, fastest)
+**Files:** `PREPROCESSING_PROMPT.md` (prompt), `td/preprocessing/__init__.py` (module)
+
+**What to do:**
+- Wire Gemini API call into `td/preprocessing/__init__.py`
+- Add Gemini API key to environment
+- Test with the two benchmark sentences (seals, Python)
+- Integrate into `demos/chat_flare.py` for live demo
+- Test with real messy queries
+
+**Test cases:**
+- "So I was curious, what's the deal with matches and fire?" → `["what is match used for"]`
+- "The cell in biology, what's it made of vs the one in prison?" → `["what is cell in biology made of", "what is cell in prison"]`
+- "seals are marine mammals that live in cold waters along the Atlantic coast and they haul out on rocks to rest" → 5 atomic sentences
+
 ### 1. Real-World Query Handling — DONE ✅
 
 **Problem:** We tested with clean queries like "what is a match used for". Real users say:
