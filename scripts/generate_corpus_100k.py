@@ -329,7 +329,7 @@ CHEMISTRY = {
 }
 
 GENERAL = {
-    "nouns": ["capital", "country", "city", " president", "government", "parliament",
+    "nouns": ["capital", "country", "city", "president", "government", "parliament",
               "election", "law", "constitution", "history", "war", "peace",
               "economy", "trade", "culture", "language", "population", "border"],
     "verbs": ["governs", "elects", "trades", "produces", "exports", "imports",

@@ -1885,7 +1885,7 @@ class GenericThinkingDust:
                                 query_bonus = 1.0 if r.replace("_", " ") in _text else 0.0
                                 fwd_bonus = 0.5 if direction == "forward" else 0.0
                                 beagle_sim = _rbs.get(r, 0.0)
-                                return idf + query_bonus + fwd_bonus + (2.0 * beagle_sim)
+                                return idf + query_bonus + fwd_bonus + beagle_sim
 
                             candidates.sort(key=_score, reverse=True)
                             direction, s, r, o = candidates[0]
@@ -1985,8 +1985,8 @@ class GenericThinkingDust:
                             best_sim = weighted_sim
                             best_rel = rel
                             best_source = src
-            # Threshold: 0.15 for BEAGLE (lower because expansion adds noise)
-            threshold = 0.15
+            # Threshold: 0.3 for BEAGLE (higher to reduce false positives from expansion)
+            threshold = 0.3
             if best_rel and best_sim >= threshold:
                 relation_in_query = best_rel
 
