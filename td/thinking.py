@@ -1885,7 +1885,7 @@ class GenericThinkingDust:
                                 query_bonus = 1.0 if r.replace("_", " ") in _text else 0.0
                                 fwd_bonus = 0.5 if direction == "forward" else 0.0
                                 beagle_sim = _rbs.get(r, 0.0)
-                                return idf + query_bonus + fwd_bonus + beagle_sim
+                                return idf + query_bonus + fwd_bonus + (2.0 * beagle_sim)
 
                             candidates.sort(key=_score, reverse=True)
                             direction, s, r, o = candidates[0]
