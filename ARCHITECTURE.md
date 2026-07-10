@@ -32,10 +32,18 @@ Thinking Dust v2 is a **neuro-symbolic reasoning engine** that derives facts it 
 
 ---
 
-## 2. Architecture (5 Layers)
+## 2. Architecture (6 Layers)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
+│ LAYER 0: Input Preprocessing (Separate Engine)                     │
+│  NOT part of TD v2 — TD v2 is a reasoning engine, not NLP.        │
+│  Simplifies messy human input into clean structured queries.       │
+│  Strips filler, resolves anaphora, normalizes slang.               │
+│  Bootstrap: LLM-based (GPT/Kimi). Production: rule-based + spaCy. │
+│  Output: clean query → fed to TD v2's think() or teach()          │
+│  File: td/preprocessing/ (planned) or external LLM call            │
+├─────────────────────────────────────────────────────────────────────┤
 │ LAYER 5: SPARQL Query Engine                                       │
 │  pyoxigraph Store (Rust-backed, disk-persistent, SPARQL 1.1).      │
 │  Property paths for transitive chains. Named graphs for             │
@@ -73,6 +81,48 @@ Thinking Dust v2 is a **neuro-symbolic reasoning engine** that derives facts it 
 │  Files: td/perception/hdc.py, td/memory/mhn.py, td/z3_solver.py    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+### Layer 0: Input Preprocessing (Separate Engine)
+
+**TD v2 is a reasoning engine, not an NLP engine.** It does NOT process raw human language. A separate preprocessing layer handles the messy input before it reaches TD v2.
+
+```
+User: "So I was curious, what's the deal with matches and fire?"
+    ↓
+┌─────────────────────────────────────────────┐
+│ PREPROCESSING LAYER                          │
+│  Strip filler: "So I was curious" → gone     │
+│  Normalize: "what's the deal with" → "what   │
+│    is the relationship between"              │
+│  Extract intent: matches + fire              │
+│  Output: "what is match related to fire"     │
+└─────────────────────────────────────────────┘
+    ↓
+TD v2: think("what is match related to fire")
+    ↓
+Answer: match tool_for fire (proof trace)
+```
+
+**Why separate?**
+- TD v2 does one thing well: logical reasoning over a knowledge graph
+- NLP preprocessing is a different problem with different solutions
+- The preprocessing layer can be swapped independently (LLM → rule-based → spaCy)
+- Same pattern as ChatGPT o1/o3/R1: preprocess → reason → answer
+
+**Bootstrap approach:** Use an LLM (GPT, Kimi, etc.) for preprocessing during demo/development. This lets us focus on the core reasoning engine. Production can use rule-based + spaCy for zero-cost preprocessing.
+
+**What the preprocessing layer handles:**
+- Filler removal: "So I was curious", "like", "you know"
+- Anaphora resolution: "that thing" → "match" (from context)
+- Intent extraction: "what's the deal with X and Y" → "what is X related to Y"
+- Slang normalization: "what's the deal" → "what is the relationship"
+- Multi-turn context: "what about prison?" → "what is cell in prison"
+
+**What TD v2 handles (after preprocessing):**
+- Entity extraction and WSD
+- Relation matching via BEAGLE expansion
+- Transitive/symmetric/functional inference
+- Proof traces and confidence scoring
 
 ---
 

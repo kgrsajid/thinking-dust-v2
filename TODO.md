@@ -31,18 +31,25 @@ _Last updated: 2026-07-10_
 - "So like, that thing you strike to make fire, what's it called?"
 - "The cell in biology, what's it made of vs the one in prison?"
 
+**Architecture:** TD v2 is a reasoning engine, NOT an NLP engine. A separate **preprocessing layer** handles messy human input before it reaches TD v2. Same pattern as ChatGPT o1/o3/R1: preprocess → reason → answer.
+
+**Bootstrap approach:** Use an LLM for preprocessing during demo/development:
+```
+LLM prompt: "Simplify this query for a knowledge graph engine. 
+Remove filler, resolve anaphora, extract intent. 
+Query: '{user_input}'
+Output: clean, structured query."
+```
+This lets us focus on the core reasoning engine. Production can use rule-based + spaCy.
+
 **What's missing:**
-- **Sentence simplification** — strip verbose/colloquial phrasing before query processing
+- **Preprocessing layer** — LLM-based (bootstrap) or rule-based + spaCy (production)
 - **Anaphora resolution** — "that thing" → "match" (needs context)
 - **Multi-turn context** — "what about prison?" → resolve to "cell in prison"
-- **Informal language** — "like", "stuff", "you know" → filter as noise
 
 **Research backing:**
 - GraphRAG (Min et al., 2025) — sentence simplification improves KG extraction
 - UDASTE (2023) — complex sentences are primary source of extraction errors
-- DisCoDisCo (Hu et al., 2023) — clause segmentation for complex queries
-
-**Status:** Sentence simplification was REVERTED (broke subjects). Needs proper fix.
 
 ---
 
