@@ -2004,6 +2004,12 @@ class GenericThinkingDust:
         # ─── SPARQL-first path (pyoxigraph) ─────────────────────────
         # Try SPARQL before BFS: handles inverse queries, property paths,
         # multi-hop transitive chains, and FILTER natively.
+        #
+        # Detect yes/no questions for proper formatting.
+        # "is France in the EU?" → format as "YES" / "NO"
+        _is_yes_no = (len(entities_in_query) >= 2 and
+                      any(tokens[0] == v for v in self.parser.lang_config.copula_verbs))
+
         if self.sparql_store is not None and self.sparql_store._synced:
             for i, e1 in enumerate(entities_in_query):
                 for e2 in entities_in_query[i + 1:]:
@@ -2011,18 +2017,20 @@ class GenericThinkingDust:
                     if relation_in_query:
                         result = self.sparql_store.ask(e1, e2, relation_in_query)
                         if result.found:
+                            prefix = "YES. " if _is_yes_no else ""
                             return {
                                 "type": "inferred",
-                                "formatted": result.proof_trace,
+                                "formatted": f"{prefix}{result.proof_trace}",
                                 "confidence": result.confidence,
                                 "method": result.method,
                             }
                     # SPARQL ask without relation (finds any path)
                     result = self.sparql_store.ask(e1, e2)
                     if result.found:
+                        prefix = "YES. " if _is_yes_no else ""
                         return {
                             "type": "inferred",
-                            "formatted": result.proof_trace,
+                            "formatted": f"{prefix}{result.proof_trace}",
                             "confidence": result.confidence,
                             "method": result.method,
                         }
@@ -2070,9 +2078,10 @@ class GenericThinkingDust:
                             conf = self.kg._chain_confidence(
                                 best_path, relation_in_query or ""
                             )
+                            prefix = "YES. " if _is_yes_no else ""
                             return {
                                 "type": "inferred",
-                                "formatted": trace,
+                                "formatted": f"{prefix}{trace}",
                                 "confidence": conf,
                                 "method": "derived",
                             }
