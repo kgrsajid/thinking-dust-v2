@@ -1550,16 +1550,14 @@ class GenericThinkingDust:
         # Only match if relation is not a common stop word.
         # Uses parser.is_stop_word() when spaCy available, English fallback.
         #
-        # IMPORTANT: Only use this fallback for SHORT sentences (≤5 words).
-        # For longer sentences, the regex is too greedy and creates false triples
-        # like (the, tennis, match) from "the tennis match lasted three hours".
-        # If spaCy couldn't extract triples from a long sentence, skip it.
-        if not triples and len(text.split()) <= 5:
-            m = re.search(r'(\w+)\s+([a-z_]+)\s+(\w+)', text)
-            if m:
-                s, r, o = m.group(1), m.group(2), m.group(3)
-                if not self.parser.is_stop_word(r) and len(r) > 1:
-                    triples.append((s, _lemmatize(r), o))
+        # Research-backed: GraphRAG (Min et al., 2025) shows spaCy dependency
+        # parsing achieves 94% of LLM-based KG extraction. If spaCy can't
+        # extract triples, the sentence is in the 6% that's genuinely hard.
+        # Regex fallback creates false triples from complex sentences
+        # (e.g., "the tennis match" → (the, tennis, match)).
+        # Skip sentences that spaCy can't handle — quality > quantity.
+        #
+        # Reference: Min et al. (2025), "Towards Practical GraphRAG", arXiv:2507.03226
 
         return triples
 
