@@ -941,14 +941,21 @@ class GenericThinkingDust:
             meta["constraint_template"] = constraint_template
         if metadata:
             meta.update(metadata)
-        self.mhn.store(problem_hdc, solution_hdc, meta)
-        self.total_learned += 1
 
-        # Try to extract knowledge graph triples
+        # Try to extract knowledge graph triples FIRST
         # WSD routing happens BEFORE BEAGLE update to preserve clean vectors.
         # Reference: Ruas et al. (2020) — sentence-level context for WSD
         # Reference: Jones & Mewhort (2007) — BEAGLE context vectors
         triples = self._extract_triples(problem_text, solution_text)
+
+        # Only store MHN entry if triples were extracted.
+        # If no triples, the sentence is too complex for the parser —
+        # storing the sense label as "answer" creates false retrievals.
+        # GraphRAG (Min et al., 2025): if spaCy can't extract, skip.
+        if triples:
+            self.mhn.store(problem_hdc, solution_hdc, meta)
+            self.total_learned += 1
+
         contradictions = []
         resolved_triples = []
 
