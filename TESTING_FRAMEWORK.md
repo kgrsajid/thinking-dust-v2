@@ -96,6 +96,22 @@ LLM-generated test sentences must satisfy:
 4. **Lexical diversity:** Different vocabulary from glosses (tests generalization)
 5. **Edge cases:** Include sentences where the sense is ambiguous or borderline
 6. **Domain coverage:** Cover subordinate senses (e.g., "vampire bat" not just "bat")
+7. **UNAMBIGUOUS QUESTIONS (CRITICAL):** Every test question must have ONE clear expected answer. If the question is ambiguous (e.g., "what is a match" — could be fire/sports/tool), it MUST accept ANY valid answer as correct.
+
+### Rule: Ambiguous Questions Accept Any Answer
+
+```
+❌ BAD:  "what is a match" → expected: fire        (ambiguous — sports/tool also valid)
+✅ GOOD: "what is a tennis match" → expected: sports (unambiguous — tennis = context)
+✅ GOOD: "what is a match used for" → expected: fire (unambiguous — "used for" = fire context)
+```
+
+If a question IS ambiguous, mark it as `ambiguous=True` and accept any of the valid senses:
+```python
+('what is a match', ['fire', 'sports', 'tool'], True)  # ambiguous=True
+```
+
+**Why:** An ambiguous question with multiple valid answers is NOT a system failure — it's a test design failure. The system correctly returns the strongest association.
 
 ## 6. Baselines
 
