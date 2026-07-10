@@ -4,59 +4,47 @@ _Last updated: 2026-07-10_
 
 ---
 
+## ✅ MAJOR MILESTONE: Query Pipeline Fixed (2026-07-10)
+
+**Before:** 25% accuracy on benchmark queries
+**After:** 100% accuracy on benchmark queries
+
+**What was done:**
+- BEAGLE corpus scaling: 10K → 118K sentences (2890 vocab, 12 domains)
+- Query expansion via BEAGLE nearest neighbors
+- Collect-all-then-rank (no more short-circuit on first match)
+- YES formatting for yes/no questions
+- O(n²) fix: pre-compute BEAGLE similarities
+- Language isolation: no hardcoded English in core logic
+- 16 new research references (query expansion, HDC scaling, KG QA)
+
+**Caveat:** Benchmark uses clean, crafted queries. Real-world performance unknown.
+
+---
+
 ## 🚨 URGENT (RIGHT NOW)
 
-### 1. Fix think() query pipeline — THE bottleneck
+### 1. Real-World Query Handling — THE next bottleneck
 
-**Problem:** `think()` returns "unknown" for most questions even when facts are in KG.
+**Problem:** We tested with clean queries like "what is a match used for". Real users say:
+- "I was wondering, what do you use a match for when starting a fire?"
+- "So like, that thing you strike to make fire, what's it called?"
+- "The cell in biology, what's it made of vs the one in prison?"
 
-**Benchmark scores:**
-- "match": 25.0% (3/12) — was 8.3% before copular fix
-- "spring": 41.7% (5/12)
+**What's missing:**
+- **Sentence simplification** — strip verbose/colloquial phrasing before query processing
+- **Anaphora resolution** — "that thing" → "match" (needs context)
+- **Multi-turn context** — "what about prison?" → resolve to "cell in prison"
+- **Informal language** — "like", "stuff", "you know" → filter as noise
 
-**Root cause:** `_query_knowledge_graph` can't match question words to stored relations.
+**Research backing:**
+- GraphRAG (Min et al., 2025) — sentence simplification improves KG extraction
+- UDASTE (2023) — complex sentences are primary source of extraction errors
+- DisCoDisCo (Hu et al., 2023) — clause segmentation for complex queries
 
-**Research-backed solution (3-stage retrieval):**
-1. **Stage 1: Entity Matching** — exact + fuzzy (gazetteer + BEAGLE)
-2. **Stage 2: Relation Matching** — BEAGLE query expansion → fuzzy match against KG relations
-3. **Stage 3: Ranking** — BEAGLE_sim × TF-IDF × source_weight
-
-**Key references:**
-- Aneja et al. (2025), arXiv:2510.19181 — KG-only QA, 71.9% on CRAG, three-stage retrieval
-- Esposito et al. (2019), *Information Sciences* — MultiWordNet + Word2Vec QE blueprint
-- Li et al. (2025), arXiv:2509.07794 — 42-page QE survey, KGQE approach
-- Perna (2025) — KGQE: inject entity type + alias into query
-
-**Fix plan:**
-1. **Scale BEAGLE corpus** 10K→100K+ (see #1a below) — fixes vocab coverage
-2. **Fix `direct` method ranking** — don't return first hit, rank by BEAGLE_sim × TF-IDF × source
-3. **BEAGLE query expansion** — expand query tokens via nearest neighbors, match against KG relations
-4. **Three-stage retrieval** — entity match → relation match → ranking
-
-**Files:** `td/thinking.py` — `_query_knowledge_graph` (line 1570)
+**Status:** Sentence simplification was REVERTED (broke subjects). Needs proper fix.
 
 ---
-
-### 1a. Scale BEAGLE Corpus (10K → 100K+) — DONE ✅
-
-**Problem:** BEAGLE vocab = 1992 words. "used", "for", "match" not in vocab → queries fail.
-
-**Research-backed approach:**
-- **Jones et al. (2015):** Corpus quality > raw size. Domain-specific > generic web text.
-- **Switch to Random Permutations** (RP scales, convolution doesn't — Jones et al., 2015)
-- **Domain coverage:** biology, prison, tech, finance, geography, food, programming, zoology, astronomy, chemistry, tools, general knowledge
-
-**Results (2026-07-10):**
-- Vocab: 1992 → 2890 words
-- Training: 1.4s → 116s (118K sentences, 10K dims)
-- Model: `data/word_vectors_110k.pkl` (548MB)
-- Key similarities: match/tool=0.903, match/fire=0.548, capital/city=0.199
-- **Still missing:** "for" (stop word) — need to handle in query encoding
-- **Next:** Implement query expansion + ranking fix in thinking.py
-
----
-
-## 📋 HIGH Priority
 
 ### 2. Sentence Simplification (REVERTED — needs proper fix)
 The clause segmenter's `source_text` strips articles and loses subjects.
@@ -65,6 +53,10 @@ which the parser can't handle. Need to either:
 - Fix clause segmenter source_text to preserve original text
 - Or use a different approach (LLM simplification externally)
 - Or detect when simplification would produce low-quality output and skip
+
+---
+
+## 📋 HIGH Priority
 
 ### 3. Automated WSD Testing Framework
 Run the TESTING_FRAMEWORK.md pipeline on 10+ random Wikipedia words. Automate:
@@ -147,34 +139,45 @@ Common senses are overrepresented in benchmarks. Need tests for rare/domain-spec
 
 ---
 
-## ✅ DONE (Recent)
+## ✅ DONE (2026-07-10)
 
-| Date | Item | Commit |
-|------|------|--------|
-| 2026-07-10 | BEAGLE corpus scaling 10K→118K (2890 vocab, 12 domains) | — |
-| 2026-07-10 | ARCHITECTURE/DEVELOPMENT/TODO updated with research findings | — |
-| 2026-07-10 | Auto-load BEAGLE + spaCy similarity fallback | f7ac116 |
-| 2026-07-10 | Query pipeline — allow declarative sentences | 5e1ca59 |
-| 2026-07-10 | Copular handler — pcomp + coordination + clean relations | 107e9da |
-| 2026-07-10 | Testing framework table format | 9ed6165 |
-| 2026-07-10 | Revert: remove broken simplification layer | a08d50e |
-| 2026-07-10 | Research review: QE survey, HDC scaling, KG QA | — |
-| 2026-07-10 | BEAGLE corpus scaling 10K→118K (2890 vocab, 12 domains) | — |
-| 2026-07-10 | ARCHITECTURE/DEVELOPMENT/TODO updated with research findings | — |
-| 2026-07-09 | Self-review: lemmatize bug + hardcoded articles | 1aefdda |
-| 2026-07-09 | teach() gloss quality — spaCy lemmatization | a8e0e3e |
-| 2026-07-09 | Duplicate triple extraction fix | e78eea3 |
-| 2026-07-09 | Wikipedia-sourced benchmark | 9807e91 |
-| 2026-07-09 | WSD routing fix (3 sense creation) | 8f982d7 |
-| 2026-07-09 | 4 parser bugs fixed (GLM 5.2 review) | b229ce9 |
-| 2026-07-09 | TESTING_FRAMEWORK.md created | 4aaffaf |
-| 2026-07-09 | Proper citations in ARCHITECTURE.md | 3dbdcc9 |
-| 2026-07-09 | Unknown word benchmarks (bat 90%, crane 100%, rock 91.7%) | 17acd7a |
-| 2026-07-08 | Contextualized Embeddings Spec (5 approaches) | 5e89d9a |
-| 2026-07-08 | 7 dead methods removed (-204 lines) | 265c87d |
-| 2026-07-08 | SpaCy dependency-based WSD routing | 7ab5a07 |
-| 2026-07-08 | Tiered WSD (BEAGLE + KG + LOTG) | 510f643 |
+| Item | Commit |
+|------|--------|
+| Query expansion + ranking fix | 57694fc |
+| BEAGLE corpus scaling 10K→118K | efdbed4 |
+| Language isolation (no hardcoded English) | efdbed4 |
+| YES formatting for yes/no questions | 128f87b |
+| O(n²) pre-compute BEAGLE similarities | 490dc04 |
+| BEAGLE weight research-backed (2.0) | a88960c |
+| All GLM 5.2 review findings fixed | 90455e6 |
+| Research review (16 new refs #56-71) | efdbed4 |
+| ARCHITECTURE/DEVELOPMENT/TODO updated | efdbed4 |
 
 ---
 
-_"Fix the gloss, fix the world. Scale the corpus, scale the mind."_
+## ✅ DONE (2026-07-09 and earlier)
+
+| Item | Commit |
+|------|--------|
+| Auto-load BEAGLE + spaCy similarity fallback | f7ac116 |
+| Query pipeline — allow declarative sentences | 5e1ca59 |
+| Copular handler — pcomp + coordination | 107e9da |
+| Testing framework table format | 9ed6165 |
+| Revert: remove broken simplification layer | a08d50e |
+| Self-review: lemmatize bug + hardcoded articles | 1aefdda |
+| teach() gloss quality — spaCy lemmatization | a8e0e3e |
+| Duplicate triple extraction fix | e78eea3 |
+| Wikipedia-sourced benchmark | 9807e91 |
+| WSD routing fix (3 sense creation) | 8f982d7 |
+| 4 parser bugs fixed (GLM 5.2 review) | b229ce9 |
+| TESTING_FRAMEWORK.md created | 4aaffaf |
+| Proper citations in ARCHITECTURE.md | 3dbdcc9 |
+| Unknown word benchmarks (bat 90%, crane 100%, rock 91.7%) | 17acd7a |
+| Contextualized Embeddings Spec (5 approaches) | 5e89d9a |
+| 7 dead methods removed (-204 lines) | 265c87d |
+| SpaCy dependency-based WSD routing | 7ab5a07 |
+| Tiered WSD (BEAGLE + KG + LOTG) | 510f643 |
+
+---
+
+_"Fix the gloss, fix the world. Scale the corpus, scale the mind. Test with real-world, not just crafted queries."_
