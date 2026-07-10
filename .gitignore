@@ -21,6 +21,7 @@
 
 # Large generated files (reproduce via training)
 *.pkl
+*.bak
 data/synthetic_corpus_*
 .coverage
 .eggs/
