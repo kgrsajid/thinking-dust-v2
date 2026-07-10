@@ -1557,11 +1557,12 @@ class GenericThinkingDust:
                 s, r, o = m.group(1), m.group(2), m.group(3)
                 triples.append((s, r, o))
 
-        # Fallback: X relation Y (e.g., "RiverA feeds_into RiverB", "Alice is ceo_of CompanyX")
-        # Two patterns:
-        # 1. Underscore relations (compound like "ceo_of") — always allowed
-        # 2. Bare verb relations (like "powers") — only for minimal SVO sentences
-        #    (3 tokens, no copula) to prevent false triples from complex sentences
+        # Fallback: compound relations with underscores (e.g., "ceo_of", "feeds_into")
+        # spaCy consistently misparses underscored compound relations as nouns/punctuation.
+        # Two patterns handle all cases without magic numbers:
+        # 1. Copular: "X is compound_rel Y" — copula + compound relation
+        # 2. Non-copular: "X compound_rel Y" — bare compound relation
+        # Underscore is the universal signal for intentional compound relation names.
         # GraphRAG (Min et al., 2025): spaCy achieves 94% — regex handles the 6%.
         if not triples or all(r == "is_a" for _, r, _ in triples):
             # Pattern 1: "X is compound_rel Y" (copular with compound relation)
@@ -1577,18 +1578,6 @@ class GenericThinkingDust:
                     s, r, o = m.group(1), m.group(2), m.group(3)
                     if not self.parser.is_stop_word(r):
                         triples.append((s, _lemmatize(r), o))
-                else:
-                    # Pattern 3: "X verb Y" (bare verb, minimal SVO only)
-                    # Only for exactly 3 tokens with no copula — prevents false
-                    # triples from complex sentences like "the tennis match lasted three hours"
-                    tokens_list = text.split()
-                    has_copula = any(w in tokens_list for w in self.parser.lang_config.copula_verbs)
-                    if len(tokens_list) == 3 and not has_copula:
-                        m_bare = re.search(r'(\w+)\s+([a-z]+)\s+(\w+)', text)
-                        if m_bare:
-                            s, r, o = m_bare.group(1), m_bare.group(2), m_bare.group(3)
-                            if not self.parser.is_stop_word(r) and len(r) > 1:
-                                triples.append((s, _lemmatize(r), o))
 
         return triples
 
