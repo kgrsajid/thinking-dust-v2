@@ -1565,7 +1565,8 @@ class GenericThinkingDust:
         # GraphRAG (Min et al., 2025): spaCy achieves 94% — regex handles the 6%.
         if not triples or all(r == "is_a" for _, r, _ in triples):
             # Pattern 1: "X is compound_rel Y" (copular with compound relation)
-            m_copular = re.search(r'(\w+)\s+(?:is|are|was|were)\s+([a-z]+_[a-z]+)\s+(\w+)', text)
+            copula_pattern = '|'.join(re.escape(v) for v in self.parser.lang_config.copula_verbs)
+            m_copular = re.search(rf'(\w+)\s+(?:{copula_pattern})\s+([a-z]+_[a-z]+)\s+(\w+)', text)
             if m_copular:
                 s, r, o = m_copular.group(1), m_copular.group(2), m_copular.group(3)
                 triples.append((s, _lemmatize(r), o))
