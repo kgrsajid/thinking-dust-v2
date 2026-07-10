@@ -46,23 +46,27 @@ import numpy as np
 from collections import defaultdict
 
 from .hdc import generate_hypervector, bundle, similarity, normalize_hdc
+from td.languages import get_language
 
 
-# Minimal English stop words (function words removed before co-occurrence counting)
-STOP_WORDS = frozenset({
-    "the", "a", "an", "and", "or", "is", "are", "was", "were", "be", "been",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "must", "can", "shall", "it", "its", "this",
-    "that", "these", "those", "there", "their", "they", "them", "of", "to",
-    "in", "for", "on", "with", "at", "by", "from", "as", "into", "through",
-    "during", "before", "after", "about", "against", "between", "under",
-    "then", "once", "here", "why", "how", "all", "any", "both", "each",
-    "few", "more", "most", "other", "some", "such", "no", "nor", "not",
-    "only", "own", "same", "so", "than", "too", "very", "just", "but",
-    "if", "because", "until", "while", "down", "out", "off", "over",
-    "i", "you", "he", "she", "we", "me", "him", "her", "us",
-    "what", "which", "who", "whom", "whose",
-})
+def _get_stop_words() -> frozenset[str]:
+    """Load BEAGLE stop words from the language registry.
+
+    NEVER hardcode English words here. All language-specific word sets
+    live in td/languages/{lang}.py. The registry loads the appropriate
+    language based on configuration.
+
+    For a new language: define BEAGLE_STOP_WORDS in td/languages/xx.py
+    and register it. This function will load it automatically.
+    """
+    lang = get_language("en")  # Default to English; change when multilingual
+    if lang.beagle_stop_words:
+        return lang.beagle_stop_words
+    # Fallback: use parser stop words if BEAGLE-specific set not defined
+    return lang.stop_words
+
+
+STOP_WORDS = _get_stop_words()
 
 
 def tokenize(text: str) -> list[str]:

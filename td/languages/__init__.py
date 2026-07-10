@@ -62,6 +62,11 @@ class LanguageConfig:
     # Used with Jauhar et al. (2015) two-stage approach.
     # "this"/"that"/"it" as subject of abstract verb → discourse deixis.
     demonstrative_pronouns: FrozenSet[str] = frozenset()
+    # BEAGLE-specific stop words for word vector training.
+    # Superset of parser stop words: adds pronouns, interrogatives,
+    # and function words that should not accumulate context vectors.
+    # Used by td/perception/word_vectors.py — NEVER hardcoded.
+    beagle_stop_words: FrozenSet[str] = frozenset()
 
 
 # ── Language Registry ─────────────────────────────────────────────

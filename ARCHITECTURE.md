@@ -1,6 +1,6 @@
 # Thinking Dust v2 — System Architecture
 
-_Last updated: 2026-07-07 GMT+5_
+_Last updated: 2026-07-10 GMT+5_
 
 ---
 
@@ -2027,3 +2027,243 @@ CREATE TABLE feedback (
 - Phase 2: Collect 100+ queries with feedback
 - Phase 3: Implement CP calibration (Python `mapie` library or custom)
 - Phase 4: Replace raw confidence with calibrated confidence
+
+---
+
+## 14. Query Pipeline Architecture (Research-Backed — 2026-07-10)
+
+### The Problem
+
+`think()` returns "unknown" for most questions even when facts are in KG. Benchmark scores: "match" 25%, "spring" 41.7%. The inference engine works, the KG works, the WSD works — but the query→answer pipeline is the bottleneck.
+
+**Root causes:**
+1. BEAGLE vocabulary too small (1992 words) — query terms not in vocab
+2. `direct` method returns first SPARQL hit, not best match
+3. No query expansion — "used for" can't match "tool_for"
+4. `en_core_web_sm` has NO real word vectors (context tensors only)
+
+### Three-Stage Retrieval (Aneja et al., 2025)
+
+The research-backed solution is three-stage retrieval, proven on CRAG benchmark (71.9% accuracy without LLMs):
+
+```
+Query: "what is a match used for?"
+  ↓
+Stage 1: Entity Matching (exact + fuzzy)
+  Extract entities from query → match against KG entities
+  "match" → entity "match" found in KG
+  ↓
+Stage 2: Relation Matching (BEAGLE + TF-IDF)
+  Expand query tokens via BEAGLE nearest neighbors
+  "used" → [utilized(0.82), employed(0.78), designed(0.71), tool(0.65)]
+  Match expansions against KG relations (fuzzy ≥ 0.75)
+  "tool" matches "tool_for" (similarity 0.65, fuzzy 0.82)
+  ↓
+Stage 3: Ranking (similarity × type × source)
+  Rank candidates by:
+  (a) BEAGLE cosine similarity between query and relation
+  (b) TF-IDF specificity (rarer relations = more informative)
+  (c) Source preference (user > derived > heuristic)
+  ↓
+Answer: (match, tool_for, fire) — ranked #1
+```
+
+**Reference:** Aneja, K. et al. (2025). "Interpretable Question Answering with Knowledge Graphs." ISIC 2025. arXiv:2510.19181. Uses cosine similarity on node embeddings + fuzzy matching + reranking. 71.9% accuracy on CRAG benchmark without LLMs.
+
+### Query Expansion via BEAGLE Synonyms
+
+When query terms don't match KG relations directly, expand via BEAGLE nearest neighbors:
+
+```
+Query: "what is a match used for?"
+  ↓
+Extract key terms: ["match", "used", "for"]
+  ↓
+BEAGLE expansion of "used":
+  nearest_neighbors("used", 10) →
+    [utilized(0.82), employed(0.78), designed(0.71),
+     tool(0.65), purpose(0.61), function(0.58)]
+  ↓
+Filter against KG relations (fuzzy match ≥ 0.75):
+  "tool" matches "tool_for" (SequenceMatcher: 0.82)
+  "purpose" matches "used_for" (SequenceMatcher: 0.78)
+  ↓
+Rank by similarity × TF-IDF × source
+```
+
+**The hybrid approach (Esposito et al., 2019):**
+1. Extract synonyms from word vectors (BEAGLE)
+2. Filter by corpus context (match against KG relations)
+3. Rank by relevance (TF-IDF + similarity)
+
+This is the blueprint for TD v2. BEAGLE = Word2Vec, `RelationSynonymRegistry` = WordNet.
+
+**Reference:** Esposito, M. et al. (2019). "Hybrid Query Expansion using Lexical Resources and Word Embeddings for Sentence Retrieval in Question Answering." *Information Sciences*. ScienceDirect. MultiWordNet synonyms + Word2Vec contextualization outperforms either alone.
+
+**Reference:** Bassani, E. et al. (2016). "Query Expansion Using Word Embeddings." SIGIR 2016. ACM. Corpus-specific embeddings outperform generic GloVe for QE.
+
+**Reference:** Zamani, H. & Croft, W.B. (2017). "Relevance-based Word Embedding." SIGIR 2017. Foundation for embedding-based QE. Significantly better than RM3 on TREC.
+
+### TF-IDF Ranking for KG Results
+
+When multiple candidate facts exist for an entity, rank by relevance:
+
+```
+Entity "match" has 3 facts in KG:
+  (match, is_a, competitive_game)
+  (match, tool_for, fire)
+  (match, has_property, flammable)
+
+Query: "what is a match used for?"
+  ↓
+For each fact, compute:
+  score = BEAGLE_sim(query_tokens, relation) × IDF(relation) × source_weight
+  ↓
+  is_a:       sim=0.12 × IDF=0.3 × src=1.0 = 0.036
+  tool_for:   sim=0.65 × IDF=2.1 × src=1.0 = 1.365  ← WINNER
+  has_property: sim=0.18 × IDF=1.8 × src=1.0 = 0.324
+  ↓
+Answer: (match, tool_for, fire)
+```
+
+**Reference:** Salton, G. & Buckley, C. (1988). "Term-weighting approaches in automatic text retrieval." *Information Processing & Management*, 24(5): 513–523. Already implemented in TD v2 — needs to be applied to the `direct` method.
+
+### KGQE: Knowledge Graph Query Expansion
+
+Inject KG entity metadata into queries to improve disambiguation:
+
+```
+Query: "what is python?"
+  ↓
+Entity linked: "python" → KG has senses:
+  python (programming language)
+  python_1 (snake species)
+  ↓
+Inject type info:
+  "python [SEP] programming language scripting code"
+  "python_1 [SEP] snake reptile constrictor"
+  ↓
+BEAGLE similarity: query matches python (programming) better
+  ↓
+Answer from python (programming) sense
+```
+
+**Reference:** Perna, D. (2025). KGQE — Knowledge Graph Query Expansion. Injects entity label, type, canonical alias into query text. Handles entity ambiguity by type-specific facts. Cited in: Li et al. (2025), "Query Expansion in the Age of PLMs/LLMs." arXiv:2509.07794.
+
+**Reference:** Li, M. et al. (2025). "Query Expansion in the Age of Pre-trained and Large Language Models: A Comprehensive Survey." arXiv:2509.07794. 42-page survey organizing QE along 4 dimensions: injection point, grounding, learning, and KG integration.
+
+### GPRF: Generalized Pseudo-Relevance Feedback
+
+For iterative query refinement (future):
+
+```
+Query: "what is a match used for?"
+  ↓
+First pass: retrieve top-k facts via BEAGLE similarity
+  → (match, is_a, competitive_game) [score: 0.45]
+  → (match, tool_for, fire) [score: 0.38]
+  ↓
+Use top-k as "pseudo-relevant" feedback
+  Extract expansion terms from feedback facts: "tool", "fire", "burning"
+  ↓
+Second pass: expanded query retrieves with higher precision
+  → (match, tool_for, fire) [score: 0.82] ← boosted
+```
+
+**Reference:** Li, M. et al. (2025). "Generalized Pseudo-Relevance Feedback." arXiv:2510.25488. Bridges sparse and dense retrieval. Relaxates the "top-k are relevant" assumption — robust to noisy feedback.
+
+---
+
+## 15. BEAGLE Corpus Scaling (Research-Backed — 2026-07-10)
+
+### The Problem
+
+BEAGLE vocabulary is 1992 words (trained on 10K sentences). Query terms like "used", "for", "match" are not in vocab → similarity = 0 → queries fail.
+
+### Research Foundation
+
+| Paper | Year | Venue | Key Finding |
+|-------|------|-------|-------------|
+| Jones, Gorman & Wewhort | 2015 | *Psychonomic Bulletin & Review* | **Scaling to full Wikipedia yielded "strong benefits for every task."** Random Permutations (RP) scaled where circular convolution couldn't. Corpus quality matters as much as size — TASA (textbook English) beat Wikipedia despite similar quantity. |
+| Jamili et al. | 2026 | Springer | On-the-fly hypervector generation eliminates lookup tables. Orthogonal sequences (Hadamard, Walsh, Gold) maintain quality at D=128. Can reduce dimensions after scaling corpus. |
+| Vergés et al. | 2025 | *AI Review* (Springer) | Open-source benchmarking of HDC methods. Key-value encoding optimal. Iterative adaptive methods + regenerative strategy improve accuracy. |
+| VS-Graph | 2025 | arXiv | HDC maintains accuracy even with **aggressive dimensionality reduction** (D=8192→128). Training 450× faster than GNNs. |
+
+### The Scaling Strategy
+
+**Key insight from Jones et al. (2015):** Domain quality > raw size. TASA (educational textbooks, ~10M words) beat full Wikipedia (~2B words) on several tasks. Why? Because TASA covers the domains where disambiguation matters — not random web text.
+
+**TD v2 corpus domain requirements:**
+
+| Domain | WSD Words Covered | Example Sentences |
+|--------|-------------------|-------------------|
+| Biology | cell(organelle) | "The cell membrane controls what enters and exits the cell." |
+| Prison/rooms | cell(prison) | "The prisoner was locked in a small cell." |
+| Technology | cell(phone), apple(tech) | "Cell phones use wireless signals to communicate." |
+| Finance | bank(finance) | "The bank offered a low interest rate on the mortgage." |
+| Geography | bank(river), countries | "The river bank was eroded by flooding." |
+| Food/fruit | apple(fruit) | "She picked a ripe apple from the orchard." |
+| Programming | python(lang) | "Python is a popular language for data science." |
+| Zoology | python(snake) | "The python constricted its prey before swallowing." |
+| Astronomy | mercury(planet) | "Mercury orbits closest to the Sun." |
+| Chemistry | mercury(element) | "Mercury is a toxic liquid metal used in thermometers." |
+| General knowledge | Common words | "The capital of France is Paris." |
+
+**Broader coverage = better generalization.** The 100K corpus is a superset of benchmark domains plus general knowledge.
+
+### Random Permutations vs Circular Convolution
+
+**Critical finding from Jones et al. (2015):** Random Permutations (RP) scale to large corpora where circular convolution cannot.
+
+| Binding Method | Complexity | Scales to 100K+ | Performance |
+|---------------|------------|-----------------|-------------|
+| Circular convolution (current) | O(k log k) | ❌ Intractable at large corpus | Good on small corpus |
+| Random Permutations | O(k) | ✅ Scales linearly | Better on large corpus |
+
+**Current TD v2 uses circular convolution.** To scale to 100K+ sentences, switch to Random Permutations.
+
+**Reference:** Jones, M.N., Gorman, R.M., & Wewhort, D.J.K. (2015). "Encoding Sequential Information in Semantic Space Models: Comparing Cognitive Neuroscientists and Artificial Intelligence." *Psychonomic Bulletin & Review*. PMC4405220.
+
+### Implementation Plan
+
+1. **Generate 100K domain-specific sentences** via LLM (Kimi K2.6 or similar)
+2. **Switch BEAGLE from convolution to Random Permutations** (O(k log k) → O(k))
+3. **Train on 100K sentences** (~10-15 seconds on CPU with RP)
+4. **Optionally reduce dimensions** 10K→4K (VS-Graph shows minimal quality loss)
+5. **Verify vocabulary coverage** — "used", "for", "match" must be in vocab
+6. **Benchmark paraphrase similarity** — capital/city > 0.15, capital/sort < 0.05
+
+---
+
+## 16. Comprehensive Survey References (Added 2026-07-10)
+
+### Query Expansion
+
+| # | Paper | Year | Venue | Relevance |
+|---|-------|------|-------|-----------|
+| 56 | Li, M. et al. "Query Expansion in the Age of Pre-trained and Large Language Models: A Comprehensive Survey" | 2025 | arXiv:2509.07794 | 42-page QE survey. KGQE, VPRF, GPRF. Unified taxonomy across 4 dimensions. |
+| 57 | Li, M. et al. "Generalized Pseudo-Relevance Feedback" | 2025 | arXiv:2510.25488 | GPRF bridges sparse+dense retrieval. Robust to noisy feedback. |
+| 58 | Aneja, K. et al. "Interpretable Question Answering with Knowledge Graphs" | 2025 | ISIC, arXiv:2510.19181 | KG-only QA without LLMs. 71.9% on CRAG. Three-stage retrieval. |
+| 59 | Esposito, M. et al. "Hybrid QE using Lexical Resources and Word Embeddings" | 2019 | *Information Sciences* | MultiWordNet + Word2Vec QE. Blueprint for TD v2's BEAGLE+synonym approach. |
+| 60 | Bassani, E. et al. "Query Expansion Using Word Embeddings" | 2016 | SIGIR, ACM | Foundation: corpus-specific embeddings for QE. |
+| 61 | Zamani, H. & Croft, W.B. "Relevance-based Word Embedding" | 2017 | SIGIR, ACM | Embedding-based QE outperforms RM3 on TREC. |
+| 62 | Gabsi, I. et al. "Word2Vec-GloVe-BERT for QE" | 2024 | Springer ISDA | BERT embeddings outperform Word2Vec/GloVe for filtering expansion terms. |
+| 63 | Rahman, M. et al. "Semantics-aware QE using PRF" | 2023 | *J. Information Science* | BERT-based semantic similarity for weighting expansion terms. |
+| 64 | Perna, D. "KGQE: Knowledge Graph Query Expansion" | 2025 | (cited in survey) | Inject entity type + canonical alias into query for disambiguation. |
+
+### HDC / BEAGLE Scaling
+
+| # | Paper | Year | Venue | Relevance |
+|---|-------|------|-------|-----------|
+| 65 | Jones, Gorman & Wewhort. "Encoding Sequential Information in Semantic Space Models" | 2015 | *Psychonomic Bulletin* | RP scales to full Wikipedia. Corpus quality > quantity. TASA > Wikipedia. |
+| 66 | Jamili et al. "Innovative Techniques for Efficient HDC on Hardware" | 2026 | Springer | On-the-fly HV generation. Orthogonal sequences. D=128 sufficient. |
+| 67 | Vergés et al. "Classification using HDC: A Review" | 2025 | *AI Review* | Open-source HDC benchmark. Key-value encoding optimal. |
+| 68 | VS-Graph. "Scalable Graph Classification Using HDC" | 2025 | arXiv | 450× faster than GNNs. Robust at D=128. |
+
+### KG QA + Entity Linking
+
+| # | Paper | Year | Venue | Relevance |
+|---|-------|------|-------|-----------|
+| 69 | Pan et al. "LLMs Meet KGs for QA: Synthesis and Opportunities" | 2025 | EMNLP | Survey of LLM+KG synthesis for QA. Taxonomy of KG roles. |
+| 70 | Zhu et al. "KG2RAG: KG-Guided Retrieval for QA" | 2025 | — | Retrieves relevant subgraph from KG, expands chunks with KG for RAG. |
+| 71 | Yang et al. "KG-Rank: Multiple Ranking Methods for KG QA" | 2024 | — | Refines retrieved triples with ranking. |

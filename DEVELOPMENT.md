@@ -1,6 +1,6 @@
 # Thinking Dust v2 — Developer Guide
 
-_Last updated: 2026-07-07 GMT+5_
+_Last updated: 2026-07-10 GMT+5_
 
 This guide covers everything you need to set up, extend, and debug TD v2.
 
@@ -240,6 +240,69 @@ BEAGLE combines two vector representations for each word:
 2. **Context vector:** Initialized to the environmental vector. Updated by accumulating the environmental vectors of surrounding words (within a sliding window). Encodes the word's typical contexts.
 
 Paraphrase matching: Two words are semantically similar if their context vectors are similar (they appear in similar contexts), even if their identity vectors are unrelated.
+
+### Scaling BEAGLE: Random Permutations (Research-Backed)
+
+**Critical finding (Jones, Gorman & Wewhort, 2015):** Random Permutations (RP) scale to large corpora where circular convolution cannot.
+
+| Binding Method | Complexity | 100K+ sentences | Performance |
+|---------------|------------|-----------------|-------------|
+| Circular convolution (current TD v2) | O(k log k) | ❌ Intractable | Good on small corpus |
+| Random Permutations | O(k) | ✅ Scales linearly | Better on large corpus |
+
+**Reference:** Jones, M.N., Gorman, R.M., & Wewhort, D.J.K. (2015). "Encoding Sequential Information in Semantic Space Models." *Psychonomic Bulletin & Review*. PMC4405220. Key quote: "Only RPs were able to scale up to the full Wikipedia corpus, and doing so yielded strong benefits for every task."
+
+**Domain quality > raw size:** TASA (educational textbooks, ~10M words) beat full Wikipedia (~2B words) on several tasks. TD v2's 100K corpus should be domain-specific, not generic web text.
+
+**TD v2 domain requirements for WSD coverage:**
+
+| Domain | WSD Words | Example Sentence Pattern |
+|--------|-----------|------------------------|
+| Biology | cell(organelle) | "The {noun} {verb} what enters and exits the {noun}." |
+| Prison/rooms | cell(prison) | "The prisoner was locked in a small {noun}." |
+| Technology | cell(phone), apple(tech) | "{Noun} phones use wireless signals to communicate." |
+| Finance | bank(finance) | "The {noun} offered a low interest rate on the mortgage." |
+| Geography | bank(river) | "The river {noun} was eroded by flooding." |
+| Food/fruit | apple(fruit) | "She picked a ripe {noun} from the orchard." |
+| Programming | python(lang) | "{Noun} is a popular language for data science." |
+| Zoology | python(snake) | "The {noun} constricted its prey before swallowing." |
+| Astronomy | mercury(planet) | "{Noun} orbits closest to the Sun." |
+| Chemistry | mercury(element) | "{Noun} is a toxic liquid metal used in thermometers." |
+| General | Common words | "The capital of {country} is {city}." |
+
+**Dimensionality reduction:** VS-Graph (2025) shows HDC maintains accuracy at D=128 (from D=8192). After scaling corpus, TD v2 can optionally reduce dims 10K→4K with minimal quality loss.
+
+**Reference:** VS-Graph (2025). arXiv:2512.03394. "Maintains high accuracy even with hypervector dimensionality reduced to D=128."
+
+### BEAGLE 100K Corpus Generation
+
+```python
+# Generate domain-specific sentences via LLM
+# Target: 100K sentences across 11 domains + general knowledge
+# ~9K sentences per domain, ~1K general knowledge
+
+DOMAINS = {
+    "biology": 9000,      # cell, organelle, membrane, DNA, mitosis
+    "prison": 9000,       # cell, prisoner, jail, guard, inmate
+    "technology": 9000,   # cell phone, mobile, wireless, tower
+    "finance": 9000,      # bank, loan, mortgage, interest, teller
+    "geography": 9000,    # bank(river), countries, capitals, rivers
+    "food": 9000,         # apple, fruit, orchard, juice, pie
+    "programming": 9000,  # python, code, script, library, function
+    "zoology": 9000,      # python(snake), reptile, constrictor
+    "astronomy": 9000,    # mercury(planet), orbit, solar, planet
+    "chemistry": 9000,    # mercury(element), metal, thermometer
+    "general": 10000,     # countries, capitals, history, sports
+}
+# Total: 100,000 sentences
+
+# Each sentence should be:
+# - Simple declarative statement or question
+# - 5-20 words
+# - Domain-appropriate vocabulary
+# - No duplicates
+# - One sentence per line
+```
 
 ---
 

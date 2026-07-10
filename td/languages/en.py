@@ -146,6 +146,42 @@ GENITIVE_MARKERS = frozenset({"of"})
 # Reference: Jauhar et al. (2015), *SEM — two-stage approach
 DEMONSTRATIVE_PRONOUNS = frozenset({"this", "that", "it"})
 
+# ── English BEAGLE Stop Words ─────────────────────────────────────
+# Superset of parser stop words for word vector training.
+# Removes function words, pronouns, interrogatives, and auxiliaries
+# before co-occurrence counting. Only content words accumulate context.
+#
+# Used by td/perception/word_vectors.py — NEVER hardcoded in core logic.
+# When adding a new language, define an equivalent set in td/languages/xx.py.
+#
+# Reference: Jones & Mewhort (2007), Psychological Review 114(1): 1-37.
+#   "High-frequency function words are removed before counting."
+BEAGLE_STOP_WORDS = STOP_WORDS | frozenset({
+    # Pronouns (personal + possessive)
+    "i", "you", "he", "she", "we", "me", "him", "her", "us",
+    "my", "your", "our", "mine", "yours", "hers", "ours",
+    # Interrogatives
+    "what", "which", "who", "whom", "whose", "where", "when", "how", "why",
+    # Demonstratives (already in STOP_WORDS but explicit)
+    "this", "that", "these", "those",
+    # Relative pronouns
+    "who", "whom", "whose", "which", "that",
+    # Common auxiliaries (already in STOP_WORDS but explicit)
+    "do", "does", "did", "will", "would", "could", "should",
+    "may", "might", "must", "can", "shall",
+    # Determiners
+    "the", "a", "an", "some", "any", "no", "every", "each",
+    # Conjunctions
+    "and", "or", "but", "nor", "yet", "so",
+    # Prepositions (already in STOP_WORDS but explicit)
+    "of", "to", "in", "for", "on", "with", "at", "by", "from",
+    "as", "into", "through", "during", "before", "after", "about",
+    "against", "between", "under", "over", "above", "below",
+    # Other function words
+    "if", "because", "until", "while", "then", "once", "here", "there",
+    "not", "very", "just", "also", "still", "already", "even",
+})
+
 # ── Register English ──────────────────────────────────────────────
 register_language(LanguageConfig(
     code="en",
@@ -161,4 +197,5 @@ register_language(LanguageConfig(
     articles=ARTICLES,
     genitive_markers=GENITIVE_MARKERS,
     demonstrative_pronouns=DEMONSTRATIVE_PRONOUNS,
+    beagle_stop_words=BEAGLE_STOP_WORDS,
 ))

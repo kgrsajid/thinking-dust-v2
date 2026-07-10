@@ -18,6 +18,10 @@
 *.swp
 *~
 .DS_Store
+
+# Large generated files (reproduce via training)
+*.pkl
+data/synthetic_corpus_*
 .coverage
 .eggs/
 .idea/
