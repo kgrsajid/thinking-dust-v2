@@ -31,7 +31,7 @@ _Last updated: 2026-07-10_
 
 ## 🚨 URGENT (RIGHT NOW)
 
-### 1. Real-World Query Handling — THE next bottleneck
+### 1. Real-World Query Handling — DONE ✅
 
 **Problem:** We tested with clean queries like "what is a match used for". Real users say:
 - "I was wondering, what do you use a match for when starting a fire?"
@@ -40,22 +40,20 @@ _Last updated: 2026-07-10_
 
 **Architecture:** TD v2 is a reasoning engine, NOT an NLP engine. A separate **preprocessing layer** handles messy human input before it reaches TD v2. Same pattern as ChatGPT o1/o3/R1: preprocess → reason → answer.
 
-**Bootstrap approach:** Use an LLM for preprocessing during demo/development:
-```
-LLM prompt: "Simplify this query for a knowledge graph engine. 
-Remove filler, resolve anaphora, extract intent. 
-Query: '{user_input}'
-Output: clean, structured query."
-```
+**Solution implemented:**
+- LLM-based preprocessing with JSON output format
+- 14 few-shot examples covering all sentence types
+- Rule-based fallback (zero-cost, production mode)
+- Parser compatibility notes documented
 
-**What's missing:**
-- **Preprocessing layer** — LLM-based (bootstrap) or rule-based + spaCy (production)
-- **Anaphora resolution** — "that thing" → "match" (needs context)
-- **Multi-turn context** — "what about prison?" → resolve to "cell in prison"
+**Files:** `td/preprocessing/__init__.py`, `PREPROCESSING_PROMPT.md`
 
-**Research backing:**
-- GraphRAG (Min et al., 2025) — sentence simplification improves KG extraction
-- UDASTE (2023) — complex sentences are primary source of extraction errors
+**What it handles:**
+- Filler removal: "So I was curious" → stripped
+- Anaphora resolution: "that thing" → entity from context
+- Clause splitting: "X and Y verb Z" → two sentences
+- Subject repetition: "Alice and Bob went" → "Alice went" + "Bob went"
+- Relative clause simplification: "birds with long legs that migrate" → 3 sentences
 
 ---
 
