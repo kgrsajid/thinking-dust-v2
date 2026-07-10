@@ -5,7 +5,8 @@ that TD v2's parser can extract triples from.
 
 **Architecture:** User → LLM Preprocessor → TD v2 (reasoning engine)
 
-**Version:** v1 (tested against v2 by GLM 5.2 — v1 won on both test cases)
+**Version:** v1 (tested against v2 by GLM 5.2 — v1 won on all test cases)
+**Model:** Gemini (selected after comparison with Kimi K2.7 Code and Kimi K2.6)
 
 ---
 
@@ -20,15 +21,47 @@ that TD v2's parser can extract triples from.
 | Question handling | ✅ Keeps question form | ❌ Converts to declarative |
 | Simplicity | ✅ 8 rules, concise | ⚠️ 11 rules, verbose |
 
-**Test results (Gemini API):**
+---
 
-Test 1: "seals are marine mammals that live in cold waters along the Atlantic coast and they haul out on rocks to rest"
-- v1: 5 sentences, each with clear SVO, "along Atlantic coast" separated
-- v2: 4 sentences, "along Atlantic coast" attached (parser can't handle)
+## Model Selection (2026-07-11)
 
-Test 2: "Python is a programming language that is used for data science and web development and it was created by Guido van Rossum in the Netherlands"
-- v1: 5 sentences, `Python tool_for data science` (underscored relation)
-- v2: 5 sentences, `Developers use Python for data science` (invented entity)
+Tested three LLMs with the v1 prompt on two complex sentences.
+
+### Test 1: "seals are marine mammals that live in cold waters along the Atlantic coast and they haul out on rocks to rest"
+
+| # | Gemini | K2.7 Code | K2.6 |
+|---|--------|-----------|------|
+| 1 | `seals is_a marine mammals` | `seals is_a marine mammals` | `Seals are marine mammals.` |
+| 2 | `seals live in cold waters` | `seals live in cold waters` | `Seals live in cold waters.` |
+| 3 | `seals live along Atlantic coast` | `cold waters are along the Atlantic coast` ⚠️ | `Seals live along the Atlantic coast.` |
+| 4 | `seals haul out on rocks` | `seals haul out on rocks` | `Seals haul out on rocks.` |
+| 5 | `seals haul out to rest` | `seals rest` | `Seals rest.` |
+
+### Test 2: "Python is a programming language that is used for data science and web development and it was created by Guido van Rossum in the Netherlands"
+
+| # | Gemini | K2.7 Code | K2.6 |
+|---|--------|-----------|------|
+| 1 | `Python is_a programming language` | `Python is_a programming language` | `Python is_a programming_language.` |
+| 2 | `Python tool_for data science` ✅ | `Python used_for data science` ✅ | `Python used_for data_science.` |
+| 3 | `Python tool_for web development` ✅ | `Python used_for web development` ✅ | `Python used_for web_development.` |
+| 4 | `Guido van Rossum created Python` | `Python created_by Guido van Rossum` | `Python created_by Guido_van_Rossum.` |
+| 5 | `Python created_in the Netherlands` | `Python created_in Netherlands` | `Python created_in the_Netherlands.` |
+
+### Model Comparison
+
+| Criteria | Gemini | K2.7 Code | K2.6 |
+|----------|--------|-----------|------|
+| Underscored relations | ✅ `tool_for` | ✅ `used_for` | ✅ `used_for` |
+| Entity names | ✅ Clean | ⚠️ `cold waters are along...` | ⚠️ `programming_language` (extra underscores) |
+| Consistent subjects | ✅ | ✅ | ✅ |
+| Speed | Fast (~28s) | Fast (~26s) | **Slow** (~180s, 2322 reasoning tokens) |
+| No invented entities | ✅ | ⚠️ | ✅ |
+
+**Selected model: Gemini** — cleanest output, fastest, no weird artifacts.
+
+**K2.6 note:** Reasoning model (spends 2322 tokens thinking before outputting). Good for complex reasoning but overkill for simple sentence splitting. K2.7 Code is faster and equally good.
+
+**K2.7 Code note:** Good output but creates occasional weird triples (`cold waters are along the Atlantic coast`). Not as clean as Gemini.
 
 ---
 
