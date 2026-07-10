@@ -100,8 +100,16 @@ def canonicalize_relation(relation: str, nlp=None) -> str:
         "capital_of"    → "capital_of" (compound relation, keep as-is)
         "in"            → "in"     (not a verb+prep, keep as-is)
         "depends_on"    → "depends_on" (compound relation, keep as-is)
+        "is"            → "is_a"   (clause segmenter produces "is", dep parser produces "is_a")
     """
     rel = relation.lower().strip()
+
+    # "is" → "is_a" canonicalization
+    # Clause segmenter produces (X, is, Y), dependency parser produces (X, is_a, Y).
+    # Both represent the same copular relationship. Canonicalize to "is_a".
+    # Reference: UD `attr` — nominal predicate of copular construction
+    if rel == "is":
+        return "is_a"
 
     # Compound relations are kept as-is
     if rel in COMPOUND_RELATIONS:

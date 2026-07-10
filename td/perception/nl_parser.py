@@ -673,7 +673,10 @@ class GenericNLParser:
                             attr_text = self._get_chunk_text(doc, attr)
                             for subj_text in subj_texts:
                                 triples.append((subj_text, "is_a", attr_text))
-                            continue
+                            # Issue 2 fix: removed continue here to let fall through
+                            # to xcomp check. Pre-existing bug: attr_preps short-circuited
+                            # xcomp extraction for sentences like "X is part of Y central to Z".
+                            # GLM 5.2 review (2026-07-10)
 
                     # Check for acl: "is a technique comparing X"
                     # attr=technique, acl=comparing, dobj of acl=units
@@ -741,13 +744,17 @@ class GenericNLParser:
                             continue
 
                 # Check preps attached to ROOT: "is in Y", "is before Y"
+                # Issue 3 fix: loop over ALL ROOT preps, not just the first.
+                # "the map is on the wall in the classroom" → (map, on, wall) + (map, in, classroom)
+                # GLM 5.2 review (2026-07-10)
                 if preps:
-                    prep = preps[0]
-                    pobj = [c for c in prep.children if c.dep_ == "pobj"]
-                    if pobj:
-                        obj_text = self._get_chunk_text(doc, pobj[0])
-                        for subj_text in subj_texts:
-                            triples.append((subj_text, prep.lemma_, obj_text))
+                    for prep in preps:
+                        pobj = [c for c in prep.children if c.dep_ == "pobj"]
+                        if pobj:
+                            obj_text = self._get_chunk_text(doc, pobj[0])
+                            for subj_text in subj_texts:
+                                triples.append((subj_text, prep.lemma_, obj_text))
+                    if preps:
                         continue
 
             # ─── Verb constructions: "X evolved from Y", "X treats Y" ──
