@@ -148,7 +148,9 @@ Every benchmark run MUST produce two tables:
     ...
 ```
 
-Columns: `#` (row number), `Sense` (expected sense label), `Teach Sentence` (input), `Extracted Triple` (s, r, o) or "(no triple)".
+Columns: `#` (row number), `Sense` (expected sense label), `Teach Sentence` (input), `Extracted Triple` (s, r, o) or "(no triple extracted)".
+
+**CRITICAL:** The Extracted Triple column MUST be shown in every benchmark run. Without it, you can't verify what was actually stored in the KG or diagnose extraction failures.
 
 ### Table 2: Questions & Answers
 
