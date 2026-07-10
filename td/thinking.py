@@ -1908,6 +1908,10 @@ class GenericThinkingDust:
                                 query_bonus = 1.0 if r.replace("_", " ") in _text else 0.0
                                 fwd_bonus = 0.5 if direction == "forward" else 0.0
                                 beagle_sim = _rbs.get(r, 0.0)
+                                # BEAGLE weight 2.0: BEAGLE similarity range [0,1] is
+                                # compressed vs IDF range [0, log(N)]. Upweighting to 2.0
+                                # balances the contributions so BEAGLE isn't drowned by IDF.
+                                # Calibration constant — adjust via cross-validation.
                                 return idf + query_bonus + fwd_bonus + (2.0 * beagle_sim)
 
                             candidates.sort(key=_score, reverse=True)
@@ -2016,7 +2020,8 @@ class GenericThinkingDust:
         # Check "are X and Y the same?" — special case for functional comparison
         # Uses language registry for equality signals.
         # Reference: td/languages/en.py — relation_prototypes["equivalent"]
-        equality_signals = {"same", "equal", "identical", "equivalent"}
+        equiv_proto = self.parser.lang_config.relation_prototypes.get("equivalent", "")
+        equality_signals = set(equiv_proto.split()) if equiv_proto else {"same", "equal", "identical", "equivalent"}
         if equality_signals & set(tokens):
             if len(entities_in_query) >= 2:
                 result = self.kg.check_same(entities_in_query[0], entities_in_query[1])
