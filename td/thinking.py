@@ -1558,30 +1558,36 @@ class GenericThinkingDust:
                 triples.append((s, r, o))
 
         # Fallback: X relation Y (e.g., "RiverA feeds_into RiverB", "Alice is ceo_of CompanyX")
-        # Two guards to prevent false triples:
-        # A. Underscore relation (compound like "ceo_of", "feeds_into") — always allow
-        # B. No underscore + short sentence (≤5 words) + no copula — allow for bare verbs
-        # This prevents (the, tennis, match) from long sentences while allowing
-        # (RiverA, feeds_into, RiverB) and (Device0, powers, Device1).
+        # Two patterns:
+        # 1. Underscore relations (compound like "ceo_of") — always allowed
+        # 2. Bare verb relations (like "powers") — only for minimal SVO sentences
+        #    (3 tokens, no copula) to prevent false triples from complex sentences
         # GraphRAG (Min et al., 2025): spaCy achieves 94% — regex handles the 6%.
         if not triples or all(r == "is_a" for _, r, _ in triples):
             # Pattern 1: "X is compound_rel Y" (copular with compound relation)
-            # spaCy misparses "ceo_of" as attr → extracts is_a instead of ceo_of
             m_copular = re.search(r'(\w+)\s+(?:is|are|was|were)\s+([a-z]+_[a-z]+)\s+(\w+)', text)
             if m_copular:
                 s, r, o = m_copular.group(1), m_copular.group(2), m_copular.group(3)
                 triples.append((s, _lemmatize(r), o))
             else:
-                # Pattern 2: "X relation Y" (no copula)
-                m = re.search(r'(\w+)\s+([a-z_]+)\s+(\w+)', text)
+                # Pattern 2: "X compound_rel Y" (non-copular, underscore relation)
+                m = re.search(r'(\w+)\s+([a-z]+_[a-z]+)\s+(\w+)', text)
                 if m:
                     s, r, o = m.group(1), m.group(2), m.group(3)
-                    has_underscore = '_' in r
-                    has_copula = any(w in text.split() for w in self.parser.lang_config.copula_verbs)
-                    is_short = len(text.split()) <= 5
-                    if not self.parser.is_stop_word(r) and len(r) > 1:
-                        if has_underscore or (is_short and not has_copula):
-                            triples.append((s, _lemmatize(r), o))
+                    if not self.parser.is_stop_word(r):
+                        triples.append((s, _lemmatize(r), o))
+                else:
+                    # Pattern 3: "X verb Y" (bare verb, minimal SVO only)
+                    # Only for exactly 3 tokens with no copula — prevents false
+                    # triples from complex sentences like "the tennis match lasted three hours"
+                    tokens_list = text.split()
+                    has_copula = any(w in tokens_list for w in self.parser.lang_config.copula_verbs)
+                    if len(tokens_list) == 3 and not has_copula:
+                        m_bare = re.search(r'(\w+)\s+([a-z]+)\s+(\w+)', text)
+                        if m_bare:
+                            s, r, o = m_bare.group(1), m_bare.group(2), m_bare.group(3)
+                            if not self.parser.is_stop_word(r) and len(r) > 1:
+                                triples.append((s, _lemmatize(r), o))
 
         return triples
 
