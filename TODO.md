@@ -61,45 +61,33 @@ which the parser can't handle. Need to either:
 - Or use a different approach (LLM simplification externally)
 - Or detect when simplification would produce low-quality output and skip
 
-### 2a. Parser Bugs Found (2026-07-10)
+### 2a. Parser Bugs Found (2026-07-10) — DONE ✅
 
-**Bug 1: Missing copular attribute triple**
-```
-Input:    "a cell is a small room in a prison"
-Extracted: (cell, room_in, prison)
-Missing:   (cell, is_a, small room)
-```
-spaCy: cell=nsubj, is=ROOT, room=attr, small=amod(room)
-Root cause: parser doesn't extract `attr` dependency as (subject, is_a, attr).
+**Bug 1: Missing copular attribute triple** ✅ Fixed
+- Emit `(subj, is_a, attr)` before `continue` in attr_preps branch
+- Reference: UD `attr` — nominal predicate of copular construction
 
-**Bug 2: Adverb leaking into extraction**
-```
-Input:    "the prisoner was locked in a cell overnight"
-Extracted: (prisoner, locked_in, cell) ← correct
-Issue: "overnight" (advmod) shouldn't be in training data
-```
-Root cause: advmod tokens aren't filtered from triple extraction.
+**Bug 2: Adverb leaking into extraction** ✅ Fixed
+- POS guard: only accept NOUN/PROPN advmod as subject
+- Reference: UD `advmod` — adverbs are NOT entities
 
-**Bug 3: No triple from copular + reduced relative clause**
-```
-Input:    "mitochondria are organelles found in cells"
-Extracted: (none)
-Expected: (mitochondria, is_a, organelles)
-```
-spaCy: mitochondria=nsubj, are=ROOT, organelles=attr, found=acl(organelles)
-Root cause: parser doesn't handle copular + `acl` (reduced relative clause).
+**Bug 3: No triple from copular + reduced relative clause** ✅ Fixed
+- Added prep chain handling for acl verbs + fallback is_a
+- Reference: TEA Nets (arXiv, Apr 2026) — cascading extraction
 
-**Bug 4: No triple from passive voice with agent**
-```
-Input:    "the river bank was eroded by flooding"
-Extracted: (none)
-Expected: (flooding, eroded, river bank)
-```
-spaCy: bank=nsubjpass, eroded=ROOT, by=agent(eroded), flooding=pcomp(by)
-Root cause: parser doesn't handle `agent` (by-phrase) in passive voice.
-Reference: TEA Nets (arXiv, Apr 2026) — nsubjpass + agent dep swap.
+**Bug 4: No triple from passive voice with agent** ✅ Fixed
+- Accept `pcomp` alongside `pobj` in agent dependency
+- Reference: TEA Nets (2026) — nsubjpass + agent dep swap
 
-**Status:** GLM 5.2 subagent investigating. Fixes needed in `td/perception/nl_parser.py`.
+**Additional fixes:**
+- `is` → `is_a` canonicalization via `lang_config.copula_to_isa`
+- Regex fallback: underscore-only guard (no magic numbers)
+- `equality_signals` from `lang_config.relation_prototypes`
+- BEAGLE weight 2.0 documented as calibration constant
+
+**GLM 5.2 code review:** 2 actionable findings fixed (equality_signals, BEAGLE weight docs). `_extract_triples_regex()` hardcoded English documented as "English-only fallback".
+
+**Commits:** 4f5e98a, b0cce9c, 33c8e65, d1d1527, bd690bf, f4109b3, 4e3add7, c9f63bd
 
 ### 2b. Skipped Sentence Logging
 When spaCy can't extract triples, log the sentence for future parser improvement.
