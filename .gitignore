@@ -49,3 +49,4 @@ venv/
 
 # RDF store (runtime data)
 data/td_store/
+data/skipped_sentences.log
