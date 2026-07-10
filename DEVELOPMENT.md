@@ -955,6 +955,86 @@ def test_reflexive_inference(td):
 
 ## 8. Future Development Guide
 
+### 8.0 Input Preprocessing Layer (Layer 0)
+
+**Architecture:** TD v2 is a reasoning engine, NOT an NLP engine. A separate preprocessing layer handles messy human input before it reaches `think()` or `teach()`.
+
+```
+User Input (messy)
+    ↓
+Preprocessing Layer (Layer 0)
+    ↓
+Clean Query → TD v2 think()
+    ↓
+Answer + Proof Trace
+```
+
+**Bootstrap approach (LLM-based):**
+
+For demo/development, call an LLM to simplify user input before passing to TD v2:
+
+```python
+def preprocess_query(user_input: str, llm_client) -> str:
+    """Simplify messy human input into a clean query for TD v2.
+    
+    Uses an LLM for preprocessing during bootstrap.
+    Production can replace with rule-based + spaCy.
+    """
+    prompt = f"""Simplify this query for a knowledge graph reasoning engine.
+Remove filler words, resolve anaphora, extract the core intent.
+Output ONLY the simplified query, nothing else.
+
+Query: '{user_input}'
+Simplified:"""
+    
+    response = llm_client.complete(prompt)
+    return response.strip()
+
+# Usage:
+clean_query = preprocess_query(
+    "So I was curious, what's the deal with matches and fire?",
+    llm_client
+)
+# clean_query → "what is match related to fire"
+result = td.think(clean_query)
+```
+
+**What the preprocessing handles:**
+- Filler removal: "So I was curious", "like", "you know"
+- Intent normalization: "what's the deal with X" → "what is X related to"
+- Anaphora resolution: "that thing" → entity from context
+- Slang → formal: "what's the deal" → "what is the relationship"
+- Multi-turn context: "what about prison?" → "what is cell in prison"
+
+**Production approach (rule-based + spaCy):**
+
+For zero-cost production, use spaCy dependency parsing + rule-based simplification:
+
+```python
+def preprocess_query_spacy(user_input: str, nlp) -> str:
+    """Rule-based preprocessing using spaCy.
+    
+    1. Parse with spaCy
+    2. Extract content words (nouns, verbs, adjectives)
+    3. Remove filler (interjections, discourse markers)
+    4. Reconstruct clean query
+    """
+    doc = nlp(user_input)
+    content_tokens = [
+        tok for tok in doc
+        if tok.pos_ in ("NOUN", "VERB", "ADJ", "PROPN", "NUM")
+        and not tok.is_stop
+    ]
+    if not content_tokens:
+        return user_input  # fallback to original
+    return " ".join(tok.text for tok in content_tokens)
+```
+
+**Files:**
+- `td/preprocessing/__init__.py` — preprocessing module (planned)
+- `td/preprocessing/llm_preprocessor.py` — LLM-based bootstrap
+- `td/preprocessing/rule_preprocessor.py` — rule-based production
+
 ### 8.1 Adding Temporal Reasoning
 
 **Files to modify:** `td/kg/__init__.py`, `td/perception/nl_parser.py`, new file `td/reasoning/temporal.py`
