@@ -31,11 +31,30 @@ _Last updated: 2026-07-10_
 
 ## 🚨 URGENT (RIGHT NOW)
 
-### 1. Three-Layer Preprocessing Architecture — IN PROGRESS
+### 1. Implement Preprocessing Layer with Gemini — NEXT SESSION
 
-**Plan:** `PREPROCESSING_PLAN.md` (comprehensive, research-backed)
-**Prompt:** v1 (`PREPROCESSING_PROMPT.md`, handles both teach AND query — no separate query prompt needed)
+**Prompt:** v1 (confirmed as final, tested against v2 via Gemini API)
+**Model:** Gemini (selected over Kimi K2.7 Code and K2.6 — cleanest output, fastest)
+**Files:** `PREPROCESSING_PROMPT.md` (prompt), `td/preprocessing/__init__.py` (module)
+
+**What to do:**
+- Wire Gemini API call into `td/preprocessing/__init__.py`
+- Add Gemini API key to environment
+- Test with the two benchmark sentences (seals, Python)
+- Integrate into `demos/chat_flare.py` for live demo
+- Test with real messy queries
+
+**Test cases:**
+- "So I was curious, what's the deal with matches and fire?" → `["what is match used for"]`
+- "The cell in biology, what's it made of vs the one in prison?" → `["what is cell in biology made of", "what is cell in prison"]`
+- "seals are marine mammals that live in cold waters along the Atlantic coast and they haul out on rocks to rest" → 5 atomic sentences
+
+### 1a. Three-Layer Preprocessing Architecture — NEW (2026-07-12)
+
+**Plan:** `PREPROCESSING_PLAN.md` (comprehensive, research-backed, 13 references)
+**Prompt:** v1 handles both teach AND query — no separate query prompt needed
 **Module:** `td/preprocessing/__init__.py`
+**Research:** Kamana et al. (2026) spaCy rules ROUGE-1=0.67, WikiSplit++ T5-small 99% entailment
 
 **What's done:**
 - ✅ Coreference resolution (he/she/it/they + discourse deixis for this/that)
@@ -62,11 +81,29 @@ _Last updated: 2026-07-10_
 - [ ] Wire Gemini API into `td/preprocessing/__init__.py`
 - [ ] Add Gemini API key to environment
 
-### 1b. Real-World Query Handling — see PREPROCESSING_PLAN.md
+### 1b. Real-World Query Handling — IN PROGRESS
 
-**Architecture:** Three-layer preprocessing (rules → T5-small → confidence → optional LLM)
-**Status:** Layer A (rule-based) ready to implement, Layers B/C designed
-**Coreference:** ✅ Already implemented (spaCy two-pipeline, he/she/it/they + this/that discourse deixis)
+**Problem:** We tested with clean queries like "what is a match used for". Real users say:
+- "I was wondering, what do you use a match for when starting a fire?"
+- "So like, that thing you strike to make fire, what's it called?"
+- "The cell in biology, what's it made of vs the one in prison?"
+
+**Architecture:** TD v2 is a reasoning engine, NOT an NLP engine. A separate **preprocessing layer** handles messy human input before it reaches TD v2. Same pattern as ChatGPT o1/o3/R1: preprocess → reason → answer.
+
+**What's done:**
+- ✅ Prompt designed (v1, tested against v2 via Gemini API)
+- ✅ Module skeleton created (`td/preprocessing/__init__.py`)
+- ✅ LLM model selected (Gemini — cleanest output, fastest)
+- ✅ `PREPROCESSING_PROMPT.md` documented with comparison results
+- ✅ Coreference resolution implemented (spaCy two-pipeline, he/she/it/they + this/that)
+- ✅ PREPROCESSING_PLAN.md written (three-layer architecture, research-backed)
+
+**What's NOT done:**
+- 🔲 Wire Gemini API call into `td/preprocessing/__init__.py`
+- 🔲 Add Gemini API key to environment
+- 🔲 Test with messy queries end-to-end
+- 🔲 Integrate into `demos/chat_flare.py`
+- 🔲 Multi-turn context ("what about prison?" → "cell in prison") — needs SessionContext
 
 ---
 
