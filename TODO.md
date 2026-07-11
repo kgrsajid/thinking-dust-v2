@@ -54,37 +54,35 @@ _Last updated: 2026-07-10_
 - "The cell in biology, what's it made of vs the one in prison?" → `["what is cell in biology made of", "what is cell in prison"]`
 - "seals are marine mammals that live in cold waters along the Atlantic coast and they haul out on rocks to rest" → 5 atomic sentences
 
-### 1a. Three-Layer Preprocessing Architecture — NEW (2026-07-12)
+### 1a. Preprocessing Layer — MAY NOT BE NEEDED (2026-07-12)
 
-**Plan:** `PREPROCESSING_PLAN.md` (comprehensive, research-backed, 13 references)
-**Prompt:** v1 handles both teach AND query — no separate query prompt needed
-**Module:** `td/preprocessing/__init__.py`
-**Research:** Kamana et al. (2026) spaCy rules ROUGE-1=0.67, WikiSplit++ T5-small 99% entailment
+**Finding:** TD v2's vocabulary-matching approach handles messy queries natively.
+No preprocessing needed for QUERIES. May still be needed for complex TEACH sentences.
 
-**What's done:**
+**Evidence:**
+- "So like, what do seals actually eat?" → `eat(seals) → fish` ✅ (591ms, no preprocessing)
+- "I was wondering, whats a match used for?" → `used_for(match) → fire` ✅ (299ms, no preprocessing)
+- How it works: `re.findall(r'\w+', text)` extracts all words → matches against KG vocabulary → filler words ignored (not in KG)
+
+**Research backing:**
+- GraphRAG (Min et al., 2025): "SpaCy noun phrase extractor to pinpoint key concepts within the query"
+- Aneja et al. (2025): "Fuzzy Entity Matching against graph nodes, edit distance up to 3"
+- Standard KGQA pattern: tokenize → match against KG → ignore non-matching tokens
+
+**When preprocessing IS needed:**
+- Complex TEACH sentences: "seals are marine mammals that live in cold waters along the Atlantic coast and they haul out on rocks to rest" → parser extracts 2/5 facts, needs splitting
+- The parser already handles messy QUERIES via vocabulary filtering
+
+**What's done (infrastructure exists if needed):**
 - ✅ Coreference resolution (he/she/it/they + discourse deixis for this/that)
 - ✅ Clause segmentation (spaCy conj dependency)
-- ✅ Passive voice extraction (nsubjpass + agent)
-- ✅ Relative clause attachment (acl:relcl)
-- ✅ Preprocessing prompt v1 (tested with Gemini, Kimi K2.7, K2.6)
+- ✅ Preprocessing prompt v1 for teach (`PREPROCESSING_PROMPT.md`)
+- ✅ Query prompt v1 (`QUERY_PREPROCESSING_PROMPT.md`)
 - ✅ PREPROCESSING_PLAN.md written (three-layer architecture)
+- ✅ PREPROCESSING_PLAN.md written (three-layer architecture, research-backed)
 
-**What's NOT done (Layer A — rule-based, can do NOW):**
-- [ ] Implement `td/preprocessing/rule_based.py` — filler removal + query normalization
-- [ ] Wire into `demos/chat_flare.py`
-- [ ] Test with 10 messy queries
-
-**What's NOT done (Layer B — T5-small, this week):**
-- [ ] Download WikiSplit++ dataset
-- [ ] Fine-tune T5-small (60M params, CPU, ~99% entailment)
-- [ ] Implement `td/preprocessing/t5_splitter.py`
-
-**What's NOT done (Layer C — confidence gate, this week):**
-- [ ] Implement `td/preprocessing/confidence.py` (is_clean_svo check)
-
-**What's NOT done (optional — Gemini as fallback):**
-- [ ] Wire Gemini API into `td/preprocessing/__init__.py`
-- [ ] Add Gemini API key to environment
+**Status:** DEFERRED. Focus on scaling the KG (millions of facts) instead of preprocessing.
+Preprocessing for teach can be revisited when loading bulk data (Wikipedia, Wikidata).
 
 ### 1b. Real-World Query Handling — IN PROGRESS
 
