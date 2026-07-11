@@ -1,7 +1,23 @@
-# Preprocessing Layer — LLM Prompt (Final Version)
+# Preprocessing Layer — TEACH Prompt (v1 Final)
 
-**Purpose:** Transform messy human input into clean, structured sentences
-that TD v2's parser can extract triples from.
+**⚠️ THIS PROMPT IS FOR TEACHING FACTS ONLY. ⚠️**
+**⚠️ FOR USER QUERIES, SEE: `QUERY_PREPROCESSING_PROMPT.md` ⚠️**
+
+**When to use this prompt:**
+- User is TEACHING facts: "Paris is the capital of France"
+- User is providing knowledge: "seals are marine mammals that live in cold waters"
+- Input is DECLARATIVE (statements, not questions)
+
+**When NOT to use this prompt:**
+- User is ASKING questions: "What do seals eat?" → use `QUERY_PREPROCESSING_PROMPT.md`
+- User is QUERYING the KG: "Is Python good for data science?" → use `QUERY_PREPROCESSING_PROMPT.md`
+- Input is INTERROGATIVE (questions, requests for information)
+
+**Why two prompts?**
+- This prompt: Rule 7 says "rewrite as declarative" — correct for teach, WRONG for queries
+- Query prompt: Rule 7 says "keep question mark" — correct for queries, WRONG for teach
+- Using this prompt for queries causes hallucinations (LLM invents answers instead of formatting queries)
+- Using query prompt for teach produces questions instead of facts
 
 **Architecture:** User → LLM Preprocessor → TD v2 (reasoning engine)
 
