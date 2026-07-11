@@ -84,6 +84,39 @@ No preprocessing needed for QUERIES. May still be needed for complex TEACH sente
 **Status:** DEFERRED. Focus on scaling the KG (millions of facts) instead of preprocessing.
 Preprocessing for teach can be revisited when loading bulk data (Wikipedia, Wikidata).
 
+### 1c. Scaling to Millions of Facts — NEXT PRIORITY (2026-07-12)
+
+**Goal:** Load millions of structured facts into TD v2's KG.
+
+**Data Sources:**
+- **Wikidata** — 116M items, 16B triples, free API, CC0 license
+- **Wikidata5m** — 5M entities, 20M triples, aligned with Wikipedia, ready to download
+  - `https://deepgraphlearning.github.io/project/wikidata5m`
+- **Domain subsets** — filter Wikidata to geography, biology, tech, etc.
+
+**Why preprocessing may NOT be needed:**
+- Wikidata triples are already clean `(subject, predicate, object)` — no sentence parsing needed
+- The vocabulary-matching trick handles messy queries automatically
+- Focus: data LOADING, not data CLEANING
+
+**Research backing:**
+| Paper | Year | What | Scale | Result |
+|-------|------|------|-------|--------|
+| PathHD (Liu et al.) | Dec 2025 | HDC path retrieval for KGQA | WebQSP/CWQ/GrailQA | Matches neural baselines, 40-60% less latency |
+| HDReason (Chen et al.) | 2024 | HDC for KG completion | YAGO3-10 (120K entities) | 10.6x speedup over GPU |
+| VS-Graph | Dec 2025 | HDC graph classification | Multiple benchmarks | 250x faster than GNNs, robust at D=128 |
+| pyoxigraph | 2026 | SPARQL store | 10M triples | 18ms per query |
+| Wikidata5m | 2020 | KG dataset | 5M entities, 20M triples | Standard benchmark |
+
+**What to do:**
+- [ ] Download Wikidata5m dataset
+- [ ] Write bulk loader: Wikidata5m → pyoxigraph
+- [ ] Benchmark query speed at 1M, 5M, 10M triples
+- [ ] Scale BEAGLE corpus to 1M sentences (aligned Wikipedia text)
+- [ ] Test TD v2 reasoning on million-scale KG
+
+**Key insight:** "We just need to have millions of records" — the records already exist. Wikidata has 16 billion of them. The trick is loading them efficiently, not preprocessing them.
+
 ### 1b. Real-World Query Handling — IN PROGRESS
 
 **Problem:** We tested with clean queries like "what is a match used for". Real users say:
