@@ -33,9 +33,14 @@ _Last updated: 2026-07-10_
 
 ### 1. Implement Preprocessing Layer with Gemini — NEXT SESSION
 
-**Prompt:** v1 (confirmed as final, tested against v2 via Gemini API)
+**Prompts:**
+- `PREPROCESSING_PROMPT.md` — v1 for TEACH (fact ingestion), confirmed as final
+- `QUERY_PREPROCESSING_PROMPT.md` — v1 for QUERY (user questions), NEW (2026-07-12)
+- Why two prompts? v1 Rule 7 ("rewrite as declarative") causes hallucinations on queries.
+  Gemini review confirmed: queries need `?` syntax for unknown variables.
+
 **Model:** Gemini (selected over Kimi K2.7 Code and K2.6 — cleanest output, fastest)
-**Files:** `PREPROCESSING_PROMPT.md` (prompt), `td/preprocessing/__init__.py` (module)
+**Files:** `PREPROCESSING_PROMPT.md`, `QUERY_PREPROCESSING_PROMPT.md`, `td/preprocessing/__init__.py`
 
 **What to do:**
 - Wire Gemini API call into `td/preprocessing/__init__.py`
@@ -95,6 +100,7 @@ _Last updated: 2026-07-10_
 - ✅ Module skeleton created (`td/preprocessing/__init__.py`)
 - ✅ LLM model selected (Gemini — cleanest output, fastest)
 - ✅ `PREPROCESSING_PROMPT.md` documented with comparison results
+- ✅ `QUERY_PREPROCESSING_PROMPT.md` created (v1 for queries, Gemini review confirmed v1 broken for queries)
 - ✅ Coreference resolution implemented (spaCy two-pipeline, he/she/it/they + this/that)
 - ✅ PREPROCESSING_PLAN.md written (three-layer architecture, research-backed)
 
