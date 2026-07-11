@@ -86,6 +86,8 @@ Preprocessing for teach can be revisited when loading bulk data (Wikipedia, Wiki
 
 ### 1c. Scaling to Millions of Facts — NEXT PRIORITY (2026-07-12)
 
+**Plan:** `DATA_SOURCES.md` (comprehensive, all links verified, format documented)
+
 **Goal:** Load millions of structured facts into TD v2's KG.
 
 **Data Sources:**
