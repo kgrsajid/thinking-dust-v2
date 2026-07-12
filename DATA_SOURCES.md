@@ -63,20 +63,30 @@ Format: `relation_id \t alias1 \t alias2 ...` (tab-separated)
 
 ### Conversion to TD v2 teach()
 
+**Option A: Direct (for small datasets, <10K triples)**
 ```python
-# Step 1: Load aliases
-entity_names = {}  # Q22686 → "Donald Trump"
-relation_names = {}  # P39 → "position held"
-
-# Step 2: For each triple (Q22686, P39, Q11696):
-subject = entity_names.get("Q22686", "Q22686")  # "Donald Trump"
-relation = relation_names.get("P39", "P39")      # "position held"
-obj = entity_names.get("Q11696", "Q11696")       # "President of the United States"
-
-# Step 3: Call teach()
-td.teach(f"{subject} {relation} {obj}", obj)
-# td.teach("Donald Trump position held President of the United States", "President of the United States")
+td.teach("Donald Trump position held President of the United States", "President of the United States")
 ```
+
+**Option B: Bulk loader (for large datasets, >10K triples) — PREFERRED**
+```python
+from td.bulk_loader import BulkLoader
+
+loader = BulkLoader(td, run_inference=True)
+stats = loader.load_wikidata5m(
+    triples_path="data/wikidata5m_transductive_train.txt",
+    aliases_path="data/entity_aliases.del",
+    relation_aliases_path="data/relation_aliases.del",
+)
+print(stats.summary())
+# → Loaded 20,614,279 triples (4,594,485 entities, 822 relations) in ~30min
+```
+
+The bulk loader:
+- Bypasses the parser (no sentence parsing needed)
+- Maps Wikidata IDs to human-readable names via alias files
+- Runs `derive_all()` once after loading (not per-fact)
+- Returns stats (triples loaded, entities, relations, timing)
 
 ### Relation Name → TD v2 Property Mapping
 

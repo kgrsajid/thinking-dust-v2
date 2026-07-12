@@ -111,8 +111,9 @@ Preprocessing for teach can be revisited when loading bulk data (Wikipedia, Wiki
 | Wikidata5m | 2020 | KG dataset | 5M entities, 20M triples | Standard benchmark |
 
 **What to do:**
+- [x] Write bulk loader (`td/bulk_loader.py`) — DONE, tested at 100K triples/sec
 - [ ] Download Wikidata5m dataset
-- [ ] Write bulk loader: Wikidata5m → pyoxigraph
+- [ ] Load Wikidata5m via `BulkLoader.load_wikidata5m()`
 - [ ] Benchmark query speed at 1M, 5M, 10M triples
 - [ ] Scale BEAGLE corpus to 1M sentences (aligned Wikipedia text)
 - [ ] Test TD v2 reasoning on million-scale KG
