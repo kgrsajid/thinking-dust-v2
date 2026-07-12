@@ -226,6 +226,27 @@ SYMMETRIC_WORDS = frozenset({
     "spouse", "sibling", "partner", "peer",
 })
 
+# Default relation properties (bootstrap)
+DEFAULT_RELATION_PROPERTIES = {
+    "in": {"transitive"},
+    "part_of": {"transitive"},
+    "before": {"transitive"},
+    "after": {"transitive"},
+    "inside": {"transitive"},
+    "contains": {"transitive"},
+    "subset_of": {"transitive"},
+    "ancestor_of": {"transitive"},
+    "descendant_of": {"transitive"},
+    "larger_than": {"transitive"},
+    "smaller_than": {"transitive"},
+    "capital_of": {"functional"},
+    "equals": {"symmetric", "transitive"},
+    "same_as": {"symmetric", "transitive"},
+    "married_to": {"symmetric"},
+    "sibling_of": {"symmetric"},
+    "adjacent_to": {"symmetric"},
+}
+
 # ── Register English ──────────────────────────────────────────────
 register_language(LanguageConfig(
     code="en",
@@ -247,4 +268,5 @@ register_language(LanguageConfig(
     event_verbs=EVENT_VERBS,
     transitive_preps=TRANSITIVE_PREPS,
     symmetric_words=SYMMETRIC_WORDS,
+    default_relation_properties=DEFAULT_RELATION_PROPERTIES,
 ))

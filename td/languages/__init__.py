@@ -94,6 +94,11 @@ class LanguageConfig:
     # "borders", "adjacent to", "married to", "sibling of" → symmetric
     symmetric_words: FrozenSet[str] = frozenset()
 
+    # Default relation properties for this language (bootstrap)
+    # These are pre-seeded when the KG is created.
+    # Format: {relation_name: {property_set}}
+    default_relation_properties: Dict[str, set] = field(default_factory=dict)
+
 
 # ── Language Registry ─────────────────────────────────────────────
 _REGISTRY: Dict[str, LanguageConfig] = {}

@@ -65,26 +65,17 @@ RULE_TEMPLATES = {
 }
 
 
-# Pre-seeded relation properties (bootstrap, user can extend)
-DEFAULT_RELATION_PROPERTIES = {
-    "in": {"transitive"},
-    "part_of": {"transitive"},
-    "before": {"transitive"},
-    "after": {"transitive"},
-    "inside": {"transitive"},
-    "contains": {"transitive"},
-    "subset_of": {"transitive"},
-    "ancestor_of": {"transitive"},
-    "descendant_of": {"transitive"},
-    "larger_than": {"transitive"},
-    "smaller_than": {"transitive"},
-    "capital_of": {"functional"},
-    "equals": {"symmetric", "transitive"},
-    "same_as": {"symmetric", "transitive"},
-    "married_to": {"symmetric"},
-    "sibling_of": {"symmetric"},
-    "adjacent_to": {"symmetric"},
-}
+# Pre-seeded relation properties — loaded from language registry
+# Falls back to empty dict if no language config available
+def _get_default_relation_properties():
+    try:
+        from td.languages import get_language
+        config = get_language("en")
+        return dict(config.default_relation_properties) if config else {}
+    except Exception:
+        return {}
+
+DEFAULT_RELATION_PROPERTIES = _get_default_relation_properties()
 
 
 @dataclass
