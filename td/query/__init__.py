@@ -381,7 +381,9 @@ class SparqlStore:
         # Sync composition rules
         if hasattr(kg, 'composition_rules'):
             for (rel1, rel2), target in kg.composition_rules.items():
-                rule_node = NamedNode(f"{TD_META}comp_{rel1}_{rel2}")
+                rel1_uri = relation_to_uri(rel1).value.split("/")[-1]
+                rel2_uri = relation_to_uri(rel2).value.split("/")[-1]
+                rule_node = NamedNode(f"{TD_META}comp_{rel1_uri}_{rel2_uri}")
                 meta_graph = NamedNode(f"{TD_GRAPH}metadata")
                 self._store.add(Quad(rule_node, RDF_TYPE,
                                      NamedNode(f"{TD_VOCAB}CompositionRule"), meta_graph))

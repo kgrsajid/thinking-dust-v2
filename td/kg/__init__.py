@@ -982,6 +982,13 @@ class KnowledgeGraph:
             if relation in self.relation_properties:
                 continue
 
+            # Load language config once per relation
+            from td.languages import get_language
+            lang_config = None
+            if nlp is not None:
+                lang = getattr(nlp, 'lang_', 'en') if hasattr(nlp, 'lang_') else 'en'
+                lang_config = get_language(lang)
+
             # ── Tier 1: spaCy semantic analysis ──────────────────
             # Parse relation name for grammatical structure.
             # Language-independent: uses Universal Dependencies tags.
@@ -1000,10 +1007,6 @@ class KnowledgeGraph:
                     verb_tokens = [t.lemma_.lower() for t in doc if t.pos_ == "VERB"]
 
                     # Load verb/preposition sets from language registry
-                    # Reference: td/languages/{lang}.py
-                    from td.languages import get_language
-                    lang = getattr(doc, 'lang_', 'en')
-                    lang_config = get_language(lang)
                     stative = lang_config.stative_verbs if lang_config else frozenset()
                     event = lang_config.event_verbs if lang_config else frozenset()
                     t_preps = lang_config.transitive_preps if lang_config else frozenset()
