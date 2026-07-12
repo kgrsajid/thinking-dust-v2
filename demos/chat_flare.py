@@ -113,6 +113,15 @@ def print_memory_state(td):
         print(f"  {C['green']}✦ SEED RATIO < 5% — System is now self-learning!{C['reset']}")
 
 
+def print_kg_stats(td):
+    """Show knowledge graph statistics."""
+    s = td.kg.stats()
+    print(f"  {C['bold']}Knowledge Graph:{C['reset']} {s['total_triples']:,} triples "
+          f"({C['green']}{s['user_facts']:,}{C['reset']} user, "
+          f"{C['cyan']}{s['derived_facts']:,}{C['reset']} derived) "
+          f"— {s['entities']:,} entities, {s['relations']:,} relations")
+
+
 def print_reasoning_trace(result):
     """Print the reasoning trace with visual hierarchy."""
     if not result.trace:
@@ -254,7 +263,7 @@ def _save_state(td):
 
     # Save MHN patterns to pickle (dense arrays — SQLite is wrong for this)
     import pickle
-    mhn_path = state_path.replace(".db", "_mhn.pkl")
+    mhn_path = state_path + "_mhn.pkl"
     with open(mhn_path, "wb") as f:
         pickle.dump({
             "patterns": td.mhn.patterns,
@@ -275,7 +284,7 @@ def _load_state(td):
 
     # Load MHN patterns from pickle
     import pickle
-    mhn_path = state_path.replace(".db", "_mhn.pkl")
+    mhn_path = state_path + "_mhn.pkl"
     if os.path.exists(mhn_path):
         try:
             with open(mhn_path, "rb") as f:
@@ -326,6 +335,9 @@ def main():
 
     print(f"  Mode: {C['green'] if pure else C['yellow']}● {'PURE' if pure else 'SEEDED'}{C['reset']}")
     print_memory_state(td)
+    kg_stats = td.kg.stats()
+    if kg_stats["total_triples"] > 0:
+        print_kg_stats(td)
     print()
 
     print(f"  {C['gray']}Commands:{C['reset']}")
@@ -335,7 +347,9 @@ def main():
     print(f"    {C['yellow']}synonym: <rel1> = <rel2>{C['reset']}        — teach relation synonym")
     print(f"    {C['yellow']}coref{C['reset']}                      — toggle coreference resolution")
     print(f"    {C['yellow']}sparql: <query>{C['reset']}            — run raw SPARQL query")
-    print(f"    {C['yellow']}stats{C['reset']}                      — show memory state")
+    print(f"    {C['yellow']}load: <file.tsv>{C['reset']}            — load TSV triples")
+    print(f"    {C['yellow']}load: wikidata5m <triples> [aliases] [rel_aliases]{C['reset']}")
+    print(f"    {C['yellow']}stats{C['reset']}                      — show memory & KG state")
     print(f"    {C['yellow']}save{C['reset']}                      — save memories to disk")
     print(f"    {C['yellow']}trace{C['reset']}                      — toggle reasoning trace")
     print(f"    {C['yellow']}quit{C['reset']}                       — exit")
@@ -367,6 +381,7 @@ def main():
             continue
         if user_input.lower() == "stats":
             print_memory_state(td)
+            print_kg_stats(td)
             print()
             continue
         if user_input.lower() == "trace":
@@ -492,6 +507,53 @@ def main():
 
             print(f"\n  {C['green']}✦ NEW PATTERN STORED ✦{C['reset']}")
             print_memory_state(td)
+            print()
+            continue
+
+        # ─── load command ───────────────────────────────────────────
+        if user_input.lower().startswith("load:"):
+            rest = user_input[5:].strip()
+            if not rest:
+                print(f"\n  {C['red']}Usage:{C['reset']}")
+                print(f"    load: <file.tsv>                    — load TSV (subject\\trelation\\tobject)")
+                print(f"    load: wikidata5m <triples> [aliases] [rel_aliases]")
+                print()
+                continue
+
+            from td.bulk_loader import BulkLoader
+
+            parts = rest.split()
+
+            if parts[0].lower() == "wikidata5m" and len(parts) >= 2:
+                triples_path = parts[1]
+                aliases_path = parts[2] if len(parts) > 2 else None
+                rel_aliases_path = parts[3] if len(parts) > 3 else None
+
+                loader = BulkLoader(td, run_inference=True)
+                try:
+                    load_stats = loader.load_wikidata5m(
+                        triples_path, aliases_path, rel_aliases_path
+                    )
+                    print(f"\n  {C['green']}✓ {load_stats.summary()}{C['reset']}")
+                except Exception as e:
+                    print(f"\n  {C['red']}Load error: {e}{C['reset']}")
+            else:
+                file_path = parts[0]
+                if not os.path.exists(file_path):
+                    print(f"\n  {C['red']}File not found: {file_path}{C['reset']}")
+                    print()
+                    continue
+
+                loader = BulkLoader(td, run_inference=True)
+                try:
+                    load_stats = loader.load_tsv(file_path)
+                    print(f"\n  {C['green']}✓ {load_stats.summary()}{C['reset']}")
+                except Exception as e:
+                    print(f"\n  {C['red']}Load error: {e}{C['reset']}")
+
+            # Sync newly loaded relations to parser
+            td.sync_kg_to_parser()
+            print_kg_stats(td)
             print()
             continue
 
