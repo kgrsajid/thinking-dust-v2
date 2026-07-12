@@ -437,6 +437,10 @@ class KnowledgeGraph:
         Only traverses backwards (object → subject) for SYMMETRIC relations.
         For asymmetric relations (in, part_of, before, etc.), only traverses
         forward (subject → object).
+
+        In store-backed mode, delegates to SPARQL property path queries
+        via SparqlStore.find_path(). Returns at most 1 path (shortest).
+        For full multi-path BFS on large datasets, use SPARQL directly.
         """
         start = start.strip().lower()
         end = end.strip().lower()
@@ -447,6 +451,26 @@ class KnowledgeGraph:
         if start == end:
             return []
 
+        # Store-backed mode: use SPARQL to find a path
+        if self._store_backed and self._sparql_store is not None:
+            # Try each known transitive relation first (property paths)
+            for relation, props in self.relation_properties.items():
+                if "transitive" in props:
+                    result = self._sparql_store.ask(start, end, relation)
+                    if result.found:
+                        # Return a synthetic Triple as the path
+                        return [[Triple(start, relation, end)]]
+
+            # Fall back to variable-predicate path search
+            path_rels = self._sparql_store.find_path(start, end, max_hops=min(max_hops, 6))
+            if path_rels:
+                # Build a synthetic path: we know the relations but not
+                # intermediate entities. Return a minimal path for proof trace.
+                # The SPARQL ask() result already has the proof trace.
+                return [[Triple(start, path_rels[0], end)]]
+            return []
+
+        # In-memory BFS (existing behavior)
         paths = []
         queue = [(start, [], {start})]
 
@@ -687,31 +711,58 @@ class KnowledgeGraph:
             )
 
         # Check if explicitly stated as same
-        for t in self.triples:
-            if ((t.subject == entity1 and t.object == entity2 and
-                 t.relation in ("same_as", "equals", "identical_to")) or
-                (t.subject == entity2 and t.object == entity1 and
-                 t.relation in ("same_as", "equals", "identical_to"))):
-                return InferenceResult(
-                    answer=True,
-                    proof_trace=f"Explicitly taught: {t.subject} {t.relation} {t.object}",
-                    confidence=0.95,
-                    method="direct",
-                )
+        # Store-backed: use SPARQL; In-memory: scan triples
+        if self._store_backed and self._sparql_store is not None:
+            for rel in ("same_as", "equals", "identical_to"):
+                # Check both directions
+                r1 = self._sparql_store.ask(entity1, entity2, rel)
+                if r1.found:
+                    return InferenceResult(
+                        answer=True,
+                        proof_trace=f"Explicitly taught: {entity1} {rel} {entity2}",
+                        confidence=0.95,
+                        method="direct",
+                    )
+                r2 = self._sparql_store.ask(entity2, entity1, rel)
+                if r2.found:
+                    return InferenceResult(
+                        answer=True,
+                        proof_trace=f"Explicitly taught: {entity2} {rel} {entity1}",
+                        confidence=0.95,
+                        method="direct",
+                    )
+        else:
+            for t in self.triples:
+                if ((t.subject == entity1 and t.object == entity2 and
+                     t.relation in ("same_as", "equals", "identical_to")) or
+                    (t.subject == entity2 and t.object == entity1 and
+                     t.relation in ("same_as", "equals", "identical_to"))):
+                    return InferenceResult(
+                        answer=True,
+                        proof_trace=f"Explicitly taught: {t.subject} {t.relation} {t.object}",
+                        confidence=0.95,
+                        method="direct",
+                    )
 
         # Check functional relations for distinction
         for func_rel, props in self.relation_properties.items():
             if "functional" not in props:
                 continue
             # Get values for entity1 and entity2 under this functional relation
-            val1 = None
-            val2 = None
-            for t in self.triples:
-                if t.relation == func_rel:
-                    if t.subject == entity1:
-                        val1 = t.object
-                    elif t.subject == entity2:
-                        val2 = t.object
+            if self._store_backed and self._sparql_store is not None:
+                val1_list = self._sparql_store.query_relation(entity1, func_rel)
+                val2_list = self._sparql_store.query_relation(entity2, func_rel)
+                val1 = val1_list[0] if val1_list else None
+                val2 = val2_list[0] if val2_list else None
+            else:
+                val1 = None
+                val2 = None
+                for t in self.triples:
+                    if t.relation == func_rel:
+                        if t.subject == entity1:
+                            val1 = t.object
+                        elif t.subject == entity2:
+                            val2 = t.object
             # If both have values and they differ → provably different
             if val1 and val2 and val1 != val2:
                 return InferenceResult(
@@ -725,17 +776,30 @@ class KnowledgeGraph:
 
         # Check if they share any relation with different objects
         # (weaker evidence of difference)
-        rels1 = {(t.relation, t.object) for t in self.triples if t.subject == entity1}
-        rels2 = {(t.relation, t.object) for t in self.triples if t.subject == entity2}
-        if rels1 and rels2:
-            # They both exist in the KG but no functional property distinguishes them
-            return InferenceResult(
-                answer=None,
-                proof_trace=f"I know about both {entity1} and {entity2}, "
-                           f"but I have no evidence that they are the same or different.",
-                confidence=0.0,
-                method="unknown",
-            )
+        if self._store_backed and self._sparql_store is not None:
+            # Check if both entities exist in the store
+            e1_exists = self._sparql_store.entity_exists(entity1)
+            e2_exists = self._sparql_store.entity_exists(entity2)
+            if e1_exists and e2_exists:
+                return InferenceResult(
+                    answer=None,
+                    proof_trace=f"I know about both {entity1} and {entity2}, "
+                               f"but I have no evidence that they are the same or different.",
+                    confidence=0.0,
+                    method="unknown",
+                )
+        else:
+            rels1 = {(t.relation, t.object) for t in self.triples if t.subject == entity1}
+            rels2 = {(t.relation, t.object) for t in self.triples if t.subject == entity2}
+            if rels1 and rels2:
+                # They both exist in the KG but no functional property distinguishes them
+                return InferenceResult(
+                    answer=None,
+                    proof_trace=f"I know about both {entity1} and {entity2}, "
+                               f"but I have no evidence that they are the same or different.",
+                    confidence=0.0,
+                    method="unknown",
+                )
 
         return InferenceResult(
             answer=None,
@@ -1732,35 +1796,14 @@ class KnowledgeGraph:
         total = int(count_results[0].get('?c', 0)) if count_results else 0
 
         if total > max_load:
-            # ── Store-backed mode: load only first max_load triples ──
-            # The rest stay in the RDF store; queries go through SPARQL.
+            # ── Store-backed mode: zero triples in memory ──────────
+            # All queries go through SPARQL (18ms, disk-backed).
+            # self.triples stays empty. No Python objects created.
             self._store_backed = True
 
-            # Load first max_load triples into memory (cache for fast access)
-            limited_results = self._sparql_store.query_sparql_bindings(
-                f'SELECT ?s ?p ?o WHERE {{ ?s ?p ?o . FILTER(STRSTARTS(STR(?p), "http://thinking-dust.org/relation/")) }} LIMIT {max_load}'
-            )
-            # Disable SPARQL sync during load (data already in store)
+            # Disable SPARQL sync during property loading
             old_store = self._sparql_store
             self._sparql_store = None
-
-            from urllib.parse import unquote
-            for r in limited_results:
-                subject = unquote(r.get('?s', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' '))
-                relation = unquote(r.get('?p', '').replace('http://thinking-dust.org/relation/', '').replace('_', ' '))
-                obj = unquote(r.get('?o', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' '))
-
-                if subject and relation and obj:
-                    meta = old_store.get_fact_metadata(subject, relation, obj)
-                    source = meta.get('source', 'user') if meta else 'user'
-                    proof = meta.get('proof', '') if meta else ''
-                    t_start = meta.get('temporal_start') if meta else None
-                    t_end = meta.get('temporal_end') if meta else None
-
-                    self.add_fact(subject, relation, obj, source=source, proof=proof,
-                                 temporal_start=t_start, temporal_end=t_end)
-
-            # Restore store reference for store-backed queries
             self._sparql_store = old_store
 
             # Load relation properties from SPARQL store
@@ -1887,13 +1930,19 @@ class KnowledgeGraph:
         return len(self.triples) > 0
 
     def _load_sqlite_migrate(self, sqlite_path: str, sparql_path: str) -> bool:
-        """Migrate from SQLite to pyoxigraph. One-time operation."""
+        """Migrate from SQLite to pyoxigraph. One-time operation.
+
+        For large SQLite databases, after migration completes and data is
+        synced to the SPARQL store, switches to store-backed mode (doesn't
+        keep all triples in memory).
+        """
         self._init_sparql_store(sparql_path)
         if self._sparql_store is None:
             return False
 
         # Clear in-memory state before migration
         self.triples.clear()
+        self._triple_index.clear()
         self._entity_index.clear()
         self._temporal_index.clear()
         self.gazetteer.clear()
@@ -1955,6 +2004,26 @@ class KnowledgeGraph:
             self._sparql_store.store.flush()
 
             conn.close()
+
+            # Switch to store-backed mode if large dataset
+            if len(rows) > self._SPARQL_THRESHOLD:
+                # Clear in-memory triples to free RAM
+                self.triples.clear()
+                self._triple_index.clear()
+                self._entity_index.clear()
+                self._store_backed = True
+
+                # Reload relation properties and composition rules from store
+                stored_props = self._sparql_store.get_all_relation_properties()
+                for rel, props in stored_props.items():
+                    if rel not in self.relation_properties:
+                        self.relation_properties[rel] = set()
+                    self.relation_properties[rel].update(props)
+
+                stored_rules = self._sparql_store.get_all_composition_rules()
+                for (r1, r2), target in stored_rules.items():
+                    self.composition_rules[(r1, r2)] = target
+
             return len(rows) > 0
         except Exception:
             conn.close()

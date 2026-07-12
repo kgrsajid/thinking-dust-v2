@@ -872,6 +872,158 @@ class SparqlStore:
             return " ".join(parts)
         return None
 
+    # ─── Store-Backed Mode Helpers ────────────────────────────────
+    # These methods enable KnowledgeGraph to operate without loading
+    # all triples into memory. They query the SPARQL store directly.
+    # Used when self._store_backed = True on KnowledgeGraph.
+
+    def count_triples(self) -> int:
+        """Count all fact triples (relation predicates only) in the store.
+
+        Filters out RDF vocabulary and metadata quads, counting only
+        triples whose predicate starts with TD_REL namespace.
+        """
+        query = (
+            'SELECT (COUNT(*) AS ?c) WHERE { '
+            '?s ?p ?o . '
+            'FILTER(STRSTARTS(STR(?p), "http://thinking-dust.org/relation/")) '
+            '}'
+        )
+        results = list(self._store.query(query))
+        if results:
+            return int(results[0]['c'].value)
+        return 0
+
+    def get_all_relations(self) -> set[str]:
+        """Get all distinct relation names in the store.
+
+        SPARQL: SELECT DISTINCT ?p WHERE { ?s ?p ?o }
+        Returns relation names (not URIs).
+        """
+        query = (
+            'SELECT DISTINCT ?p WHERE { '
+            '?s ?p ?o . '
+            'FILTER(STRSTARTS(STR(?p), "http://thinking-dust.org/relation/")) '
+            '}'
+        )
+        results = list(self._store.query(query))
+        return {uri_to_relation(r['p']) for r in results}
+
+    def get_all_entities(self) -> set[str]:
+        """Get all distinct entity names in the store.
+
+        Returns entities from both subject and object positions.
+        """
+        query = (
+            'SELECT DISTINCT ?e WHERE { '
+            '{ ?e ?p ?o } UNION { ?s ?p ?e } . '
+            'FILTER(STRSTARTS(STR(?e), "http://thinking-dust.org/entity/")) '
+            '}'
+        )
+        results = list(self._store.query(query))
+        return {uri_to_entity(r['e']) for r in results}
+
+    def get_facts_for_relation(self, relation: str) -> list[tuple[str, str]]:
+        """Get all (subject, object) pairs for a given relation.
+
+        SPARQL: SELECT ?s ?o WHERE { ?s td_rel:{relation} ?o }
+
+        Args:
+            relation: Relation name (e.g., "in")
+
+        Returns:
+            List of (subject, object) tuples.
+        """
+        p = self._relation_node(relation)
+        query = f'SELECT ?s ?o WHERE {{ ?s {str(p)} ?o }}'
+        results = list(self._store.query(query))
+        return [(uri_to_entity(r['s']), uri_to_entity(r['o'])) for r in results]
+
+    def get_entity_neighbors(self, entity: str) -> list[tuple[str, str, str]]:
+        """Get all (relation, neighbor, direction) tuples for an entity.
+
+        Combines forward (entity as subject) and inverse (entity as object)
+        queries into a single result set.
+
+        Args:
+            entity: Entity name
+
+        Returns:
+            List of (relation, neighbor, direction) where direction is
+            "outgoing" or "incoming".
+        """
+        e = self._entity_node(entity)
+
+        # Forward: entity as subject
+        fwd_query = (
+            f'SELECT ?p ?o WHERE {{ {str(e)} ?p ?o . '
+            f'FILTER(STRSTARTS(STR(?p), "http://thinking-dust.org/relation/")) }}'
+        )
+        results = []
+        for r in self._store.query(fwd_query):
+            rel = uri_to_relation(r['p'])
+            neighbor = uri_to_entity(r['o'])
+            results.append((rel, neighbor, "outgoing"))
+
+        # Inverse: entity as object
+        inv_query = (
+            f'SELECT ?s ?p WHERE {{ ?s ?p {str(e)} . '
+            f'FILTER(STRSTARTS(STR(?p), "http://thinking-dust.org/relation/")) }}'
+        )
+        for r in self._store.query(inv_query):
+            rel = uri_to_relation(r['p'])
+            neighbor = uri_to_entity(r['s'])
+            results.append((rel, neighbor, "incoming"))
+
+        return results
+
+    def entity_exists(self, entity: str) -> bool:
+        """Check if an entity exists in the store (as subject or object)."""
+        e = self._entity_node(entity)
+        query = f'ASK {{ {str(e)} ?p ?o }} UNION {{ ?s ?p {str(e)} }}'
+        return bool(self._store.query(query))
+
+    def get_all_composition_rules(self) -> dict[tuple[str, str], str | None]:
+        """Load all composition rules from the SPARQL store.
+
+        Returns dict mapping (rel1, rel2) → target_relation (or None).
+        """
+        meta_graph = NamedNode(f"{TD_GRAPH}metadata")
+        query = (
+            f'SELECT ?first ?second ?result WHERE {{ '
+            f'GRAPH {str(meta_graph)} {{ '
+            f'?rule <http://thinking-dust.org/vocab/composition_first> ?first . '
+            f'?rule <http://thinking-dust.org/vocab/composition_second> ?second . '
+            f'OPTIONAL {{ ?rule <http://thinking-dust.org/vocab/composition_result> ?result }} '
+            f'}} }}'
+        )
+        results = list(self._store.query(query))
+        rules = {}
+        for r in results:
+            r1 = uri_to_relation(r['first'])
+            r2 = uri_to_relation(r['second'])
+            target = uri_to_relation(r['result']) if 'result' in r and r['result'] is not None else None
+            rules[(r1, r2)] = target
+        return rules
+
+    def get_all_relation_properties(self) -> dict[str, set[str]]:
+        """Load all relation properties from the SPARQL store.
+
+        Returns dict mapping relation → set of property names.
+        """
+        query = (
+            f'SELECT ?r ?p WHERE {{ '
+            f'?r <http://thinking-dust.org/vocab/property> ?p '
+            f'}}'
+        )
+        results = list(self._store.query(query))
+        props: dict[str, set[str]] = {}
+        for r in results:
+            rel = uri_to_relation(r['r'])
+            prop = r['p'].value
+            props.setdefault(rel, set()).add(prop)
+        return props
+
     def __len__(self) -> int:
         return len(list(self._store))
 
