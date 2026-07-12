@@ -919,12 +919,8 @@ class KnowledgeGraph:
                     x, y = t1.subject, t1.object
                     for z in r2_by_subject.get(y, []):
                         if z != x:
-                            # Pre-check existence to avoid add_fact returning
-                            # existing triple (which would set changed=True forever)
-                            already_exists = any(
-                                t.subject == x and t.relation == target and t.object == z
-                                for t in self.triples
-                            )
+                            # Pre-check existence — O(1) via hash index
+                            already_exists = (x, target, z) in self._triple_index
                             if not already_exists:
                                 proof = f"derived: {r1}({x},{y}) ∧ {r2}({y},{z}) → {target}({x},{z})"
                                 triple = self.add_fact(x, target, z, source="derived", proof=proof)
@@ -970,6 +966,13 @@ class KnowledgeGraph:
 
         detected: dict[str, set[str]] = {}
 
+        # Load language config once (not per-relation)
+        from td.languages import get_language
+        lang_config = None
+        if nlp is not None:
+            lang = getattr(nlp, 'lang_', 'en') if hasattr(nlp, 'lang_') else 'en'
+            lang_config = get_language(lang)
+
         # Index triples by relation
         by_relation: dict[str, list[tuple[str, str]]] = defaultdict(list)
         for t in self.triples:
@@ -981,13 +984,6 @@ class KnowledgeGraph:
             # Skip if already has properties registered
             if relation in self.relation_properties:
                 continue
-
-            # Load language config once per relation
-            from td.languages import get_language
-            lang_config = None
-            if nlp is not None:
-                lang = getattr(nlp, 'lang_', 'en') if hasattr(nlp, 'lang_') else 'en'
-                lang_config = get_language(lang)
 
             # ── Tier 1: spaCy semantic analysis ──────────────────
             # Parse relation name for grammatical structure.

@@ -166,8 +166,8 @@ class BulkLoader:
             # Progress logging
             if (i + 1) % self.batch_size == 0:
                 elapsed = time.time() - t0
-                rate = (i + 1) / elapsed
-                print(f"  Loaded {i + 1:,} triples ({rate:.0f} triples/sec)...")
+                rate = stats.triples_loaded / max(elapsed, 0.001)
+                print(f"  Loaded {stats.triples_loaded:,} triples ({rate:.0f} triples/sec)...")
 
         stats.entity_count = len(entities_seen)
         stats.relation_count = len(relations_seen)
@@ -241,6 +241,8 @@ class BulkLoader:
                     if name:
                         entity_map[entity_id] = name
             print(f"  Loaded {len(entity_map):,} entity aliases")
+            if not entity_map:
+                print("  WARNING: No entity aliases parsed. Triples will use raw IDs.")
 
         # Load relation aliases (ID → name)
         relation_map = {}
