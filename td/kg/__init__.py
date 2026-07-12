@@ -1630,8 +1630,11 @@ class KnowledgeGraph:
         if self._sparql_store is None:
             self._init_sparql_store(store_path)
 
-        # Full sync from in-memory list to SPARQL store
-        self._sparql_store.sync_from_kg(self)
+        # In store-backed mode, the store IS the source of truth.
+        # Don't sync from empty self.triples — that would destroy all data.
+        if not self._store_backed:
+            # Full sync from in-memory list to SPARQL store
+            self._sparql_store.sync_from_kg(self)
 
         # Flush to disk
         self._sparql_store.store.flush()
@@ -1641,8 +1644,9 @@ class KnowledgeGraph:
         import gc; gc.collect()
         self._sparql_store = None
 
-        # Also export to SQLite for backward compatibility
-        self._save_sqlite(sqlite_path)
+        # SQLite export: only in in-memory mode (store-backed has no triples to export)
+        if not self._store_backed:
+            self._save_sqlite(sqlite_path)
 
     def _save_sqlite(self, path: str):
         """Export to SQLite for backward compatibility."""
@@ -1801,11 +1805,6 @@ class KnowledgeGraph:
             # self.triples stays empty. No Python objects created.
             self._store_backed = True
 
-            # Disable SPARQL sync during property loading
-            old_store = self._sparql_store
-            self._sparql_store = None
-            self._sparql_store = old_store
-
             # Load relation properties from SPARQL store
             stored_props = self._sparql_store.get_all_relation_properties()
             for rel, props in stored_props.items():
@@ -1854,9 +1853,15 @@ class KnowledgeGraph:
 
         for r in results:
             from urllib.parse import unquote
-            subject = unquote(r.get('?s', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' '))
-            relation = unquote(r.get('?p', '').replace('http://thinking-dust.org/relation/', '').replace('_', ' '))
-            obj = unquote(r.get('?o', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' '))
+            from ..query import uri_to_entity, uri_to_relation
+            # Use proper URI-to-name conversion (handles percent-encoded chars)
+            s_raw = r.get('?s', '')
+            p_raw = r.get('?p', '')
+            o_raw = r.get('?o', '')
+            # Handle both NamedNode objects and string representations
+            subject = uri_to_entity(s_raw) if hasattr(s_raw, 'value') else unquote(s_raw.replace('http://thinking-dust.org/entity/', '')).replace('_', ' ')
+            relation = uri_to_relation(p_raw) if hasattr(p_raw, 'value') else unquote(p_raw.replace('http://thinking-dust.org/relation/', ''))
+            obj = uri_to_entity(o_raw) if hasattr(o_raw, 'value') else unquote(o_raw.replace('http://thinking-dust.org/entity/', '')).replace('_', ' ')
 
             if subject and relation and obj:
                 # Get metadata if available
@@ -2019,6 +2024,12 @@ class KnowledgeGraph:
                     if rel not in self.relation_properties:
                         self.relation_properties[rel] = set()
                     self.relation_properties[rel].update(props)
+                    # Track inverse pairs
+                    for prop in props:
+                        if prop.startswith("inverse:"):
+                            inv = prop.split(":", 1)[1]
+                            self._inverse_pairs[rel] = inv
+                            self._inverse_pairs[inv] = rel
 
                 stored_rules = self._sparql_store.get_all_composition_rules()
                 for (r1, r2), target in stored_rules.items():

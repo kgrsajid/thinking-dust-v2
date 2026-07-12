@@ -980,7 +980,7 @@ class SparqlStore:
     def entity_exists(self, entity: str) -> bool:
         """Check if an entity exists in the store (as subject or object)."""
         e = self._entity_node(entity)
-        query = f'ASK {{ {str(e)} ?p ?o }} UNION {{ ?s ?p {str(e)} }}'
+        query = f'ASK {{ {{ {str(e)} ?p ?o }} UNION {{ ?s ?p {str(e)} }} }}'
         return bool(self._store.query(query))
 
     def get_all_composition_rules(self) -> dict[tuple[str, str], str | None]:
