@@ -19,10 +19,6 @@
 *~
 .DS_Store
 
-# Large generated files (reproduce via training)
-*.pkl
-*.bak
-data/synthetic_corpus_*
 .coverage
 .eggs/
 .idea/
@@ -35,24 +31,11 @@ ENV/
 Thumbs.db
 __pycache__/
 build/
-data/*.db
-data/*.pkl
-data/concepts.json
-data/td_knowledge.db
-data/td_knowledge_mhn.pkl
-data/td_state.pkl
 dist/
 env/
 htmlcov/
 venv-arm64/
 venv/
 
-# RDF store (runtime data)
-data/td_store/
-data/skipped_sentences.log
-
-# Wikidata5m raw data (too large for git)
-data/wikidata5m_*.tar.gz
-data/wikidata5m_*.txt
-data/wikidata5m_entity.txt
-data/wikidata5m_relation.txt
+# All data (generated at runtime, too large for git)
+data/
