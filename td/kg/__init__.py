@@ -175,6 +175,13 @@ class KnowledgeGraph:
         # Initialized lazily on first add_fact or explicit load
         self._sparql_store = None
 
+        # Store-backed mode: when True, query SPARQL store directly
+        # instead of loading all triples into memory. Activated when
+        # triple count exceeds _SPARQL_THRESHOLD on load.
+        # self.triples becomes a cache (possibly empty), not source of truth.
+        self._store_backed = False
+        self._SPARQL_THRESHOLD = 100_000  # 100K triples
+
     def add_fact(self, subject: str, relation: str, obj: str, source: str = "user",
                  proof: str = "", temporal_start: int = None,
                  temporal_end: int = None) -> Triple:
@@ -395,11 +402,25 @@ class KnowledgeGraph:
     def get_facts_for_relation(self, relation: str) -> list[Triple]:
         """Get all triples with a given relation."""
         relation = relation.strip().lower()
+
+        # Store-backed mode: query SPARQL directly
+        if self._store_backed and self._sparql_store is not None:
+            pairs = self._sparql_store.get_facts_for_relation(relation)
+            return [Triple(s, relation, o) for s, o in pairs]
+
         return [t for t in self.triples if t.relation == relation]
 
     def get_neighbors(self, entity: str, direction: str = "both") -> list[tuple[str, str, str]]:
         """Get (relation, neighbor, direction) tuples for an entity."""
         entity = entity.strip().lower()
+
+        # Store-backed mode: query SPARQL directly
+        if self._store_backed and self._sparql_store is not None:
+            neighbors = self._sparql_store.get_entity_neighbors(entity)
+            if direction == "both":
+                return neighbors
+            return [(r, n, d) for r, n, d in neighbors if d == direction]
+
         results = []
         for idx in self._entity_index.get(entity, []):
             t = self.triples[idx]
@@ -465,12 +486,71 @@ class KnowledgeGraph:
         1. Direct lookup: (Paris, capital_of, France) → True
         2. Inference: (Paris, in, EU) → derived via transitivity
         3. Contradiction: (Paris, in, Germany) → False (conflicts with known facts)
+
+        In store-backed mode, direct lookups and transitive chains are
+        answered via SPARQL. BFS path finding falls back to SPARQL property paths.
         """
         subject = subject.strip().lower()
         relation = relation.strip().lower()
         obj = obj.strip().lower() if obj else None
 
         t0 = time.perf_counter()
+
+        # ── Store-backed mode: use SPARQL for lookups ──────────────
+        if self._store_backed and self._sparql_store is not None:
+            if obj:
+                # Direct or transitive lookup via SPARQL
+                result = self._sparql_store.ask(subject, obj, relation)
+                if result.found:
+                    return InferenceResult(
+                        answer=True,
+                        proof_trace=result.proof_trace,
+                        confidence=result.confidence,
+                        method=result.method if "sparql" in result.method else "direct",
+                    )
+                # Check for contradiction via functional relation
+                if self._is_functional(relation):
+                    objs = self._sparql_store.query_relation(subject, relation)
+                    if objs and objs[0] != obj:
+                        return InferenceResult(
+                            answer=False,
+                            proof_trace=f"Contradiction: {relation}({subject}) is {objs[0]}, not {obj}.",
+                            confidence=0.90,
+                            method="contradiction",
+                        )
+                # Not found in store
+                return InferenceResult(
+                    answer=None,
+                    proof_trace="No matching facts or derivable conclusions.",
+                    confidence=0.0,
+                    method="unknown",
+                )
+            else:
+                # Open query: (subject, relation, ?)
+                objs = self._sparql_store.query_relation(subject, relation)
+                if objs:
+                    return InferenceResult(
+                        answer=True,
+                        proof_trace=f"{relation}({subject}) → {', '.join(objs)}",
+                        confidence=0.85,
+                        method="direct",
+                    )
+                # Check inverse relations
+                for inv_rel in self._get_inverse_relations(relation):
+                    inv_results = self._sparql_store.inverse_query(inv_rel, subject)
+                    if inv_results:
+                        return InferenceResult(
+                            answer=True,
+                            proof_trace=f"{relation}({subject}) → {', '.join(inv_results)} (via {inv_rel})",
+                            confidence=0.85,
+                            method="direct",
+                        )
+                return InferenceResult(
+                    answer=None,
+                    proof_trace="No matching facts or derivable conclusions.",
+                    confidence=0.0,
+                    method="unknown",
+                )
 
         # Mode 1: Direct lookup
         for t in self.triples:
@@ -844,8 +924,50 @@ class KnowledgeGraph:
 
         If R is transitive and R(A,B) and R(B,C) exist, derive R(A,C).
         Returns list of newly derived triples.
+
+        In store-backed mode, uses SPARQL property paths to find
+        transitive chains and add missing direct facts.
         """
         derived = []
+
+        # Store-backed mode: use SPARQL property paths
+        if self._store_backed and self._sparql_store is not None:
+            from ..query import entity_to_uri, relation_to_uri, uri_to_entity
+
+            def uri_to_entity_str(uri_str):
+                """Convert URI string to entity name."""
+                from urllib.parse import unquote
+                if uri_str.startswith('http://thinking-dust.org/entity/'):
+                    name = unquote(uri_str[len('http://thinking-dust.org/entity/'):])
+                    return name.replace('_', ' ')
+                return unquote(uri_str).replace('_', ' ')
+
+            p = relation_to_uri(relation)
+
+            # Find all transitive pairs (A, C) where there's no direct (A, C)
+            # SPARQL: SELECT ?a ?c WHERE { ?a (<p>)+ ?c . FILTER NOT EXISTS { ?a <p> ?c } }
+            query = (
+                f'SELECT ?a ?c WHERE {{ '
+                f'?a ({str(p)})+ ?c . '
+                f'FILTER NOT EXISTS {{ ?a {str(p)} ?c }} '
+                f'}}'
+            )
+            results = self._sparql_store.query_sparql_bindings(query)
+            for r in results:
+                a = r.get('?a', '')
+                c = r.get('?c', '')
+                if a and c:
+                    a_name = uri_to_entity_str(a)
+                    c_name = uri_to_entity_str(c)
+                    if a_name and c_name and a_name != c_name:
+                        proof = f"derived: {relation} is transitive"
+                        triple = self.add_fact(a_name, relation, c_name,
+                                               source="derived", proof=proof)
+                        if triple:
+                            derived.append(triple)
+            return derived
+
+        # In-memory mode (existing behavior)
         facts = self.get_facts_for_relation(relation)
 
         # Build adjacency for this relation
@@ -885,6 +1007,10 @@ class KnowledgeGraph:
           Uses explicit composition_rules (OWL Property Chain) as authority.
           (e.g., capital_of(Paris, France) ∧ in(France, EU) → in(Paris, EU))
 
+        In store-backed mode, transitive derivation uses SPARQL property paths.
+        Cross-relation composition still uses in-memory lookup (small data:
+        only facts for the two composed relations are loaded).
+
         Reference: OWL 2 PropertyChain axiom (W3C, 2009)
         """
         all_derived = []
@@ -920,7 +1046,16 @@ class KnowledgeGraph:
                     for z in r2_by_subject.get(y, []):
                         if z != x:
                             # Pre-check existence — O(1) via hash index
+                            # In store-backed mode, also check SPARQL store
                             already_exists = (x, target, z) in self._triple_index
+                            if not already_exists and self._store_backed and self._sparql_store is not None:
+                                # Check if fact already exists in the store
+                                from ..query import entity_to_uri, relation_to_uri
+                                s_uri = entity_to_uri(x)
+                                p_uri = relation_to_uri(target)
+                                o_uri = entity_to_uri(z)
+                                ask_query = f'ASK {{ {str(s_uri)} {str(p_uri)} {str(o_uri)} }}'
+                                already_exists = bool(self._sparql_store.store.query(ask_query))
                             if not already_exists:
                                 proof = f"derived: {r1}({x},{y}) ∧ {r2}({y},{z}) → {target}({x},{z})"
                                 triple = self.add_fact(x, target, z, source="derived", proof=proof)
@@ -974,9 +1109,17 @@ class KnowledgeGraph:
             lang_config = get_language(lang)
 
         # Index triples by relation
-        by_relation: dict[str, list[tuple[str, str]]] = defaultdict(list)
-        for t in self.triples:
-            by_relation[t.relation].append((t.subject, t.object))
+        # Store-backed mode: load pairs from SPARQL per relation
+        if self._store_backed and self._sparql_store is not None:
+            all_rels = self._sparql_store.get_all_relations()
+            by_relation: dict[str, list[tuple[str, str]]] = defaultdict(list)
+            for rel in all_rels:
+                pairs = self._sparql_store.get_facts_for_relation(rel)
+                by_relation[rel] = pairs
+        else:
+            by_relation: dict[str, list[tuple[str, str]]] = defaultdict(list)
+            for t in self.triples:
+                by_relation[t.relation].append((t.subject, t.object))
 
         for relation, pairs in by_relation.items():
             props = set()
@@ -1555,14 +1698,24 @@ class KnowledgeGraph:
         except ImportError:
             pass  # pyoxigraph not installed
 
-    def _load_sparql(self, path: str, sqlite_path: str = None) -> bool:
-        """Load from existing pyoxigraph store."""
+    def _load_sparql(self, path: str, sqlite_path: str = None, max_load: int = 10000) -> bool:
+        """Load from existing pyoxigraph store.
+
+        For large datasets (> max_load triples), sets _store_backed=True
+        and loads only the first max_load triples into memory. The rest
+        stay in the RDF store and are queried via SPARQL on demand.
+        Relation properties and composition rules are always loaded (small).
+
+        For small datasets (≤ max_load triples), loads everything
+        into memory (existing behavior, backward compatible).
+        """
         self._init_sparql_store(path)
         if self._sparql_store is None:
             return False
 
         # Clear in-memory state before loading
         self.triples.clear()
+        self._triple_index.clear()
         self._entity_index.clear()
         self._temporal_index.clear()
         self.gazetteer.clear()
@@ -1572,6 +1725,80 @@ class KnowledgeGraph:
         self.composition_rules.clear()
         self._init_default_composition_rules()
 
+        # ── Count triples to decide mode ───────────────────────────
+        count_results = self._sparql_store.query_sparql_bindings(
+            'SELECT (COUNT(*) as ?c) WHERE { ?s ?p ?o . FILTER(STRSTARTS(STR(?p), "http://thinking-dust.org/relation/")) }'
+        )
+        total = int(count_results[0].get('?c', 0)) if count_results else 0
+
+        if total > max_load:
+            # ── Store-backed mode: load only first max_load triples ──
+            # The rest stay in the RDF store; queries go through SPARQL.
+            self._store_backed = True
+
+            # Load first max_load triples into memory (cache for fast access)
+            limited_results = self._sparql_store.query_sparql_bindings(
+                f'SELECT ?s ?p ?o WHERE {{ ?s ?p ?o . FILTER(STRSTARTS(STR(?p), "http://thinking-dust.org/relation/")) }} LIMIT {max_load}'
+            )
+            # Disable SPARQL sync during load (data already in store)
+            old_store = self._sparql_store
+            self._sparql_store = None
+
+            from urllib.parse import unquote
+            for r in limited_results:
+                subject = unquote(r.get('?s', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' '))
+                relation = unquote(r.get('?p', '').replace('http://thinking-dust.org/relation/', '').replace('_', ' '))
+                obj = unquote(r.get('?o', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' '))
+
+                if subject and relation and obj:
+                    meta = old_store.get_fact_metadata(subject, relation, obj)
+                    source = meta.get('source', 'user') if meta else 'user'
+                    proof = meta.get('proof', '') if meta else ''
+                    t_start = meta.get('temporal_start') if meta else None
+                    t_end = meta.get('temporal_end') if meta else None
+
+                    self.add_fact(subject, relation, obj, source=source, proof=proof,
+                                 temporal_start=t_start, temporal_end=t_end)
+
+            # Restore store reference for store-backed queries
+            self._sparql_store = old_store
+
+            # Load relation properties from SPARQL store
+            stored_props = self._sparql_store.get_all_relation_properties()
+            for rel, props in stored_props.items():
+                if rel not in self.relation_properties:
+                    self.relation_properties[rel] = set()
+                self.relation_properties[rel].update(props)
+                # Track inverse pairs
+                for prop in props:
+                    if prop.startswith("inverse:"):
+                        inv = prop.split(":", 1)[1]
+                        self._inverse_pairs[rel] = inv
+                        self._inverse_pairs[inv] = rel
+
+            # Load composition rules from SPARQL store
+            stored_rules = self._sparql_store.get_all_composition_rules()
+            for (r1, r2), target in stored_rules.items():
+                self.composition_rules[(r1, r2)] = target
+
+            # Load sense_inventory from companion SQLite file (if exists)
+            if sqlite_path and os.path.exists(sqlite_path):
+                try:
+                    conn = sqlite3.connect(sqlite_path)
+                    sense_rows = conn.execute(
+                        "SELECT surface_form, sense_uri, sense_index FROM sense_inventory ORDER BY surface_form, sense_index"
+                    ).fetchall()
+                    for surface, uri, _ in sense_rows:
+                        self.sense_inventory.setdefault(surface, [])
+                        if uri not in self.sense_inventory[surface]:
+                            self.sense_inventory[surface].append(uri)
+                    conn.close()
+                except sqlite3.OperationalError:
+                    pass  # Table doesn't exist in older DBs
+
+            return True  # Store exists with data
+
+        # ── In-memory mode: load all triples (existing behavior) ──
         # Populate in-memory structures from SPARQL store
         # Query all triples from default graph
         results = self._sparql_store.query_sparql_bindings(
@@ -1759,6 +1986,19 @@ class KnowledgeGraph:
             conn.close()
 
     def stats(self) -> dict:
+        # Store-backed mode: get stats from SPARQL store
+        if self._store_backed and self._sparql_store is not None:
+            store_stats = self._sparql_store.stats()
+            source_counts = store_stats.get("source_counts", {})
+            return {
+                "total_triples": self._sparql_store.count_triples(),
+                "user_facts": source_counts.get("user", 0),
+                "derived_facts": source_counts.get("derived", 0),
+                "entities": len(self._sparql_store.get_all_entities()),
+                "relations": len(store_stats.get("relations", set())),
+                "store_backed": True,
+            }
+
         user_facts = sum(1 for t in self.triples if t.source == "user")
         derived_facts = sum(1 for t in self.triples if t.source == "derived")
         return {
@@ -1767,4 +2007,5 @@ class KnowledgeGraph:
             "derived_facts": derived_facts,
             "entities": len(set(t.subject for t in self.triples) | set(t.object for t in self.triples)),
             "relations": len(set(t.relation for t in self.triples)),
+            "store_backed": False,
         }
