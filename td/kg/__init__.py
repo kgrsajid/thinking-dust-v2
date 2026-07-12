@@ -936,23 +936,22 @@ class KnowledgeGraph:
 
     def detect_relation_properties(self, min_evidence: int = 3,
                                      nlp=None) -> dict[str, set[str]]:
-        """Auto-detect relation properties using three-tier approach.
+        """Auto-detect relation properties from data patterns.
 
-        Tier 1: Wikidata API constraints (if available)
-          - Subject type constraint (Q21503250) → domain
-          - Value-type constraint (Q21510865) → range
-          - Symmetry constraint (Q21510857) → symmetric
-          - Single value constraint (Q19474404) → functional
-          - Inverse constraint (Q21510856) → inverse pair
-          Reference: https://www.wikidata.org/wiki/Help:Property_constraints_portal/Type
+        Works for ANY dataset from ANY source (CSV, database, LLM-generated,
+        scraped, Wikidata, custom). No dependency on specific APIs.
 
-        Tier 2: spaCy semantic analysis (language-independent)
-          - Parse relation names via Universal Dependencies
-          - ADP (preposition) patterns → likely transitive
-          - Symmetric verb patterns → likely symmetric
+        Two-tier approach:
+
+        Tier 1: spaCy semantic analysis (language-independent)
+          - Parse relation names via Universal Dependencies POS tags
+          - Stative verbs (locate, contain) + preposition → transitive
+          - Event verbs (born, die) + preposition → NOT transitive
+          - Symmetric words (border, adjacent, spouse) → symmetric
+          Reference: Levin (1993), "English Verb Classes and Alternations"
           Reference: Universal Dependencies (Nivre et al., 2016)
 
-        Tier 3: Statistical detection (fallback)
+        Tier 2: Statistical detection (fallback)
           - Count triple patterns in loaded data
           - 80%+ evidence threshold
           Reference: Muggleton (1991), Inductive Logic Programming
