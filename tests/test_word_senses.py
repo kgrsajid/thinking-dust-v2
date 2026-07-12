@@ -47,13 +47,13 @@ from td.memory.mhn import ModernHopfieldNetwork, MHNConfig
 @pytest.fixture
 def wvm():
     """Fresh WordVectorModel with small dim for fast tests."""
-    return WordVectorModel(dim=1000)
+    return WordVectorModel(dim=10000)
 
 
 @pytest.fixture
 def wvm_trained():
     """Pre-trained WordVectorModel with biology and prison contexts."""
-    wvm = WordVectorModel(dim=1000)
+    wvm = WordVectorModel(dim=10000)
     # Biology context sentences
     for sent in [
         "the cell membrane transports ions across the boundary",
@@ -96,9 +96,9 @@ def kg():
 @pytest.fixture
 def td():
     """Fresh GenericThinkingDust in pure mode."""
-    vocab = build_default_vocabulary(dim=1000)
-    mhn = ModernHopfieldNetwork(MHNConfig(dim=1000, min_similarity=0.01))
-    return GenericThinkingDust(vocab=vocab, mhn=mhn, dim=1000, pure_mode=True)
+    vocab = build_default_vocabulary(dim=10000)
+    mhn = ModernHopfieldNetwork(MHNConfig(dim=10000, min_similarity=0.01))
+    return GenericThinkingDust(vocab=vocab, mhn=mhn, dim=10000, pure_mode=True)
 
 
 # ─── 1. Sense Cluster Creation ────────────────────────────────────
@@ -116,7 +116,7 @@ class TestSenseClusterCreation:
     def test_similar_contexts_same_cluster(self, wvm):
         """Contexts from the same sense should cluster together.
 
-        With dim=1000 (test), random vectors are less stable than dim=10000
+        With dim=10000, random vectors are less stable than dim=10000
         (production). We test the mechanism: same domain → same cluster OR
         at least the count increases for the best-matching cluster.
         """
@@ -131,7 +131,7 @@ class TestSenseClusterCreation:
     def test_different_contexts_different_clusters(self, wvm):
         """Contexts from different senses should create different clusters.
 
-        With dim=1000, random vectors may or may not exceed the similarity
+        With dim=10000, random vectors may or may not exceed the similarity
         threshold. We verify the mechanism: different contexts are at least
         assigned, and the number of clusters reflects the diversity.
         """
@@ -497,7 +497,7 @@ class TestWSDPersistence:
         wvm.save(path)
 
         # Load into fresh model
-        wvm2 = WordVectorModel(dim=1000)
+        wvm2 = WordVectorModel(dim=10000)
         wvm2.load(path)
 
         assert wvm2.get_sense_count("cell") == wvm.get_sense_count("cell")
@@ -518,7 +518,7 @@ class TestWSDPersistence:
             pickle.dump(data, f)
 
         # Load — should handle missing key gracefully
-        wvm2 = WordVectorModel(dim=1000)
+        wvm2 = WordVectorModel(dim=10000)
         wvm2.load(path)
         assert wvm2.sense_clusters == {}
 
@@ -707,7 +707,7 @@ class TestFullSentenceContext:
         overlapping content words (biology terms), so the contexts should
         have some positive correlation.
 
-        Note: with dim=1000 and random vectors, the cosine similarity between
+        Note: with dim=10000 and random vectors, the cosine similarity between
         two context vectors can be close to 0 even for same-domain sentences.
         We test that the vectors are non-trivially sized (not zero).
         """
