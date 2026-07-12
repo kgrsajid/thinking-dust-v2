@@ -76,7 +76,7 @@ class BulkLoader:
 
     def load_triples(self, triples: list[tuple[str, str, str]] | Iterator,
                      source: str = "bulk", relation_map: dict = None,
-                     entity_map: dict = None) -> LoadStats:
+                     entity_map: dict = None, max_triples: int = None) -> LoadStats:
         """Load a list of (subject, relation, object) triples.
 
         Args:

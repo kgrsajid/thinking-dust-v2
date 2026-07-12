@@ -50,3 +50,9 @@ venv/
 # RDF store (runtime data)
 data/td_store/
 data/skipped_sentences.log
+
+# Wikidata5m raw data (too large for git)
+data/wikidata5m_*.tar.gz
+data/wikidata5m_*.txt
+data/wikidata5m_entity.txt
+data/wikidata5m_relation.txt

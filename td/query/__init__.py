@@ -106,7 +106,11 @@ def entity_to_uri(entity: str) -> NamedNode:
     'paris' → NamedNode('http://thinking-dust.org/entity/paris')
     'south korea' → NamedNode('http://thinking-dust.org/entity/south_korea')
     """
+    import re as _re
     normalized = entity.lower().strip().replace(" ", "_")
+    # Remove characters invalid in IRIs (RFC 3987)
+    # Keep: letters, digits, - . _ ~ / : @
+    normalized = _re.sub(r'[^a-z0-9_\-\.~:/@]', '', normalized)
     return NamedNode(f"{TD_ENT}{normalized}")
 
 
@@ -115,7 +119,9 @@ def relation_to_uri(relation: str) -> NamedNode:
 
     'capital_of' → NamedNode('http://thinking-dust.org/relation/capital_of')
     """
+    import re as _re
     normalized = relation.lower().strip().replace(" ", "_")
+    normalized = _re.sub(r'[^a-z0-9_\-\.~:/@]', '', normalized)
     return NamedNode(f"{TD_REL}{normalized}")
 
 
