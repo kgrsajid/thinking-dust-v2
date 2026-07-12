@@ -261,10 +261,11 @@ class BulkLoader:
 
         # Functional relations (R(X,Y) ∧ R(X,Z) → Y=Z)
         functional = {
-            "P36",   # capital
+            "P36",   # capital (each country has ONE capital)
             "P35",   # head of state
-            "P6",    # head of government
         }
+        # NOT functional: P39 (position held) — multiple people hold same position
+        # NOT functional: P106 (occupation) — many people share same occupation
 
         # Inverse pairs (R1(X,Y) → R2(Y,X))
         inverse_pairs = {
