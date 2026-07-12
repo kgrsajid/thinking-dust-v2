@@ -1853,15 +1853,15 @@ class KnowledgeGraph:
 
         for r in results:
             from urllib.parse import unquote
-            from ..query import uri_to_entity, uri_to_relation
-            # Use proper URI-to-name conversion (handles percent-encoded chars)
+            # Extract names from URIs
+            # Entities: spaces → underscores in URI, so convert back
+            # Relations: underscores are part of the name (e.g., created_by), DON'T convert
             s_raw = r.get('?s', '')
             p_raw = r.get('?p', '')
             o_raw = r.get('?o', '')
-            # Handle both NamedNode objects and string representations
-            subject = uri_to_entity(s_raw) if hasattr(s_raw, 'value') else unquote(s_raw.replace('http://thinking-dust.org/entity/', '')).replace('_', ' ')
-            relation = uri_to_relation(p_raw) if hasattr(p_raw, 'value') else unquote(p_raw.replace('http://thinking-dust.org/relation/', ''))
-            obj = uri_to_entity(o_raw) if hasattr(o_raw, 'value') else unquote(o_raw.replace('http://thinking-dust.org/entity/', '')).replace('_', ' ')
+            subject = unquote(s_raw.replace('http://thinking-dust.org/entity/', '')).replace('_', ' ')
+            relation = unquote(p_raw.replace('http://thinking-dust.org/relation/', ''))
+            obj = unquote(o_raw.replace('http://thinking-dust.org/entity/', '')).replace('_', ' ')
 
             if subject and relation and obj:
                 # Get metadata if available

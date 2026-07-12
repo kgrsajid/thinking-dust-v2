@@ -745,7 +745,11 @@ class GenericThinkingDust:
 
         # ─── Check Knowledge Graph first (inference > constraint) ────
         # If the KG can answer this via derivation, use it
-        if self.kg and self.kg.triples:
+        # In store-backed mode, triples may be empty but the store has data
+        kg_has_data = self.kg and (self.kg.triples or
+                                    (getattr(self.kg, '_store_backed', False) and
+                                     self.kg._sparql_store is not None))
+        if kg_has_data:
             kg_result = self._query_knowledge_graph(problem_text)
             if kg_result:
                 trace.append(f"Route: KG inference ({kg_result['method']})")
@@ -753,7 +757,9 @@ class GenericThinkingDust:
                 # Auto-derive new facts periodically
                 self.kg.derive_all()
                 # Sync newly derived facts to SPARQL store
-                if self.sparql_store is not None:
+                # (skip full sync in store-backed mode — derive_all already
+                # writes to the store via add_fact)
+                if self.sparql_store is not None and not getattr(self.kg, '_store_backed', False):
                     self.sparql_store.sync_from_kg(self.kg)
                 return ThinkingResult(
                     problem=problem_text, evolved_state=problem_hdc,
@@ -774,6 +780,9 @@ class GenericThinkingDust:
         #    BUT: if the KG has actual triples with this relation AND it's been
         #    taught as transitive/symmetric/functional, prefer KG inference.
         kg_relations_with_facts = set(t.relation for t in self.kg.triples)
+        # In store-backed mode, also include relations from the SPARQL store
+        if getattr(self.kg, '_store_backed', False) and self.kg._sparql_store is not None:
+            kg_relations_with_facts.update(self.kg._sparql_store.get_all_relations())
         has_constraint_relations = any(
             r.get("rel_type") in self.parser.constraint_signals
             and r.get("rel_type") not in kg_relations_with_facts
@@ -1179,13 +1188,21 @@ class GenericThinkingDust:
 
         # Rebuild from triples: each triple's subject maps to a sense URI
         sense_uris = self.kg.get_sense_uris(entity)
-        for t in self.kg.triples:
-            if t.subject == entity or t.subject in sense_uris:
-                sense_idx = sense_uris.index(t.subject) if t.subject in sense_uris else 0
-                # Reconstruct a natural-language-like sentence from the triple
-                # Use the original teach sentence if available from metadata
-                gloss = f"{t.subject} {t.relation} {t.object}"
-                self.lesk_wsd.add_sense_example(entity, sense_idx, gloss)
+        if getattr(self.kg, '_store_backed', False) and self.kg._sparql_store is not None:
+            # Get neighbors from SPARQL store for this entity
+            neighbors = self.kg._sparql_store.get_entity_neighbors(entity)
+            for rel, neighbor, direction in neighbors:
+                if direction == "outgoing":
+                    gloss = f"{entity} {rel} {neighbor}"
+                    self.lesk_wsd.add_sense_example(entity, 0, gloss)
+        else:
+            for t in self.kg.triples:
+                if t.subject == entity or t.subject in sense_uris:
+                    sense_idx = sense_uris.index(t.subject) if t.subject in sense_uris else 0
+                    # Reconstruct a natural-language-like sentence from the triple
+                    # Use the original teach sentence if available from metadata
+                    gloss = f"{t.subject} {t.relation} {t.object}"
+                    self.lesk_wsd.add_sense_example(entity, sense_idx, gloss)
 
         # Also add the teach sentences from _teach_contexts if available
         # (these are richer than triple-form)
@@ -1201,6 +1218,8 @@ class GenericThinkingDust:
         These are the type declarations for the entity.
         Example: "cell is_a organelle" → ["organelle"]
         """
+        if getattr(self.kg, '_store_backed', False) and self.kg._sparql_store is not None:
+            return self.kg._sparql_store.query_relation(entity, "is_a")
         return [t.object for t in self.kg.triples
                 if t.subject == entity and t.relation == "is_a"]
 
@@ -1621,10 +1640,14 @@ class GenericThinkingDust:
         tokens = re.findall(r'\w+', text_lower)  # \w includes underscores
 
         # Collect entities that exist in the KG
-        kg_entities = set()
-        for t in self.kg.triples:
-            kg_entities.add(t.subject)
-            kg_entities.add(t.object)
+        # Store-backed mode: query SPARQL store; In-memory: scan triples
+        if getattr(self.kg, '_store_backed', False) and self.kg._sparql_store is not None:
+            kg_entities = self.kg._sparql_store.get_all_entities()
+        else:
+            kg_entities = set()
+            for t in self.kg.triples:
+                kg_entities.add(t.subject)
+                kg_entities.add(t.object)
         entities_in_query = [t for t in tokens if t in kg_entities]
 
         if len(entities_in_query) < 2:
@@ -1688,7 +1711,10 @@ class GenericThinkingDust:
                     # — "won" doesn't match, so skip)
                     if not has_interrogative and not has_question_mark:
                         # Check if any token matches a KG relation
-                        kg_relations = set(t.relation for t in self.kg.triples)
+                        if getattr(self.kg, '_store_backed', False) and self.kg._sparql_store is not None:
+                            kg_relations = self.kg._sparql_store.get_all_relations()
+                        else:
+                            kg_relations = set(t.relation for t in self.kg.triples)
                         kg_relations.update(self.kg.relation_properties.keys())
                         has_relation_match = any(t in kg_relations for t in tokens)
                         if not has_relation_match:
@@ -1709,7 +1735,10 @@ class GenericThinkingDust:
                                     if subj_text not in kg_entities and subj_text != entity:
                                         return None
 
-                    kg_relations = set(t.relation for t in self.kg.triples)
+                    if getattr(self.kg, '_store_backed', False) and self.kg._sparql_store is not None:
+                        kg_relations = self.kg._sparql_store.get_all_relations()
+                    else:
+                        kg_relations = set(t.relation for t in self.kg.triples)
                     kg_relations.update(self.kg.relation_properties.keys())
 
                     def _try_inverse_query(rel):
@@ -1719,9 +1748,14 @@ class GenericThinkingDust:
                         if result.answer is not None:
                             return result
                         # Inverse: capital_of(?, france) → what is the capital of France?
-                        for t in self.kg.triples:
-                            if t.relation == rel and t.object == entity:
-                                return self.kg.query(t.subject, rel, entity)
+                        if getattr(self.kg, '_store_backed', False) and self.kg._sparql_store is not None:
+                            inv_results = self.kg._sparql_store.inverse_query(rel, entity)
+                            if inv_results:
+                                return self.kg.query(inv_results[0], rel, entity)
+                        else:
+                            for t in self.kg.triples:
+                                if t.relation == rel and t.object == entity:
+                                    return self.kg.query(t.subject, rel, entity)
                         return None
 
                     # Collect ALL candidate relations (exact + compound + BEAGLE)
@@ -1862,10 +1896,18 @@ class GenericThinkingDust:
                             # - Salton & Buckley (1988), IP&M 24(5) — TF-IDF
                             # - Jones & Mewhort (2007), Psych Review — BEAGLE
                             # - Esposito et al. (2019), Info Sciences — hybrid QE
-                            total_triples = len(self.kg.triples) if self.kg.triples else 1
-                            rel_freq = {}
-                            for t in self.kg.triples:
-                                rel_freq[t.relation] = rel_freq.get(t.relation, 0) + 1
+                            if getattr(self.kg, '_store_backed', False) and self.kg._sparql_store is not None:
+                                total_triples = self.kg._sparql_store.count_triples()
+                                # Build rel_freq from SPARQL (one query per relation)
+                                rel_freq = {}
+                                for r in self.kg._sparql_store.get_all_relations():
+                                    pairs = self.kg._sparql_store.get_facts_for_relation(r)
+                                    rel_freq[r] = len(pairs)
+                            else:
+                                total_triples = len(self.kg.triples) if self.kg.triples else 1
+                                rel_freq = {}
+                                for t in self.kg.triples:
+                                    rel_freq[t.relation] = rel_freq.get(t.relation, 0) + 1
 
                             # Pre-compute BEAGLE query expansion for ranking
                             # Expands query tokens via nearest neighbors to find
@@ -1925,7 +1967,10 @@ class GenericThinkingDust:
                 return None
 
         # Collect relation words in the query that match KG relations
-        kg_relations = set(t.relation for t in self.kg.triples)
+        if getattr(self.kg, '_store_backed', False) and self.kg._sparql_store is not None:
+            kg_relations = self.kg._sparql_store.get_all_relations()
+        else:
+            kg_relations = set(t.relation for t in self.kg.triples)
         # Also check relation_properties (for relations taught but no triples yet)
         kg_relations.update(self.kg.relation_properties.keys())
 
