@@ -193,6 +193,39 @@ BEAGLE_STOP_WORDS = STOP_WORDS | frozenset({
     "not", "very", "just", "also", "still", "already", "even",
 })
 
+# ── Relation Property Detection Words ─────────────────────────────
+# Used by detect_relation_properties() in td/kg/__init__.py
+# Reference: Levin (1993), "English Verb Classes and Alternations"
+
+# Stative/spatial verbs that indicate transitivity
+# "located in", "contained in", "residing in" → transitive
+STATIVE_VERBS = frozenset({
+    "locate", "situate", "contain", "include", "comprise",
+    "constitute", "encompass", "incorporate", "involve",
+    "belong", "reside", "exist", "remain", "persist",
+})
+
+# Event verbs that are NOT transitive even with prepositions
+# "born in", "died in", "happened in" → NOT transitive
+EVENT_VERBS = frozenset({
+    "born", "die", "happen", "occur", "take place",
+    "arrive", "depart", "emerge", "appear", "vanish",
+})
+
+# Prepositions that indicate transitivity when combined with stative verbs
+TRANSITIVE_PREPS = frozenset({
+    "in", "of", "at", "from", "within", "inside",
+    "under", "above", "below", "between", "among", "across",
+})
+
+# Words that indicate symmetric relations
+# "borders", "adjacent to", "married to", "sibling of" → symmetric
+SYMMETRIC_WORDS = frozenset({
+    "border", "adjacent", "equal", "match", "connect",
+    "link", "relate", "correspond", "neighbor", "touch",
+    "spouse", "sibling", "partner", "peer",
+})
+
 # ── Register English ──────────────────────────────────────────────
 register_language(LanguageConfig(
     code="en",
@@ -210,4 +243,8 @@ register_language(LanguageConfig(
     demonstrative_pronouns=DEMONSTRATIVE_PRONOUNS,
     beagle_stop_words=BEAGLE_STOP_WORDS,
     copula_to_isa=COPULA_TO_ISA,
+    stative_verbs=STATIVE_VERBS,
+    event_verbs=EVENT_VERBS,
+    transitive_preps=TRANSITIVE_PREPS,
+    symmetric_words=SYMMETRIC_WORDS,
 ))

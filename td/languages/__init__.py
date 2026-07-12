@@ -74,6 +74,26 @@ class LanguageConfig:
     # Reference: UD `attr` — nominal predicate of copular construction
     copula_to_isa: Dict[str, str] = field(default_factory=dict)
 
+    # ── Relation Property Detection Words ──────────────────────────
+    # Used by detect_relation_properties() in td/kg/__init__.py
+    # Language-specific words that indicate relation semantics.
+
+    # Stative/spatial verbs that indicate transitivity
+    # "located in", "contained in", "residing in" → transitive
+    # Reference: Levin (1993), "English Verb Classes and Alternations"
+    stative_verbs: FrozenSet[str] = frozenset()
+
+    # Event verbs that are NOT transitive even with prepositions
+    # "born in", "died in", "happened in" → NOT transitive
+    event_verbs: FrozenSet[str] = frozenset()
+
+    # Prepositions that indicate transitivity when combined with stative verbs
+    transitive_preps: FrozenSet[str] = frozenset()
+
+    # Words that indicate symmetric relations
+    # "borders", "adjacent to", "married to", "sibling of" → symmetric
+    symmetric_words: FrozenSet[str] = frozenset()
+
 
 # ── Language Registry ─────────────────────────────────────────────
 _REGISTRY: Dict[str, LanguageConfig] = {}

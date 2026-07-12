@@ -999,30 +999,18 @@ class KnowledgeGraph:
                     prep_tokens = [t.text.lower() for t in doc if t.pos_ == "ADP"]
                     verb_tokens = [t.lemma_.lower() for t in doc if t.pos_ == "VERB"]
 
-                    # Stative/spatial verbs that indicate transitivity
-                    # Reference: Levin (1993), "English Verb Classes and Alternations"
-                    stative_verbs = {
-                        "locate", "situate", "contain", "include", "comprise",
-                        "constitute", "encompass", "incorporate", "involve",
-                        "belong", "reside", "exist", "remain", "persist",
-                    }
-                    # Event verbs that are NOT transitive even with "in"
-                    event_verbs = {
-                        "born", "die", "happen", "occur", "take place",
-                        "arrive", "depart", "emerge", "appear", "vanish",
-                    }
+                    # Load verb/preposition sets from language registry
+                    # Reference: td/languages/{lang}.py
+                    from td.languages import get_language
+                    lang = getattr(doc, 'lang_', 'en')
+                    lang_config = get_language(lang)
+                    stative = lang_config.stative_verbs if lang_config else frozenset()
+                    event = lang_config.event_verbs if lang_config else frozenset()
+                    t_preps = lang_config.transitive_preps if lang_config else frozenset()
 
-                    transitive_preps = {"in", "of", "at", "from", "within",
-                                        "inside", "under", "above", "below",
-                                        "between", "among", "across"}
-
-                    # Only mark transitive if:
-                    # 1. Has a transitive preposition AND
-                    # 2. Has a stative verb (or noun-only pattern like "part of")
-                    # 3. Does NOT have an event verb
-                    has_stative = any(v in stative_verbs for v in verb_tokens)
-                    has_event = any(v in event_verbs for v in verb_tokens)
-                    has_transitive_prep = any(p in transitive_preps for p in prep_tokens)
+                    has_stative = any(v in stative for v in verb_tokens)
+                    has_event = any(v in event for v in verb_tokens)
+                    has_transitive_prep = any(p in t_preps for p in prep_tokens)
 
                     if has_transitive_prep and not has_event:
                         if has_stative or (has_noun and not has_verb):
@@ -1036,12 +1024,8 @@ class KnowledgeGraph:
                 # Symmetric verb/noun patterns
                 if has_verb or has_noun:
                     all_lemmas = [t.lemma_.lower() for t in doc if t.pos_ in ("VERB", "NOUN", "ADJ")]
-                    symmetric_words = {
-                        "border", "adjacent", "equal", "match", "connect",
-                        "link", "relate", "correspond", "neighbor", "touch",
-                        "spouse", "sibling", "partner", "peer",
-                    }
-                    if any(w in symmetric_words for w in all_lemmas):
+                    sym_words = lang_config.symmetric_words if lang_config else frozenset()
+                    if any(w in sym_words for w in all_lemmas):
                         props.add("symmetric")
 
             # ── Tier 2: Statistical detection (fallback) ─────────
