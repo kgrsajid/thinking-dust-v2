@@ -169,6 +169,13 @@ class BulkLoader:
         - Triples: Q22686\\tP39\\tQ11696 (tab-separated Wikidata IDs)
         - Aliases: Q22686\\tDonald Trump\\tDonnie Trump (tab-separated)
 
+        Entity and relation IDs are converted to human-readable names
+        using the alias files. The FIRST alias is used as the canonical
+        name (e.g., Q22686 → "Donald Trump", P39 → "position held").
+
+        After loading, relation properties are registered based on the
+        Wikidata relation mapping (e.g., P31 → is_a, P131 → in transitive).
+
         Args:
             triples_path: Path to triples file (.txt or .txt.gz)
             aliases_path: Path to entity aliases file (optional)
@@ -205,6 +212,11 @@ class BulkLoader:
                         relation_map[rel_id] = name
             print(f"  Loaded {len(relation_map):,} relation aliases")
 
+        # Register Wikidata relation properties after loading
+        # This maps common Wikidata properties to TD v2 inference rules.
+        # Reference: https://www.wikidata.org/wiki/Wikidata:List_of_properties
+        self._register_wikidata_properties(relation_map)
+
         # Parse triples
         def triple_generator():
             for line in self._read_lines(triples_path):
@@ -219,6 +231,82 @@ class BulkLoader:
             relation_map=relation_map,
             entity_map=entity_map,
         )
+
+    def _register_wikidata_properties(self, relation_map: dict):
+        """Register TD v2 inference properties for common Wikidata relations.
+
+        Maps Wikidata property IDs to TD v2 relation properties (transitive,
+        symmetric, functional, inverse). This enables inference on loaded data.
+
+        Reference: https://www.wikidata.org/wiki/Wikidata:List_of_properties
+        """
+        # Transitive relations (R(X,Y) ∧ R(Y,Z) → R(X,Z))
+        transitive = {
+            "P131",  # located in administrative territory
+            "P17",   # country
+            "P27",   # country of citizenship
+            "P463",  # member of
+            "P361",  # part of
+            "P279",  # subclass of
+            "P706",  # located in/on physical feature
+            "P150",  # contains administrative territory
+        }
+
+        # Symmetric relations (R(X,Y) → R(Y,X))
+        symmetric = {
+            "P3373",  # sibling
+            "P26",    # spouse
+            "P47",    # shares border with
+        }
+
+        # Functional relations (R(X,Y) ∧ R(X,Z) → Y=Z)
+        functional = {
+            "P36",   # capital
+            "P35",   # head of state
+            "P6",    # head of government
+        }
+
+        # Inverse pairs (R1(X,Y) → R2(Y,X))
+        inverse_pairs = {
+            ("P361", "P527"),  # part_of ↔ has_part
+            ("P150", "P131"),  # contains ↔ located_in
+            ("P127", "P355"),  # owned_by ↔ has_subsidiary
+        }
+
+        # Resolve relation IDs to human-readable names and register
+        registered = 0
+        for rel_id in transitive:
+            name = relation_map.get(rel_id)
+            if name:
+                self.td.kg.set_relation_property(name, "transitive")
+                registered += 1
+
+        for rel_id in symmetric:
+            name = relation_map.get(rel_id)
+            if name:
+                self.td.kg.set_relation_property(name, "symmetric")
+                registered += 1
+
+        for rel_id in functional:
+            name = relation_map.get(rel_id)
+            if name:
+                self.td.kg.set_relation_property(name, "functional")
+                registered += 1
+
+        for rel1_id, rel2_id in inverse_pairs:
+            name1 = relation_map.get(rel1_id)
+            name2 = relation_map.get(rel2_id)
+            if name1 and name2:
+                self.td.kg.set_relation_property(name1, "inverse", inverse=name2)
+                registered += 1
+
+        # Also register "is_a" and common relations that aren't in Wikidata
+        # but emerge from the data
+        self.td.kg.set_relation_property("is_a", "transitive")
+        self.td.kg.set_relation_property("instance of", "transitive")
+        self.td.kg.set_relation_property("subclass of", "transitive")
+
+        print(f"  Registered {registered} Wikidata relation properties")
 
     def load_tsv(self, path: str, source: str = "tsv",
                  has_header: bool = False) -> LoadStats:

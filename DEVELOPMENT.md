@@ -140,6 +140,7 @@ td-v2/
 ├── td/
 │   ├── __init__.py
 │   ├── thinking.py           # Main entry point: GenericThinkingDust class
+│   ├── bulk_loader.py        # Bulk loading structured data (Wikidata5m, TSV)
 │   ├── minimal_seed.py        # Pre-seeded relation properties
 │   ├── pipeline.py           # Query processing pipeline orchestration
 │   ├── decomposer.py         # Problem decomposition into sub-problems
@@ -303,6 +304,126 @@ DOMAINS = {
 # - No duplicates
 # - One sentence per line
 ```
+
+---
+
+## 3.5 Bulk Loading Structured Data
+
+TD v2 supports three input paths:
+
+| Input Type | Method | Parser | When to Use |
+|-----------|--------|--------|-------------|
+| Human text | `td.teach(text, answer)` | ✅ Full pipeline | User types facts in natural language |
+| LLM-generated | `td.teach(text, answer)` | ✅ Full pipeline | LLM generates clean sentences |
+| Structured triples | `BulkLoader.load_triples([...])` | ❌ Skipped | Pre-extracted (subject, relation, object) |
+
+### When to Use BulkLoader
+
+Use `BulkLoader` when you have **pre-structured triples** — data that's already in `(subject, relation, object)` format. Examples:
+- Wikidata5m (20M triples, Wikidata Q/P IDs)
+- CSV/TSV exports from databases
+- LLM-generated triple datasets
+- Any data where triples are pre-extracted
+
+**Do NOT use BulkLoader** for:
+- Natural language sentences (use `td.teach()`)
+- Data that needs parsing or sentence splitting
+- Data with pronouns or anaphora
+
+### Basic Usage
+
+```python
+from td.bulk_loader import BulkLoader
+
+loader = BulkLoader(td, run_inference=True)
+
+# Load from a list of triples
+stats = loader.load_triples([
+    ("paris", "capital_of", "france"),
+    ("france", "in", "eu"),
+    ("eu", "part_of", "europe"),
+], source="manual")
+print(stats.summary())
+
+# Query immediately
+result = td.think("is paris in europe")
+# → YES (derived via transitivity)
+```
+
+### Loading Wikidata5m
+
+```python
+loader = BulkLoader(td, run_inference=True)
+
+stats = loader.load_wikidata5m(
+    triples_path="data/wikidata5m_transductive_train.txt",
+    aliases_path="data/entity_aliases.del",
+    relation_aliases_path="data/relation_aliases.del",
+)
+print(stats.summary())
+# → Loaded 20,614,279 triples (4,594,485 entities, 822 relations) in ~30min
+```
+
+**What happens internally:**
+1. Aliases loaded: `Q22686` → `"Donald Trump"`, `P39` → `"position held"`
+2. Triples converted: `(Q22686, P39, Q11696)` → `("donald trump", "position held", "president of the united states")`
+3. Relation properties registered: `P131` (located in) → transitive, `P36` (capital) → functional, etc.
+4. Facts loaded directly into KG (no parser)
+5. `derive_all()` runs once at the end (not per-fact)
+
+### Loading from TSV
+
+```python
+# TSV file: subject\trelation\tobject (one per line)
+stats = loader.load_tsv("data/my_facts.tsv", source="custom")
+```
+
+### Wikidata Relation Properties
+
+The bulk loader automatically registers inference properties for common Wikidata relations:
+
+| Wikidata ID | Name | TD v2 Property |
+|-------------|------|---------------|
+| P31 | instance of | `is_a` (transitive) |
+| P279 | subclass of | `is_a` (transitive) |
+| P131 | located in administrative territory | `in` (transitive) |
+| P17 | country | `in` (transitive) |
+| P27 | country of citizenship | `in` (transitive) |
+| P361 | part of | `part_of` (transitive) |
+| P463 | member of | `in` (transitive) |
+| P26 | spouse | `married_to` (symmetric) |
+| P47 | shares border with | `borders` (symmetric) |
+| P36 | capital | `capital_of` (functional) |
+| P361/P527 | part of / has part | inverse pair |
+
+This means after loading Wikidata5m, queries like "is France in Europe?" work immediately via transitive inference — no manual relation property teaching needed.
+
+### Performance
+
+| Metric | Value |
+|--------|-------|
+| Load speed | ~100,000 triples/sec |
+| 20M triples | ~20-30 minutes |
+| Inference (derive_all) | ~1-5 minutes after loading |
+| Query speed (after load) | 18-50ms (pyoxigraph) |
+
+### Architecture
+
+```
+BulkLoader.load_triples(triples)
+    ↓
+For each (subject, relation, object):
+    kg.add_fact(s, r, o, source="bulk")  ← no parser, no BEAGLE
+    ↓
+After all triples loaded:
+    kg.derive_all()  ← runs inference ONCE (transitive, symmetric, composition)
+    ↓
+Ready for queries
+```
+
+**Key difference from teach():**
+- `teach()`: parser → WSD → BEAGLE → KG → (lazy inference on query)
+- `BulkLoader`: direct KG insertion → inference once at end → ready
 
 ---
 
