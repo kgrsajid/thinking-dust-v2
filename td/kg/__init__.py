@@ -1583,9 +1583,10 @@ class KnowledgeGraph:
         self._sparql_store = None
 
         for r in results:
-            subject = r.get('?s', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' ')
-            relation = r.get('?p', '').replace('http://thinking-dust.org/relation/', '')
-            obj = r.get('?o', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' ')
+            from urllib.parse import unquote
+            subject = unquote(r.get('?s', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' '))
+            relation = unquote(r.get('?p', '').replace('http://thinking-dust.org/relation/', '').replace('_', ' '))
+            obj = unquote(r.get('?o', '').replace('http://thinking-dust.org/entity/', '').replace('_', ' '))
 
             if subject and relation and obj:
                 # Get metadata if available
