@@ -367,8 +367,8 @@ print(stats.summary())
 **What happens internally:**
 1. Aliases loaded: `Q22686` → `"Donald Trump"`, `P39` → `"position held"`
 2. Triples converted: `(Q22686, P39, Q11696)` → `("donald trump", "position held", "president of the united states")`
-3. Relation properties registered: `P131` (located in) → transitive, `P36` (capital) → functional, etc.
-4. Facts loaded directly into KG (no parser)
+3. Facts loaded directly into KG (no parser)
+4. Relation properties auto-detected from loaded data (spaCy + statistical)
 5. `derive_all()` runs once at the end (not per-fact)
 
 ### Loading from TSV

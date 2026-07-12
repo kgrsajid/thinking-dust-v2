@@ -100,12 +100,15 @@ class BulkLoader:
         for i, triple in enumerate(triples):
             stats.total_lines += 1
 
-            # Unpack
-            if len(triple) < 3:
+            # Unpack with error handling
+            try:
+                if len(triple) < 3:
+                    stats.triples_skipped += 1
+                    continue
+                s, r, o = triple[0], triple[1], triple[2]
+            except (TypeError, AttributeError, IndexError):
                 stats.triples_skipped += 1
                 continue
-
-            s, r, o = triple[0], triple[1], triple[2]
 
             # Map IDs to names if maps provided
             if entity_map:
@@ -171,8 +174,8 @@ class BulkLoader:
             try:
                 import spacy
                 nlp = spacy.load("en_core_web_sm")
-            except (ImportError, OSError):
-                pass
+            except (ImportError, OSError) as e:
+                print(f"  spaCy unavailable ({e}), using statistical detection only")
             detected = self.td.kg.detect_relation_properties(min_evidence=3, nlp=nlp)
             if detected:
                 for rel, props in detected.items():
@@ -244,9 +247,6 @@ class BulkLoader:
                         relation_map[rel_id] = name
             print(f"  Loaded {len(relation_map):,} relation aliases")
 
-        # Register Wikidata relation properties after loading
-        self._register_wikidata_properties()
-
         # Parse triples
         def triple_generator():
             for line in self._read_lines(triples_path):
@@ -261,18 +261,6 @@ class BulkLoader:
             relation_map=relation_map,
             entity_map=entity_map,
         )
-
-    def _register_wikidata_properties(self):
-        """Register relation properties for loaded data.
-
-        Uses two-tier detection (spaCy + statistical) — works for ANY dataset
-        from ANY source. No dependency on specific APIs or data formats.
-
-        Reference: Levin (1993), "English Verb Classes and Alternations"
-        Reference: Universal Dependencies (Nivre et al., 2016)
-        Reference: Muggleton (1991), Inductive Logic Programming
-        """
-        print("  Relation properties: detected via spaCy + statistical analysis")
 
     def load_tsv(self, path: str, source: str = "tsv",
                  has_header: bool = False) -> LoadStats:
@@ -301,10 +289,10 @@ class BulkLoader:
     def _read_lines(path: str) -> Iterator[str]:
         """Read lines from a file, supporting .gz compression."""
         if path.endswith(".gz"):
-            with gzip.open(path, "rt", encoding="utf-8") as f:
+            with gzip.open(path, "rt", encoding="utf-8", errors="replace") as f:
                 for line in f:
                     yield line
         else:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
                 for line in f:
                     yield line

@@ -140,6 +140,7 @@ class KnowledgeGraph:
 
     def __init__(self, max_hops: int = 100):
         self.triples: list[Triple] = []
+        self._triple_index: set[tuple[str, str, str]] = set()  # O(1) dedup
         self.relation_properties: dict[str, set[str]] = dict(DEFAULT_RELATION_PROPERTIES)
         self._entity_index: dict[str, list[int]] = defaultdict(list)  # entity → triple indices
         self.max_hops = max_hops  # Effectively unlimited (100 hops)
@@ -198,18 +199,19 @@ class KnowledgeGraph:
         # ── LOTG: Pre-commit ontological consistency check ────────
         self.last_warnings = self.detector.check(subject, relation, obj)
 
-        # Check for duplicate (ignoring temporal fields for deduplication)
-        for t in self.triples:
-            if t.subject == subject and t.relation == relation and t.object == obj:
-                # Update temporal fields if provided
-                if temporal_start is not None:
-                    t.temporal_start = temporal_start
-                if temporal_end is not None:
-                    t.temporal_end = temporal_end
-                # Update temporal index (only subject owns its interval)
-                if t.temporal_start is not None:
-                    self._temporal_index[subject] = (t.temporal_start, t.temporal_end)
-                return t  # Already exists
+        # Check for duplicate — O(1) via hash index
+        triple_key = (subject, relation, obj)
+        if triple_key in self._triple_index:
+            # Find existing triple to update temporal fields
+            for t in self.triples:
+                if t.subject == subject and t.relation == relation and t.object == obj:
+                    if temporal_start is not None:
+                        t.temporal_start = temporal_start
+                    if temporal_end is not None:
+                        t.temporal_end = temporal_end
+                    if t.temporal_start is not None:
+                        self._temporal_index[subject] = (t.temporal_start, t.temporal_end)
+                    return t  # Already exists
 
         triple = Triple(subject, relation, obj, source, proof,
                         temporal_start=temporal_start, temporal_end=temporal_end)
@@ -218,6 +220,7 @@ class KnowledgeGraph:
             triple.metadata = {"contradictions": [str(w) for w in self.last_warnings]}
         idx = len(self.triples)
         self.triples.append(triple)
+        self._triple_index.add(triple_key)  # O(1) dedup index
         self._entity_index[subject].append(idx)
         self._entity_index[obj].append(idx)
 
@@ -979,7 +982,7 @@ class KnowledgeGraph:
             if relation in self.relation_properties:
                 continue
 
-            # ── Tier 2: spaCy semantic analysis ──────────────────
+            # ── Tier 1: spaCy semantic analysis ──────────────────
             # Parse relation name for grammatical structure.
             # Language-independent: uses Universal Dependencies tags.
             if nlp is not None:
@@ -1025,6 +1028,11 @@ class KnowledgeGraph:
                         if has_stative or (has_noun and not has_verb):
                             props.add("transitive")
 
+                    # Bare stative verbs without preposition → transitive
+                    # "contains", "includes", "encompasses" → transitive
+                    if has_stative and not has_event and not has_prep:
+                        props.add("transitive")
+
                 # Symmetric verb/noun patterns
                 if has_verb or has_noun:
                     all_lemmas = [t.lemma_.lower() for t in doc if t.pos_ in ("VERB", "NOUN", "ADJ")]
@@ -1036,7 +1044,7 @@ class KnowledgeGraph:
                     if any(w in symmetric_words for w in all_lemmas):
                         props.add("symmetric")
 
-            # ── Tier 3: Statistical detection (fallback) ─────────
+            # ── Tier 2: Statistical detection (fallback) ─────────
             # Count triple patterns in loaded data.
             # Reference: Muggleton (1991), Inductive Logic Programming
             pairs_set = set(pairs)
