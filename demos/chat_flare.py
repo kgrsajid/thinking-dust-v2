@@ -269,6 +269,7 @@ def _save_state(td):
             "patterns": td.mhn.patterns,
             "total_thinks": td.total_thinks,
             "total_learned": td.total_learned,
+            "seed_count": td.seed_count,
         }, f)
 
     total = len(td.mhn.patterns) + len(td.kg.triples)
@@ -292,6 +293,7 @@ def _load_state(td):
             td.mhn.patterns = data.get("patterns", [])
             td.total_thinks = data.get("total_thinks", 0)
             td.total_learned = data.get("total_learned", 0)
+            td.seed_count = data.get("seed_count", 0)
         except Exception:
             pass
 
