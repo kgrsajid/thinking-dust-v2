@@ -210,7 +210,7 @@ class BulkLoader:
 
     def load_wikidata5m(self, triples_path: str, aliases_path: str = None,
                         relation_aliases_path: str = None,
-                        source: str = "wikidata5m") -> LoadStats:
+                        source: str = "wikidata5m", lang: str = "en") -> LoadStats:
         """Load Wikidata5m dataset directly.
 
         Handles the Wikidata5m format:
@@ -221,14 +221,14 @@ class BulkLoader:
         using the alias files. The FIRST alias is used as the canonical
         name (e.g., Q22686 → "Donald Trump", P39 → "position held").
 
-        After loading, relation properties are registered based on the
-        Wikidata relation mapping (e.g., P31 → is_a, P131 → in transitive).
-
         Args:
             triples_path: Path to triples file (.txt or .txt.gz)
             aliases_path: Path to entity aliases file (optional)
             relation_aliases_path: Path to relation aliases file (optional)
             source: Source label
+            lang: Language code for alias filtering (default: "en").
+                  If "en", prefers Latin-script aliases and skips
+                  non-Latin-script entries (CJK, Cyrillic, Arabic, etc.)
 
         Returns:
             LoadStats
@@ -236,13 +236,13 @@ class BulkLoader:
         # Load entity aliases (ID → name)
         entity_map = {}
         if aliases_path:
-            print(f"  Loading entity aliases from {aliases_path}...")
+            print(f"  Loading entity aliases from {aliases_path} (lang={lang})...")
             for line in self._read_lines(aliases_path):
                 parts = line.strip().split("\t")
                 if len(parts) >= 2:
                     entity_id = parts[0].strip()
-                    # Use first alias as canonical name
-                    name = parts[1].strip().lower()
+                    # Find best alias for requested language
+                    name = self._pick_alias(parts[1:], lang)
                     if name:
                         entity_map[entity_id] = name
             print(f"  Loaded {len(entity_map):,} entity aliases")
@@ -299,6 +299,42 @@ class BulkLoader:
                     yield (parts[0], parts[1], parts[2])
 
         return self.load_triples(triple_generator(), source=source)
+
+    @staticmethod
+    def _pick_alias(aliases: list[str], lang: str = "en") -> str | None:
+        """Pick the best alias for a given language from a list of aliases.
+
+        For lang="en": prefers Latin-script aliases, skips CJK/Cyrillic/Arabic.
+        For other languages: uses first available alias.
+
+        This is a heuristic — Wikidata alias files don't have language tags.
+        Latin-script aliases are likely English or Latin-alphabet languages.
+
+        Args:
+            aliases: List of alias strings (already stripped)
+            lang: Language code ("en" for English)
+
+        Returns:
+            Best alias (lowercased) or None
+        """
+        if not aliases:
+            return None
+
+        if lang == "en":
+            # Prefer Latin-script aliases (likely English)
+            for alias in aliases:
+                a = alias.strip().lower()
+                if not a:
+                    continue
+                # Check if mostly Latin characters (ASCII + common accented)
+                ascii_ratio = sum(1 for c in a if ord(c) < 256) / max(len(a), 1)
+                if ascii_ratio >= 0.8:
+                    return a
+            # Fallback: use first alias even if non-Latin
+            return aliases[0].strip().lower() if aliases[0].strip() else None
+        else:
+            # Non-English: use first available alias
+            return aliases[0].strip().lower() if aliases[0].strip() else None
 
     @staticmethod
     def _read_lines(path: str) -> Iterator[str]:

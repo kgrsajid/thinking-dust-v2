@@ -103,25 +103,27 @@ def _init_vocab():
 def entity_to_uri(entity: str) -> NamedNode:
     """Convert TD entity name to RDF URI.
 
+    Language-independent: percent-encodes non-ASCII characters.
     'paris' → NamedNode('http://thinking-dust.org/entity/paris')
-    'south korea' → NamedNode('http://thinking-dust.org/entity/south_korea')
+    'reino hulandes' → NamedNode('http://thinking-dust.org/entity/reino_hulandes')
+    '東京' → NamedNode('http://thinking-dust.org/entity/%E6%9D%B1%E4%BA%AC')
     """
-    import re as _re
+    from urllib.parse import quote
     normalized = entity.lower().strip().replace(" ", "_")
-    # Remove characters invalid in IRIs (RFC 3987)
-    # Keep: letters, digits, - . _ ~ / : @
-    normalized = _re.sub(r'[^a-z0-9_\-\.~:/@]', '', normalized)
+    # Percent-encode non-ASCII characters (language-independent)
+    normalized = quote(normalized, safe='-_./:@')
     return NamedNode(f"{TD_ENT}{normalized}")
 
 
 def relation_to_uri(relation: str) -> NamedNode:
     """Convert TD relation name to RDF URI.
 
+    Language-independent: percent-encodes non-ASCII characters.
     'capital_of' → NamedNode('http://thinking-dust.org/relation/capital_of')
     """
-    import re as _re
+    from urllib.parse import quote
     normalized = relation.lower().strip().replace(" ", "_")
-    normalized = _re.sub(r'[^a-z0-9_\-\.~:/@]', '', normalized)
+    normalized = quote(normalized, safe='-_./:@')
     return NamedNode(f"{TD_REL}{normalized}")
 
 
