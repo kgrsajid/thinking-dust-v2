@@ -201,6 +201,11 @@ class BulkLoader:
             # TODO: batch update from entity descriptions
             stats.beagle_time_sec = time.time() - t_beagle
 
+        # Auto-save to persistent storage
+        print("  Saving to persistent storage...")
+        self.td.kg.save()
+        print("  Saved.")
+
         return stats
 
     def load_wikidata5m(self, triples_path: str, aliases_path: str = None,
