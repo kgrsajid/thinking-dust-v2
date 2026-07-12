@@ -235,26 +235,15 @@ class BulkLoader:
     def _register_wikidata_properties(self, relation_map: dict):
         """Register relation properties for loaded data.
 
-        Instead of hardcoding which Wikidata properties are transitive/symmetric/functional,
-        we register common semantic relations that TD v2 already knows about.
-        Unknown relation properties are learned from data patterns by derive_all().
+        Language-independent: no hardcoded English relation names.
+        All relation properties are learned from data patterns by derive_all().
 
         The inference engine detects transitivity, symmetry, and functionality
         automatically from observed triple patterns — no manual mapping needed.
         """
-        # Only register the fundamental semantic relations that TD v2 pre-seeds
-        # These are language-level properties, not Wikidata-specific
-        self.td.kg.set_relation_property("is_a", "transitive")
-        self.td.kg.set_relation_property("instance of", "transitive")
-        self.td.kg.set_relation_property("subclass of", "transitive")
-        self.td.kg.set_relation_property("part of", "transitive")
-        self.td.kg.set_relation_property("has part", "transitive")
-
-        # Register inverse pairs for common semantic relations
-        # Wikidata relation names from alias file will be used as-is
-        # The engine learns the rest from data patterns
-
-        print("  Relation properties: using pre-seeded defaults + data-driven learning")
+        # No pre-seeding. The engine learns everything from data.
+        # derive_all() will detect which relations are transitive, symmetric, etc.
+        print("  Relation properties: data-driven (learned from patterns)")
 
     def load_tsv(self, path: str, source: str = "tsv",
                  has_header: bool = False) -> LoadStats:
