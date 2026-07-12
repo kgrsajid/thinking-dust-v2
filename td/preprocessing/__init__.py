@@ -94,11 +94,20 @@ class Preprocessor:
     """
 
     # Filler words to strip in rule-based mode
+    # NOTE: "what about" is NOT a filler — it's a query pattern
+    # that needs expansion ("what about prison?" → "what about cell in prison?")
     FILLERS = frozenset({
         "so", "like", "you know", "i mean", "basically", "actually",
         "well", "right", "i was wondering", "can you tell me",
-        "could you tell me", "do you know", "what about",
+        "could you tell me", "do you know",
     })
+
+    # Query intent patterns (not fillers — these carry meaning)
+    QUERY_PATTERNS = [
+        (r"what about (.+)\??", r"what about \1 ?"),
+        (r"how does (.+) work\??", r"how does \1 work ?"),
+        (r"what is (.+) used for\??", r"what is \1 used for ?"),
+    ]
 
     def __init__(self, llm_client=None, prompt: str = PREPROCESSING_PROMPT):
         """Initialize the preprocessor.

@@ -378,25 +378,27 @@ print(stats.summary())
 stats = loader.load_tsv("data/my_facts.tsv", source="custom")
 ```
 
-### Wikidata Relation Properties
+### Relation Properties (Auto-Detected)
 
-The bulk loader automatically registers inference properties for common Wikidata relations:
+After loading, the bulk loader automatically detects relation properties from data patterns:
 
-| Wikidata ID | Name | TD v2 Property |
-|-------------|------|---------------|
-| P31 | instance of | `is_a` (transitive) |
-| P279 | subclass of | `is_a` (transitive) |
-| P131 | located in administrative territory | `in` (transitive) |
-| P17 | country | `in` (transitive) |
-| P27 | country of citizenship | `in` (transitive) |
-| P361 | part of | `part_of` (transitive) |
-| P463 | member of | `in` (transitive) |
-| P26 | spouse | `married_to` (symmetric) |
-| P47 | shares border with | `borders` (symmetric) |
-| P36 | capital | `capital_of` (functional) |
-| P361/P527 | part of / has part | inverse pair |
+```python
+# Auto-detection runs after loading:
+detect_relation_properties(min_evidence=3)
+# Detects: transitive, symmetric, functional from triple patterns
+# Then: derive_all() runs inference with detected properties
+```
 
-This means after loading Wikidata5m, queries like "is France in Europe?" work immediately via transitive inference — no manual relation property teaching needed.
+**How detection works:**
+- **Transitive:** If R(A,B) and R(B,C) exist, and R(A,C) also exists for ≥3 chains → R is transitive
+- **Symmetric:** If R(A,B) and R(B,A) both exist for ≥3 pairs → R is symmetric
+- **Functional:** If for all A where R(A,B) exists, there's exactly one B → R is functional
+
+**No hardcoded mapping needed.** Works for ANY dataset in ANY language.
+
+**Reference:** Wikidata has property constraints that could also be used:
+- Wikontic (Chepurova et al., Nov 2025) — Wikidata ontology constraints for KG construction
+- OntoKG (Prorata-ai, Apr 2026) — intrinsic-relational property classification
 
 ### Performance
 

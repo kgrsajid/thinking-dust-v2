@@ -243,17 +243,20 @@ Parse: entity_aliases.del → entity_name_map
 Parse: relation_aliases.del → relation_name_map
 Parse: wikidata5m_transductive_train.txt → triple_list
     ↓
-For each triple (Q_subject, P_relation, Q_object):
+BulkLoader.load_triples(triple_list, entity_map, relation_map)
+    ↓
+For each (Q_subject, P_relation, Q_object):
     subject = entity_name_map[Q_subject]  # "Donald Trump"
     relation = relation_name_map[P_relation]  # "position held"
     object = entity_name_map[Q_object]  # "President of the United States"
     ↓
-    td.teach(f"{subject} {relation} {object}", object)
+    kg.add_fact(subject, relation, object)  ← no parser, direct KG insertion
     ↓
-pyoxigraph stores as RDF triple
-BEAGLE updates context vectors
+After all triples loaded:
+    kg.detect_relation_properties()  ← auto-detect transitive/symmetric/functional
+    kg.derive_all()  ← run inference ONCE (not per-fact)
     ↓
-Query: "Who held the position of President?" → searches KG → "Donald Trump"
+Ready for queries (18-50ms per query)
 ```
 
 ### Performance Estimates

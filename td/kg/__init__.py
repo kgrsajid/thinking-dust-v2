@@ -934,6 +934,100 @@ class KnowledgeGraph:
 
         return all_derived
 
+    def detect_relation_properties(self, min_evidence: int = 3) -> dict[str, set[str]]:
+        """Auto-detect relation properties from loaded triple patterns.
+
+        Analyzes the knowledge graph to discover which relations are
+        transitive, symmetric, or functional based on evidence in the data.
+
+        This is data-driven — no hardcoded rules. Works for ANY dataset
+        in ANY language.
+
+        Detection rules:
+        - Transitive: If R(A,B) and R(B,C) exist, and R(A,C) also exists
+          for ≥min_evidence chains → R is transitive
+        - Symmetric: If R(A,B) and R(B,A) both exist for ≥min_evidence
+          pairs → R is symmetric
+        - Functional: If for all A where R(A,B) exists, there's exactly
+          one B → R is functional
+
+        Args:
+            min_evidence: Minimum supporting examples to declare a property
+
+        Returns:
+            Dict mapping relation name to set of detected properties
+        """
+        from collections import defaultdict
+
+        # Index triples by relation
+        by_relation: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        for t in self.triples:
+            by_relation[t.relation].append((t.subject, t.object))
+
+        detected: dict[str, set[str]] = {}
+
+        for relation, pairs in by_relation.items():
+            props = set()
+
+            # Skip if already has properties registered
+            if relation in self.relation_properties:
+                continue
+
+            # --- Transitivity check ---
+            # If R(A,B) and R(B,C) exist, check if R(A,C) also exists
+            pairs_set = set(pairs)
+            adj_from: dict[str, set[str]] = defaultdict(set)
+            for s, o in pairs:
+                adj_from[s].add(o)
+
+            transitive_count = 0
+            total_chains = 0
+            for a, b in pairs:
+                for c in adj_from.get(b, set()):
+                    if c != a:  # Avoid self-loops
+                        total_chains += 1
+                        if (a, c) in pairs_set:
+                            transitive_count += 1
+
+            if total_chains >= min_evidence:
+                ratio = transitive_count / total_chains
+                if ratio >= 0.8:  # 80%+ of chains are complete
+                    props.add("transitive")
+
+            # --- Symmetry check ---
+            # If R(A,B) exists, check if R(B,A) also exists
+            symmetric_count = 0
+            total_asymmetric = 0
+            for s, o in pairs:
+                if s != o:  # Skip self-loops
+                    total_asymmetric += 1
+                    if (o, s) in pairs_set:
+                        symmetric_count += 1
+
+            if total_asymmetric >= min_evidence:
+                ratio = symmetric_count / total_asymmetric
+                if ratio >= 0.8:  # 80%+ are symmetric
+                    props.add("symmetric")
+
+            # --- Functionality check ---
+            # If for all A, R(A,B) has exactly one B → functional
+            subject_objects: dict[str, set[str]] = defaultdict(set)
+            for s, o in pairs:
+                subject_objects[s].add(o)
+
+            if len(subject_objects) >= min_evidence:
+                max_fanout = max(len(objs) for objs in subject_objects.values())
+                if max_fanout <= 1:
+                    props.add("functional")
+
+            if props:
+                detected[relation] = props
+                # Register the detected properties
+                for prop in props:
+                    self.set_relation_property(relation, prop)
+
+        return detected
+
     # ─── Temporal Reasoning (Allen's Interval Algebra) ─────────────────
     #
     # Allen, J.F. (1983). "Maintaining Knowledge about Temporal Intervals."
