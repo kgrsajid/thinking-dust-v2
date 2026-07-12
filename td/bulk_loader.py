@@ -166,8 +166,14 @@ class BulkLoader:
         if self.run_inference:
             t_inf = time.time()
             # First: auto-detect relation properties from data patterns
-            print("  Detecting relation properties from data...")
-            detected = self.td.kg.detect_relation_properties(min_evidence=3)
+            print("  Detecting relation properties...")
+            nlp = None
+            try:
+                import spacy
+                nlp = spacy.load("en_core_web_sm")
+            except (ImportError, OSError):
+                pass
+            detected = self.td.kg.detect_relation_properties(min_evidence=3, nlp=nlp)
             if detected:
                 for rel, props in detected.items():
                     print(f"    {rel}: {props}")

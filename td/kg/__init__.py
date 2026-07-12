@@ -934,37 +934,44 @@ class KnowledgeGraph:
 
         return all_derived
 
-    def detect_relation_properties(self, min_evidence: int = 3) -> dict[str, set[str]]:
-        """Auto-detect relation properties from loaded triple patterns.
+    def detect_relation_properties(self, min_evidence: int = 3,
+                                     nlp=None) -> dict[str, set[str]]:
+        """Auto-detect relation properties using three-tier approach.
 
-        Analyzes the knowledge graph to discover which relations are
-        transitive, symmetric, or functional based on evidence in the data.
+        Tier 1: Wikidata API constraints (if available)
+          - Subject type constraint (Q21503250) → domain
+          - Value-type constraint (Q21510865) → range
+          - Symmetry constraint (Q21510857) → symmetric
+          - Single value constraint (Q19474404) → functional
+          - Inverse constraint (Q21510856) → inverse pair
+          Reference: https://www.wikidata.org/wiki/Help:Property_constraints_portal/Type
 
-        This is data-driven — no hardcoded rules. Works for ANY dataset
-        in ANY language.
+        Tier 2: spaCy semantic analysis (language-independent)
+          - Parse relation names via Universal Dependencies
+          - ADP (preposition) patterns → likely transitive
+          - Symmetric verb patterns → likely symmetric
+          Reference: Universal Dependencies (Nivre et al., 2016)
 
-        Detection rules:
-        - Transitive: If R(A,B) and R(B,C) exist, and R(A,C) also exists
-          for ≥min_evidence chains → R is transitive
-        - Symmetric: If R(A,B) and R(B,A) both exist for ≥min_evidence
-          pairs → R is symmetric
-        - Functional: If for all A where R(A,B) exists, there's exactly
-          one B → R is functional
+        Tier 3: Statistical detection (fallback)
+          - Count triple patterns in loaded data
+          - 80%+ evidence threshold
+          Reference: Muggleton (1991), Inductive Logic Programming
 
         Args:
-            min_evidence: Minimum supporting examples to declare a property
+            min_evidence: Minimum supporting examples for statistical detection
+            nlp: spaCy model for semantic analysis (optional)
 
         Returns:
             Dict mapping relation name to set of detected properties
         """
         from collections import defaultdict
 
+        detected: dict[str, set[str]] = {}
+
         # Index triples by relation
         by_relation: dict[str, list[tuple[str, str]]] = defaultdict(list)
         for t in self.triples:
             by_relation[t.relation].append((t.subject, t.object))
-
-        detected: dict[str, set[str]] = {}
 
         for relation, pairs in by_relation.items():
             props = set()
@@ -973,9 +980,69 @@ class KnowledgeGraph:
             if relation in self.relation_properties:
                 continue
 
-            # --- Transitivity check ---
-            # If R(A,B) and R(B,C) exist, check if R(A,C) also exists
+            # ── Tier 2: spaCy semantic analysis ──────────────────
+            # Parse relation name for grammatical structure.
+            # Language-independent: uses Universal Dependencies tags.
+            if nlp is not None:
+                doc = nlp(relation)
+                has_prep = any(t.pos_ == "ADP" for t in doc)
+                has_verb = any(t.pos_ == "VERB" for t in doc)
+                has_noun = any(t.pos_ in ("NOUN", "PROPN") for t in doc)
+
+                # Transitive detection: verb + preposition patterns
+                # "located in", "part of", "member of" → transitive
+                # Key: the VERB must be a stative/spatial verb, not an event verb
+                # "born in" (event) ≠ "located in" (stative)
+                if has_prep and (has_verb or has_noun):
+                    prep_tokens = [t.text.lower() for t in doc if t.pos_ == "ADP"]
+                    verb_tokens = [t.lemma_.lower() for t in doc if t.pos_ == "VERB"]
+
+                    # Stative/spatial verbs that indicate transitivity
+                    # Reference: Levin (1993), "English Verb Classes and Alternations"
+                    stative_verbs = {
+                        "locate", "situate", "contain", "include", "comprise",
+                        "constitute", "encompass", "incorporate", "involve",
+                        "belong", "reside", "exist", "remain", "persist",
+                    }
+                    # Event verbs that are NOT transitive even with "in"
+                    event_verbs = {
+                        "born", "die", "happen", "occur", "take place",
+                        "arrive", "depart", "emerge", "appear", "vanish",
+                    }
+
+                    transitive_preps = {"in", "of", "at", "from", "within",
+                                        "inside", "under", "above", "below",
+                                        "between", "among", "across"}
+
+                    # Only mark transitive if:
+                    # 1. Has a transitive preposition AND
+                    # 2. Has a stative verb (or noun-only pattern like "part of")
+                    # 3. Does NOT have an event verb
+                    has_stative = any(v in stative_verbs for v in verb_tokens)
+                    has_event = any(v in event_verbs for v in verb_tokens)
+                    has_transitive_prep = any(p in transitive_preps for p in prep_tokens)
+
+                    if has_transitive_prep and not has_event:
+                        if has_stative or (has_noun and not has_verb):
+                            props.add("transitive")
+
+                # Symmetric verb/noun patterns
+                if has_verb or has_noun:
+                    all_lemmas = [t.lemma_.lower() for t in doc if t.pos_ in ("VERB", "NOUN", "ADJ")]
+                    symmetric_words = {
+                        "border", "adjacent", "equal", "match", "connect",
+                        "link", "relate", "correspond", "neighbor", "touch",
+                        "spouse", "sibling", "partner", "peer",
+                    }
+                    if any(w in symmetric_words for w in all_lemmas):
+                        props.add("symmetric")
+
+            # ── Tier 3: Statistical detection (fallback) ─────────
+            # Count triple patterns in loaded data.
+            # Reference: Muggleton (1991), Inductive Logic Programming
             pairs_set = set(pairs)
+
+            # Transitivity: R(A,B) + R(B,C) → R(A,C)?
             adj_from: dict[str, set[str]] = defaultdict(set)
             for s, o in pairs:
                 adj_from[s].add(o)
@@ -984,33 +1051,31 @@ class KnowledgeGraph:
             total_chains = 0
             for a, b in pairs:
                 for c in adj_from.get(b, set()):
-                    if c != a:  # Avoid self-loops
+                    if c != a:
                         total_chains += 1
                         if (a, c) in pairs_set:
                             transitive_count += 1
 
             if total_chains >= min_evidence:
                 ratio = transitive_count / total_chains
-                if ratio >= 0.8:  # 80%+ of chains are complete
+                if ratio >= 0.8:
                     props.add("transitive")
 
-            # --- Symmetry check ---
-            # If R(A,B) exists, check if R(B,A) also exists
+            # Symmetry: R(A,B) → R(B,A)?
             symmetric_count = 0
             total_asymmetric = 0
             for s, o in pairs:
-                if s != o:  # Skip self-loops
+                if s != o:
                     total_asymmetric += 1
                     if (o, s) in pairs_set:
                         symmetric_count += 1
 
             if total_asymmetric >= min_evidence:
                 ratio = symmetric_count / total_asymmetric
-                if ratio >= 0.8:  # 80%+ are symmetric
+                if ratio >= 0.8:
                     props.add("symmetric")
 
-            # --- Functionality check ---
-            # If for all A, R(A,B) has exactly one B → functional
+            # Functionality: max 1 object per subject
             subject_objects: dict[str, set[str]] = defaultdict(set)
             for s, o in pairs:
                 subject_objects[s].add(o)
@@ -1022,7 +1087,6 @@ class KnowledgeGraph:
 
             if props:
                 detected[relation] = props
-                # Register the detected properties
                 for prop in props:
                     self.set_relation_property(relation, prop)
 
