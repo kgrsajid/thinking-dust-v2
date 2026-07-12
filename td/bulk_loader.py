@@ -112,10 +112,18 @@ class BulkLoader:
 
             # Map IDs to names if maps provided
             if entity_map:
-                s = entity_map.get(s, s)
-                o = entity_map.get(o, o)
+                s = entity_map.get(s)
+                o = entity_map.get(o)
+                # Skip if entity mapping failed (no alias found)
+                if s is None or o is None:
+                    stats.triples_skipped += 1
+                    continue
             if relation_map:
-                r = relation_map.get(r, r)
+                r = relation_map.get(r)
+                # Skip if relation mapping failed
+                if r is None:
+                    stats.triples_skipped += 1
+                    continue
 
             # Normalize (case-insensitive matching, preserve original case)
             s = s.strip()
