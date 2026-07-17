@@ -15,11 +15,9 @@
 - Input is DECLARATIVE (statements, facts)
 
 **Why two prompts?**
-- Teach prompt Rule 7: "rewrite as declarative" — correct for teach, WRONG for queries
-  - "What do seals eat?" → "Seals eat fish" (HALLUCINATED answer!)
-- This prompt Rule 7: "keep question mark" — correct for queries, WRONG for teach
-  - "Paris is the capital of France" → stays as fact (correct)
-- The prompts have OPPOSITE rules for the same scenario. Using the wrong one = garbage.
+- Teach prompt Rule 7: "rewrite as declarative" — converts "What do seals eat?" → "Seals eat fish". This is VALID when the fact exists in the KG (parser extracts (seals, eat, fish) and matches). But it loses the question intent — the engine can't distinguish "I'm asking" from "I'm teaching".
+- This prompt Rule 7: "keep question mark" — preserves question intent with `?` syntax. Useful when the answer might NOT be in the KG and the engine needs to know what variable to search for.
+- Both approaches are complementary. This prompt is an alternative, not a replacement.
 
 **Created:** 2026-07-12
 **Evidence:** Gemini 3.1 Pro benchmark confirmed v1 prompt fails on queries (see benchmark below)
@@ -222,31 +220,30 @@ def preprocess_query(user_input: str, llm_client) -> list[str]:
 | 14 | Edge | "what about prison?" | "what about cell in prison" | "what about cell in prison ?" | ❌ | ⚠️ | Query expands context |
 | 15 | Edge | "how does it work?" | "how does it work" | "how does UNKNOWN work ?" | ❌ | ⚠️ | Query flags unresolved pronoun |
 | 16 | Edge | "and in Europe?" | "and in Europe" | "what is in Europe ?" | ❌ | ⚠️ | Query expands fragment |
-| 17 | Simple | "What do seals eat?" | "Seals eat fish" (HALLUCINATED) | "what do seals eat ?" | ❌ | ⚠️ | **v1 HALLUCINATES answer** |
-| 18 | Simple | "Is Python good for data science?" | "Python is good for data science" (HALLUCINATED) | "is Python good for data science ?" | ❌ | ⚠️ | **v1 HALLUCINATES answer** |
+| 17 | Simple | "What do seals eat?" | "Seals eat fish" | "what do seals eat ?" | ⚠️ | ⚠️ | v1 converts to declarative (valid if fact in KG); query preserves intent |
+| 18 | Simple | "Is Python good for data science?" | "Python is good for data science" | "is Python good for data science ?" | ⚠️ | ⚠️ | v1 converts to declarative; query preserves intent |
 
 ### Summary
 
 | Metric | v1 (Teach Prompt) | Query Prompt (This) |
 |--------|-------------------|---------------------|
-| **Hallucinations** | ❌ 2 (tests 17, 18) | ✅ 0 |
-| **Question intent preserved** | ❌ 0% (all converted to declarative) | ✅ 100% |
+| **Question intent preserved** | ⚠️ Converted to declarative (works if fact in KG) | ✅ 100% (keeps `?` syntax) |
 | **Unknown variable syntax** | ❌ None | ✅ `?` syntax |
 | **Unresolved pronouns** | ❌ Left as-is | ✅ Flagged as `UNKNOWN` |
 | **Fragment handling** | ❌ Left as-is | ✅ Expanded |
 | **Filler removal** | ✅ 100% | ✅ 100% |
 | **Coordination splitting** | ✅ 80% | ✅ 80% |
 | **Embedded fact extraction** | ✅ 80% | ✅ 80% |
-| **Parser can extract triples** | ⚠️ 60% (but 2 are hallucinated) | ⚠️ 60% (no hallucinations) |
+| **Parser can extract triples** | ⚠️ 60% | ⚠️ 60% |
 
-### The Critical Difference
+### The Difference
 
-**v1 prompt on queries:** "What do seals eat?" → "Seals eat fish" → parser extracts `(seals, eat, fish)` → **WRONG** (hallucinated, not in KG)
+**v1 prompt on queries:** "What do seals eat?" → "Seals eat fish" → parser extracts `(seals, eat, fish)` → matches KG if fact exists. Valid approach, but loses question intent.
 
-**Query prompt on queries:** "What do seals eat?" → "what do seals eat ?" → parser extracts `(seals, eat, what)` → **CORRECT** (query marker, engine searches KG for seals→eat→?)
+**Query prompt on queries:** "What do seals eat?" → "what do seals eat ?" → parser extracts `(seals, eat, what)` → engine knows `?` is the unknown variable and searches KG for seals→eat→?
 
-The `?` tells TD v2's reasoning engine: "this is what I'm looking for." Without it, the engine thinks it's a fact to store.
+The `?` tells TD v2's reasoning engine: "this is what I'm looking for." Without it, the engine treats it as a fact to store or match. Both approaches work; this prompt preserves more intent.
 
 ---
 
-_"A teach prompt and a query prompt are different tools for different jobs. Don't use a hammer on screws."_
+_"A teach prompt and a query prompt are different tools for different jobs."

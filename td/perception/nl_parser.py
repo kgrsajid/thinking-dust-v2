@@ -308,6 +308,9 @@ class GenericNLParser:
         if self.nlp_coref is None:
             return text, {}
 
+        if not text.strip():
+            return text, {}
+
         doc = self.nlp(text)
         doc = self.nlp_coref(doc)
 
