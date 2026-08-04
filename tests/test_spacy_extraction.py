@@ -51,6 +51,57 @@ class TestCopularExtraction:
         assert ("bob", "sibling_of", "carol") in triples
 
 
+class TestCopularPrepGuard:
+    """ClausIE guard: copular + prep must NOT emit spurious is_a triples.
+
+    When attr has a prep child ("part of Y", "capital of Y"), the entire
+    prep phrase is the complement. Emitting (subj, is_a, attr) is spurious.
+
+    Reference: ClausIE (Del Corro & Gemulla, WWW 2013)
+    Reference: Stanford OpenIE (Angeli et al., 2015)
+    """
+
+    def test_part_of_no_is_a(self, td):
+        """'cell is part of organism' → ONLY (cell, part_of, organism), NO (cell, is_a, part)"""
+        triples = td._extract_triples("cell is part of organism", "")
+        assert ("cell", "part_of", "organism") in triples
+        assert ("cell", "is_a", "part") not in triples
+
+    def test_capital_of_no_is_a(self, td):
+        """'paris is the capital of france' → (paris, capital_of, france), NOT (paris, is_a, capital)"""
+        triples = td._extract_triples("Paris is the capital of France", "")
+        assert ("paris", "capital_of", "france") in triples
+        assert ("paris", "is_a", "capital") not in triples
+
+    def test_made_of_no_is_a(self, td):
+        """'dna is made of nucleotides' → (dna, made_of, nucleotides), NOT (dna, is_a, made)"""
+        triples = td._extract_triples("DNA is made of nucleotides", "")
+        # Should have the compound relation, not the is_a
+        has_compound = any(
+            s == "dna" and "made" in r and o == "nucleotides"
+            for s, r, o in triples
+        )
+        assert has_compound, f"Expected compound relation (dna, made_*, nucleotides), got {triples}"
+        assert ("dna", "is_a", "made") not in triples
+
+    def test_simple_is_a_still_works(self, td):
+        """'cell is organelle' → (cell, is_a, organelle) — no prep child on attr"""
+        triples = td._extract_triples("cell is organelle", "")
+        assert ("cell", "is_a", "organelle") in triples
+
+    def test_sibling_of_no_is_a(self, td):
+        """'bob is sibling of carol' → (bob, sibling_of, carol), NOT (bob, is_a, sibling)"""
+        triples = td._extract_triples("Bob is sibling of Carol", "")
+        assert ("bob", "sibling_of", "carol") in triples
+        assert ("bob", "is_a", "sibling") not in triples
+
+    def test_married_to_no_is_a(self, td):
+        """'alice is married to bob' → (alice, married_to, bob), NOT (alice, is_a, married)"""
+        triples = td._extract_triples("Alice is married to Bob", "")
+        assert ("alice", "married_to", "bob") in triples
+        assert ("alice", "is_a", "married") not in triples
+
+
 class TestNonCopularExtraction:
     """Non-copular patterns (no 'is'): 'X R Y'"""
 

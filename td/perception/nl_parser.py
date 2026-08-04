@@ -670,12 +670,13 @@ class GenericNLParser:
                                 tok_text = self._get_chunk_text(doc, tok)
                                 for subj_text in subj_texts:
                                     triples.append((subj_text, rel, tok_text))
-                            # Also emit base copular triple: (cell, is_a, small room)
-                            # Bug fix: continue skipped this, missing the classification triple.
-                            # Reference: UD `attr` — "nominal predicate of copular construction"
-                            attr_text = self._get_chunk_text(doc, attr)
-                            for subj_text in subj_texts:
-                                triples.append((subj_text, "is_a", attr_text))
+                            # ClausIE guard: do NOT emit (subj, is_a, attr) here.
+                            # When attr has a prep child, the entire prep phrase is the
+                            # complement — "part of organism" is a meronymy relation, not
+                            # taxonomy. Emitting (cell, is_a, part) is spurious.
+                            # Let the compound relation (part_of, capital_of, etc.) stand alone.
+                            # Reference: ClausIE (Del Corro & Gemulla, WWW 2013)
+                            # Reference: Stanford OpenIE (Angeli et al., 2015)
                             # Issue 2 fix: removed continue here to let fall through
                             # to xcomp check. Pre-existing bug: attr_preps short-circuited
                             # xcomp extraction for sentences like "X is part of Y central to Z".
@@ -726,12 +727,16 @@ class GenericNLParser:
                                     triples.append((subj_text, "is_a", attr_text))
                                 continue
 
-                    # Fallback: emit base (subj, is_a, attr) if no sub-branch matched
-                    # Bug fix: without this, copular sentences with complex attrs
-                    # (acl, xcomp) that don't match sub-branches produce zero triples.
-                    attr_text = self._get_chunk_text(doc, attr)
-                    for subj_text in subj_texts:
-                        triples.append((subj_text, "is_a", attr_text))
+                    # Fallback: emit base (subj, is_a, attr) if no sub-branch matched.
+                    # ClausIE guard: skip is_a when attr has prep child — the entire
+                    # prep phrase is the complement, not just the bare attr noun.
+                    # "cell is part of organism" → (cell, part_of, organism), NOT (cell, is_a, part)
+                    # Reference: ClausIE (Del Corro & Gemulla, WWW 2013)
+                    # Reference: Stanford OpenIE (Angeli et al., 2015)
+                    if not any(c.dep_ == "prep" for c in attr.children):
+                        attr_text = self._get_chunk_text(doc, attr)
+                        for subj_text in subj_texts:
+                            triples.append((subj_text, "is_a", attr_text))
 
                     # Check for xcomp: "are central to computer science"
                     # acomp=central, xcomp=computer (with aux=to, dobj=science)
