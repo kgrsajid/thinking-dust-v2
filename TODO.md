@@ -170,11 +170,41 @@ Integrated into `nl_parser.py` (line 1037).
 
 ### 2d. Teach() Gloss Quality Fix — DONE ✅ (2026-08-04)
 
-**Problem:** `_rebuild_lesk_glosses()` in `td/thinking.py` rebuilt glosses from
-**triple-form** (`"{subject} {relation} {object}"`), not original teach sentences.
-After sense creation, glosses lost context words.
+**Problem:** `_rebuild_lesk_glosses()` in `td/thinking.py` (line 1174) rebuilds
+glosses from **triple-form** (`"{subject} {relation} {object}"`), not original
+teach sentences. After sense creation, glosses lose context words.
 
-**Fix (via GLM 5.2 subagent):**
+**Example of the bug:**
+```
+teach: "mitochondria are organelles found in cells that produce energy"
+Triple stored: (mitochondria, is_a, organelles)
+Rebuilt gloss: "mitochondria is_a organelles"   ← lost: found, cells, produce, energy
+Original had:  "mitochondria are organelles found in cells that produce energy"  ← rich
+```
+
+**Why it matters:** Rich glosses → 100% WSD accuracy. Sparse triple-form → 42% fallback.
+This is THE single biggest WSD improvement opportunity.
+
+**Root cause:** Original teach sentences are not stored anywhere after sense creation.
+Line 1177 admits: _"Uses reconstructed sentences from triples (not original teach text,
+which is not stored)."_
+
+**The fix (2 options):**
+
+**Option A (simpler):** Keep a `dict[str, list[tuple[str, int]]]` mapping
+`entity → [(original_sentence, sense_idx)]`. Populate in `teach()`.
+Use in `_rebuild_lesk_glosses()` instead of triple-form.
+
+**Option B:** Add `original_sentence` field to Triple metadata in `add_fact()`.
+
+**Option A is recommended** — doesn't touch the Triple dataclass, ~20 lines of code.
+
+**Where:**
+- `td/thinking.py` line 1044: `add_sense_example()` already gets `problem_text` — store it
+- `td/thinking.py` line 1174: `_rebuild_lesk_glosses()` — read from stored sentences
+- `td/thinking.py` lines 1209-1212: dead code (`pass` block) — replace with actual lookup
+
+**Fix implemented (via GLM 5.2 subagent):**
 - Restored `_original_teach_sentences` dict — stores full original teach sentences per entity+sense
 - Wired up `_rebuild_lesk_glosses()` after BOTH `induce_new_sense()` call sites (in `teach()` and `_induce_senses_from_context()`)
 - Added persistence: `save_wsd_state()` / `load_wsd_state()` for JSON serialization
