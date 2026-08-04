@@ -2354,10 +2354,17 @@ class GenericThinkingDust:
             )
             self._original_teach_sentences = {}
             return
-        self._original_teach_sentences = {
-            entity: [(sent, idx) for sent, idx in sentences]
-            for entity, sentences in data.items()
-        }
+        try:
+            self._original_teach_sentences = {
+                entity: [(sent, idx) for sent, idx in sentences]
+                for entity, sentences in data.items()
+            }
+        except (TypeError, ValueError) as exc:
+            logging.warning(
+                "load_wsd_state: schema mismatch in WSD state at %s: %s. "
+                "Falling back to empty dict.", path, exc
+            )
+            self._original_teach_sentences = {}
 
     def save(self, path: str) -> None:
         """Persist all ThinkingDust state via the Facade pattern.
