@@ -51,32 +51,42 @@ class TestCopularExtraction:
         assert ("bob", "sibling_of", "carol") in triples
 
 
-class TestCopularPrepGuard:
-    """ClausIE guard: copular + prep must NOT emit spurious is_a triples.
+class TestCopularPrepRelationNouns:
+    """Copular + prep extraction with RELATION_NOUNS filtering.
 
-    When attr has a prep child ("part of Y", "capital of Y"), the entire
-    prep phrase is the complement. Emitting (subj, is_a, attr) is spurious.
+    Based on EDC Framework (Zhang & Soh, 2024) + ClausIE complement/adjunct
+    distinction (Del Corro & Gemulla, WWW 2013).
 
-    Reference: ClausIE (Del Corro & Gemulla, WWW 2013)
+    Rules:
+    - ALWAYS emit compound relation from prep chain (never suppress)
+    - Emit is_a ONLY if attr is NOT a relation noun
+    - Relation nouns: part, made, component, derivative, etc.
+    - Type nouns: city, student, organelle, etc.
+
+    Reference: ClausIE — https://resources.mpi-inf.mpg.de/d5/clausie/clausie-www13.pdf
+    Reference: EDC — arXiv:2404.03868
     Reference: Stanford OpenIE (Angeli et al., 2015)
     """
 
     def test_part_of_no_is_a(self, td):
-        """'cell is part of organism' → ONLY (cell, part_of, organism), NO (cell, is_a, part)"""
+        """'cell is part of organism' → (cell, part_of, organism), NO (cell, is_a, part)
+        'part' is a RELATION NOUN — it expresses meronymy, not a type."""
         triples = td._extract_triples("cell is part of organism", "")
         assert ("cell", "part_of", "organism") in triples
         assert ("cell", "is_a", "part") not in triples
 
-    def test_capital_of_no_is_a(self, td):
-        """'paris is the capital of france' → (paris, capital_of, france), NOT (paris, is_a, capital)"""
+    def test_capital_of_emits_both(self, td):
+        """'Paris is the capital of France' → (paris, capital_of, france) AND (paris, is_a, capital)
+        'capital' is a TYPE NOUN (has hypernym 'city' in WordNet) — emit both."""
         triples = td._extract_triples("Paris is the capital of France", "")
         assert ("paris", "capital_of", "france") in triples
-        assert ("paris", "is_a", "capital") not in triples
+        # capital is NOT a relation noun, so is_a should also be emitted
+        assert ("paris", "is_a", "capital") in triples
 
     def test_made_of_no_is_a(self, td):
-        """'dna is made of nucleotides' → (dna, made_of, nucleotides), NOT (dna, is_a, made)"""
+        """'dna is made of nucleotides' → (dna, made_of, nucleotides), NOT (dna, is_a, made)
+        'made' is a RELATION NOUN — it expresses composition, not a type."""
         triples = td._extract_triples("DNA is made of nucleotides", "")
-        # Should have the compound relation, not the is_a
         has_compound = any(
             s == "dna" and "made" in r and o == "nucleotides"
             for s, r, o in triples
@@ -90,16 +100,66 @@ class TestCopularPrepGuard:
         assert ("cell", "is_a", "organelle") in triples
 
     def test_sibling_of_no_is_a(self, td):
-        """'bob is sibling of carol' → (bob, sibling_of, carol), NOT (bob, is_a, sibling)"""
+        """'bob is sibling of carol' → (bob, sibling_of, carol)
+        spaCy parses 'sibling' as ROOT+VERB (lemma 'sible'), so this goes
+        through the verb extraction path, not the copular path. No is_a emitted.
+        'sibling' is a type noun, but the parse doesn't produce attr+cop structure."""
         triples = td._extract_triples("Bob is sibling of Carol", "")
         assert ("bob", "sibling_of", "carol") in triples
-        assert ("bob", "is_a", "sibling") not in triples
 
     def test_married_to_no_is_a(self, td):
-        """'alice is married to bob' → (alice, married_to, bob), NOT (alice, is_a, married)"""
+        """'alice is married to bob' → (alice, married_to, bob), NOT (alice, is_a, married)
+        'married' is a relation word (past participle used as adjective) — not a type."""
         triples = td._extract_triples("Alice is married to Bob", "")
         assert ("alice", "married_to", "bob") in triples
         assert ("alice", "is_a", "married") not in triples
+
+    # ── NEW: Type noun + adjunct prep → emit BOTH ──────────────────
+
+    def test_city_in_france_emits_both(self, td):
+        """'Paris is a city in France' → (paris, is_a, city) AND (paris, city_in, france)
+        'city' is a TYPE NOUN. 'in France' is an adjunct prep. Emit both."""
+        triples = td._extract_triples("Paris is a city in France", "")
+        assert ("paris", "is_a", "city") in triples, f"Expected is_a in {triples}"
+        # Compound relation from prep chain
+        has_compound = any(
+            s == "paris" and "france" in o
+            for s, r, o in triples
+        )
+        assert has_compound, f"Expected compound relation to france in {triples}"
+
+    def test_student_of_philosophy_emits_both(self, td):
+        """'Alice is a student of philosophy' → (alice, is_a, student) AND (alice, student_of, philosophy)
+        'student' is a TYPE NOUN. 'of philosophy' is a complement prep. Emit both."""
+        triples = td._extract_triples("Alice is a student of philosophy", "")
+        assert ("alice", "is_a", "student") in triples, f"Expected is_a in {triples}"
+        has_compound = any(
+            s == "alice" and "philosophy" in o
+            for s, r, o in triples
+        )
+        assert has_compound, f"Expected compound relation to philosophy in {triples}"
+
+    def test_friend_of_alice_emits_both(self, td):
+        """'Bob is a friend of Alice' → (bob, is_a, friend) AND (bob, friend_of, alice)
+        'friend' is a TYPE NOUN. Emit both triples."""
+        triples = td._extract_triples("Bob is a friend of Alice", "")
+        assert ("bob", "is_a", "friend") in triples, f"Expected is_a in {triples}"
+        has_compound = any(
+            s == "bob" and "alice" in o
+            for s, r, o in triples
+        )
+        assert has_compound, f"Expected compound relation to alice in {triples}"
+
+    def test_component_of_no_is_a(self, td):
+        """'CPU is a component of the computer' → (cpu, component_of, computer), NO is_a
+        'component' is a RELATION NOUN."""
+        triples = td._extract_triples("CPU is a component of the computer", "")
+        has_compound = any(
+            s == "cpu" and "computer" in o
+            for s, r, o in triples
+        )
+        assert has_compound, f"Expected compound relation in {triples}"
+        assert ("cpu", "is_a", "component") not in triples
 
 
 class TestNonCopularExtraction:

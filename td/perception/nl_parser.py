@@ -670,17 +670,13 @@ class GenericNLParser:
                                 tok_text = self._get_chunk_text(doc, tok)
                                 for subj_text in subj_texts:
                                     triples.append((subj_text, rel, tok_text))
-                            # ClausIE guard: do NOT emit (subj, is_a, attr) here.
-                            # When attr has a prep child, the entire prep phrase is the
-                            # complement — "part of organism" is a meronymy relation, not
-                            # taxonomy. Emitting (cell, is_a, part) is spurious.
-                            # Let the compound relation (part_of, capital_of, etc.) stand alone.
+                            # EDC Framework (Zhang & Soh, 2024): always emit compound
+                            # relation. The is_a emission is handled by the RELATION_NOUNS
+                            # check in the fallback below — relation nouns like "part" skip
+                            # is_a, type nouns like "city" emit both is_a + compound.
                             # Reference: ClausIE (Del Corro & Gemulla, WWW 2013)
                             # Reference: Stanford OpenIE (Angeli et al., 2015)
-                            # Issue 2 fix: removed continue here to let fall through
-                            # to xcomp check. Pre-existing bug: attr_preps short-circuited
-                            # xcomp extraction for sentences like "X is part of Y central to Z".
-                            # GLM 5.2 review (2026-07-10)
+                            # Reference: EDC (arXiv:2404.03868)
 
                     # Check for acl: "is a technique comparing X"
                     # attr=technique, acl=comparing, dobj of acl=units
@@ -728,12 +724,14 @@ class GenericNLParser:
                                 continue
 
                     # Fallback: emit base (subj, is_a, attr) if no sub-branch matched.
-                    # ClausIE guard: skip is_a when attr has prep child — the entire
-                    # prep phrase is the complement, not just the bare attr noun.
-                    # "cell is part of organism" → (cell, part_of, organism), NOT (cell, is_a, part)
-                    # Reference: ClausIE (Del Corro & Gemulla, WWW 2013)
-                    # Reference: Stanford OpenIE (Angeli et al., 2015)
-                    if not any(c.dep_ == "prep" for c in attr.children):
+                    # Use RELATION_NOUNS check instead of blanket prep suppression.
+                    # Relation nouns (part, made, component, etc.) express relations,
+                    # not types — skip is_a for them.
+                    # Type nouns (city, student, organelle, etc.) emit is_a normally,
+                    # EVEN when they have prep children (adjunct prepositions).
+                    # Reference: EDC Framework (Zhang & Soh, 2024) — over-extract, canonicalize later
+                    # Reference: ClausIE (Del Corro & Gemulla, WWW 2013) — complement vs adjunct
+                    if attr.text.lower() not in self.lang_config.relation_nouns:
                         attr_text = self._get_chunk_text(doc, attr)
                         for subj_text in subj_texts:
                             triples.append((subj_text, "is_a", attr_text))

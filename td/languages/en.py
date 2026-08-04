@@ -247,6 +247,32 @@ DEFAULT_RELATION_PROPERTIES = {
     "adjacent_to": {"symmetric"},
 }
 
+# ── English Relation Nouns ────────────────────────────────────────
+# Nouns that express a RELATION rather than a TYPE.
+# When these appear as attr in copular + prep constructions, the is_a
+# triple is suppressed — the noun is a relation word, not a type.
+#
+# "cell is part of organism" → "part" is relation noun → (cell, part_of, organism) only
+# "Paris is a city in France" → "city" is NOT a relation noun → both is_a + city_in
+#
+# Based on ClausIE complement vs adjunct distinction:
+# - Complement preps: noun REQUIRES prep to complete meaning (relation noun)
+# - Adjunct preps: noun stands alone (type noun + optional modifier)
+#
+# Reference: ClausIE (Del Corro & Gemulla, WWW 2013)
+# Reference: EDC Framework (Zhang & Soh, 2024) — arXiv:2404.03868
+RELATION_NOUNS = frozenset({
+    "part", "made", "derivative", "product", "component", "member",
+    "piece", "portion", "sort", "type", "kind",
+    # Additional relation nouns from meronymy/composition domain
+    "fraction", "section", "segment", "division", "branch",
+    "subset", "subclass", "variant", "version",
+    # Relation adjectives (past participles used as acomp in copular)
+    # "Alice is married to Bob" → married = relation, not a type
+    "married", "divorced", "engaged", "related", "connected",
+    "associated", "affiliated", "linked", "bound",
+})
+
 # ── Register English ──────────────────────────────────────────────
 register_language(LanguageConfig(
     code="en",
@@ -269,4 +295,5 @@ register_language(LanguageConfig(
     transitive_preps=TRANSITIVE_PREPS,
     symmetric_words=SYMMETRIC_WORDS,
     default_relation_properties=DEFAULT_RELATION_PROPERTIES,
+    relation_nouns=RELATION_NOUNS,
 ))

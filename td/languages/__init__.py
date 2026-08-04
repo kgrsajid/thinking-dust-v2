@@ -99,6 +99,16 @@ class LanguageConfig:
     # Format: {relation_name: {property_set}}
     default_relation_properties: Dict[str, set] = field(default_factory=dict)
 
+    # ── Relation Nouns ─────────────────────────────────────────────
+    # Nouns that express a RELATION rather than a TYPE.
+    # "cell is part of organism" → "part" is a relation noun → skip is_a
+    # "Paris is a city in France" → "city" is a type noun → emit is_a
+    #
+    # Used by copular+prep extraction in nl_parser.py.
+    # Reference: ClausIE (Del Corro & Gemulla, WWW 2013) — complement vs adjunct
+    # Reference: EDC Framework (Zhang & Soh, 2024) — extract then canonicalize
+    relation_nouns: FrozenSet[str] = frozenset()
+
 
 # ── Language Registry ─────────────────────────────────────────────
 _REGISTRY: Dict[str, LanguageConfig] = {}
