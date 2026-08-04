@@ -1,6 +1,6 @@
 # TD v2 — TODO List
 
-_Last updated: 2026-07-10_
+_Last updated: 2026-08-04_
 
 ---
 
@@ -30,6 +30,8 @@ _Last updated: 2026-07-10_
 ---
 
 ## 🚨 URGENT (RIGHT NOW)
+
+_Updated 2026-08-4: Preprocessing deferred (queries work natively). Duplicate triples fixed. Focus: gloss quality fix + scaling._
 
 ### 1. Implement Preprocessing Layer with Gemini — NEXT SESSION
 
@@ -154,6 +156,53 @@ which the parser can't handle. Need to either:
 - Fix clause segmenter source_text to preserve original text
 - Or use a different approach (LLM simplification externally)
 - Or detect when simplification would produce low-quality output and skip
+
+### 2c. Duplicate Triples from Dual-Path Extraction — DONE ✅ (2026-08-04)
+
+**Problem:** Two extraction paths (clause segmenter + dependency parser) produced
+near-duplicates with different relation strings. "went_to" vs "went", etc.
+
+**Fix:** `td/perception/relation_canonicalizer.py` — post-extraction canonicalization.
+Strips preposition suffixes, lemmatizes verb root, deduplicates, keeps richer relation.
+Integrated into `nl_parser.py` (line 1037).
+
+**Reference:** Zhang & Soh (2024), "Extract, Define, Canonicalize" (EDC framework)
+
+### 2d. Teach() Gloss Quality Fix — 🚨 STILL OPEN (THE WSD BOTTLENECK)
+
+**Problem:** `_rebuild_lesk_glosses()` in `td/thinking.py` (line 1174) rebuilds
+glosses from **triple-form** (`"{subject} {relation} {object}"`), not original
+teach sentences. After sense creation, glosses lose context words.
+
+**Example of the bug:**
+```
+teach: "mitochondria are organelles found in cells that produce energy"
+Triple stored: (mitochondria, is_a, organelles)
+Rebuilt gloss: "mitochondria is_a organelles"   ← lost: found, cells, produce, energy
+Original had:  "mitochondria are organelles found in cells that produce energy"  ← rich
+```
+
+**Why it matters:** Rich glosses → 100% WSD accuracy. Sparse triple-form → 42% fallback.
+This is THE single biggest WSD improvement opportunity.
+
+**Root cause:** Original teach sentences are not stored anywhere after sense creation.
+Line 1177 admits: _"Uses reconstructed sentences from triples (not original teach text,
+which is not stored)."_
+
+**The fix (2 options):**
+
+**Option A (simpler):** Keep a `dict[str, list[tuple[str, int]]]` mapping
+`entity → [(original_sentence, sense_idx)]`. Populate in `teach()`.
+Use in `_rebuild_lesk_glosses()` instead of triple-form.
+
+**Option B:** Add `original_sentence` field to Triple metadata in `add_fact()`.
+
+**Option A is recommended** — doesn't touch the Triple dataclass, ~20 lines of code.
+
+**Where:**
+- `td/thinking.py` line 1044: `add_sense_example()` already gets `problem_text` — store it
+- `td/thinking.py` line 1174: `_rebuild_lesk_glosses()` — read from stored sentences
+- `td/thinking.py` lines 1209-1212: dead code (`pass` block) — replace with actual lookup
 
 ### 2a. Parser Bugs Found (2026-07-10) — DONE ✅
 
@@ -296,6 +345,15 @@ Common senses are overrepresented in benchmarks. Need tests for rare/domain-spec
 - Accusative/dative forms
 - More German pronouns
 - Verify with native speaker
+
+---
+
+## ✅ DONE (2026-08-04)
+
+| Item | Notes |
+|------|-------|
+| Duplicate triples from dual-path extraction — FULLY FIXED | `relation_canonicalizer.py` integrated into `nl_parser.py` (line 1037). Post-extraction canonicalization: strips prep suffixes, lemmatizes verbs, keeps richer relation. |
+| Read TODO.md, ARCHITECTURE.md, DEVELOPMENT.md, README.md | Full project state reviewed |
 
 ---
 
