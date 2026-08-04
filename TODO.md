@@ -168,41 +168,24 @@ Integrated into `nl_parser.py` (line 1037).
 
 **Reference:** Zhang & Soh (2024), "Extract, Define, Canonicalize" (EDC framework)
 
-### 2d. Teach() Gloss Quality Fix — 🚨 STILL OPEN (THE WSD BOTTLENECK)
+### 2d. Teach() Gloss Quality Fix — DONE ✅ (2026-08-04)
 
-**Problem:** `_rebuild_lesk_glosses()` in `td/thinking.py` (line 1174) rebuilds
-glosses from **triple-form** (`"{subject} {relation} {object}"`), not original
-teach sentences. After sense creation, glosses lose context words.
+**Problem:** `_rebuild_lesk_glosses()` in `td/thinking.py` rebuilt glosses from
+**triple-form** (`"{subject} {relation} {object}"`), not original teach sentences.
+After sense creation, glosses lost context words.
 
-**Example of the bug:**
-```
-teach: "mitochondria are organelles found in cells that produce energy"
-Triple stored: (mitochondria, is_a, organelles)
-Rebuilt gloss: "mitochondria is_a organelles"   ← lost: found, cells, produce, energy
-Original had:  "mitochondria are organelles found in cells that produce energy"  ← rich
-```
+**Fix (via GLM 5.2 subagent):**
+- Restored `_original_teach_sentences` dict — stores full original teach sentences per entity+sense
+- Wired up `_rebuild_lesk_glosses()` after BOTH `induce_new_sense()` call sites (in `teach()` and `_induce_senses_from_context()`)
+- Added persistence: `save_wsd_state()` / `load_wsd_state()` for JSON serialization
+- Fallback to triple-form for bulk-loaded data with no stored sentences
 
-**Why it matters:** Rich glosses → 100% WSD accuracy. Sparse triple-form → 42% fallback.
-This is THE single biggest WSD improvement opportunity.
+**Commits:**
+- `8bfd95c` — initial fix (store + rebuild)
+- `e0ef120` — GLM 5.2 incorrectly removed as dead code
+- `e74b339` — restored and properly wired up with persistence
 
-**Root cause:** Original teach sentences are not stored anywhere after sense creation.
-Line 1177 admits: _"Uses reconstructed sentences from triples (not original teach text,
-which is not stored)."_
-
-**The fix (2 options):**
-
-**Option A (simpler):** Keep a `dict[str, list[tuple[str, int]]]` mapping
-`entity → [(original_sentence, sense_idx)]`. Populate in `teach()`.
-Use in `_rebuild_lesk_glosses()` instead of triple-form.
-
-**Option B:** Add `original_sentence` field to Triple metadata in `add_fact()`.
-
-**Option A is recommended** — doesn't touch the Triple dataclass, ~20 lines of code.
-
-**Where:**
-- `td/thinking.py` line 1044: `add_sense_example()` already gets `problem_text` — store it
-- `td/thinking.py` line 1174: `_rebuild_lesk_glosses()` — read from stored sentences
-- `td/thinking.py` lines 1209-1212: dead code (`pass` block) — replace with actual lookup
+**Reference:** Lesk (1986), Banerjee & Pedersen (2002), ARCHITECTURE.md §6
 
 ### 2a. Parser Bugs Found (2026-07-10) — DONE ✅
 
@@ -353,6 +336,7 @@ Common senses are overrepresented in benchmarks. Need tests for rare/domain-spec
 | Item | Notes |
 |------|-------|
 | Duplicate triples from dual-path extraction — FULLY FIXED | `relation_canonicalizer.py` integrated into `nl_parser.py` (line 1037). Post-extraction canonicalization: strips prep suffixes, lemmatizes verbs, keeps richer relation. |
+| Teach() gloss quality fix — FULLY FIXED | `_rebuild_lesk_glosses()` restored, wired up after both `induce_new_sense()` call sites, persistence added via `save_wsd_state()`/`load_wsd_state()`. Commits: 8bfd95c → e0ef120 → e74b339. |
 | Read TODO.md, ARCHITECTURE.md, DEVELOPMENT.md, README.md | Full project state reviewed |
 
 ---
