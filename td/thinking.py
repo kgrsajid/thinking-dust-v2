@@ -710,12 +710,7 @@ class GenericThinkingDust:
         # Reference: Vasilescu et al. (2004), "Simplified Lesk"
         self.lesk_wsd = LeskWSD()
 
-        # ── WSD: Original teach sentences for gloss rebuilds ─────
-        # Stores the FULL original teach sentence per entity+sense.
-        # Used by _rebuild_lesk_glosses() so glosses stay rich after
-        # sense creation (instead of rebuilding from sparse triple-form).
-        self._original_teach_sentences: dict[str, list[tuple[str, int]]] = {}
-        # entity → [(original_sentence, sense_idx)]
+
 
         self.total_thinks = 0
         self.total_learned = 0
@@ -1051,10 +1046,6 @@ class GenericThinkingDust:
             # Always update Lesk gloss (including first teach, sense_idx=0)
             self.lesk_wsd.add_sense_example(base_entity, sense_idx, problem_text)
 
-            # Store original sentence for gloss rebuilds after sense creation
-            self._original_teach_sentences.setdefault(base_entity, [])
-            self._original_teach_sentences[base_entity].append((problem_text, sense_idx))
-
             # Capture any contradiction warnings from LOTG (domain/range)
             if self.kg.last_warnings:
                 contradictions.extend(self.kg.last_warnings)
@@ -1164,10 +1155,14 @@ class GenericThinkingDust:
         3. Existing triples stay on the base form (now sense_0)
         4. New fact will be stored on sense_1 by the caller
 
-        Note: We do NOT rebuild Lesk glosses here. The original teach
-        sentences are richer than reconstructed triple-form. The slight
-        contamination in sense 0's gloss is acceptable because Lesk's
-        word overlap matching is robust to noise.
+        Lesk glosses are NOT rebuilt after sense creation. The initial
+        add_sense_example() call in teach() already stores the full
+        teach sentence as a rich gloss. Pre-creation sentences remain
+        in sense 0's gloss — slight contamination is acceptable because
+        Lesk's word overlap matching is robust to noise (Lesk, 1986;
+        Banerjee & Pedersen, 2002). ARCHITECTURE.md §6 confirms gloss
+        quality > algorithm complexity, and the quality is already
+        maximised by storing full sentences on first teach.
 
         Args:
             entity: The ambiguous entity (e.g., "cell")
@@ -1181,43 +1176,6 @@ class GenericThinkingDust:
             conflicting_types=set(),
             proof=f"is_a divergence in: {context_sentence[:80]}"
         )
-
-    def _rebuild_lesk_glosses(self, entity: str) -> None:
-        """Rebuild Lesk glosses from stored original sentences after sense creation.
-
-        When a new sense is created, existing Lesk glosses may be
-        contaminated (words from multiple senses in sense 0).
-        This rebuilds clean glosses using the ORIGINAL teach sentences
-        stored in _original_teach_sentences (not sparse triple-form).
-
-        Rich glosses → 100% WSD accuracy.
-        Sparse triple-form glosses → 58% accuracy (42% fallback).
-        """
-        # Clear existing glosses for this entity
-        if entity in self.lesk_wsd.sense_glosses:
-            del self.lesk_wsd.sense_glosses[entity]
-
-        # Primary: rebuild from stored original sentences (rich)
-        stored = self._original_teach_sentences.get(entity, [])
-        if stored:
-            for sentence, sense_idx in stored:
-                self.lesk_wsd.add_sense_example(entity, sense_idx, sentence)
-            return
-
-        # Fallback: if no stored sentences (e.g., bulk-loaded), use triple-form
-        sense_uris = self.kg.get_sense_uris(entity)
-        if getattr(self.kg, '_store_backed', False) and self.kg._sparql_store is not None:
-            neighbors = self.kg._sparql_store.get_entity_neighbors(entity)
-            for rel, neighbor, direction in neighbors:
-                if direction == "outgoing":
-                    gloss = f"{entity} {rel} {neighbor}"
-                    self.lesk_wsd.add_sense_example(entity, 0, gloss)
-        else:
-            for t in self.kg.triples:
-                if t.subject == entity or t.subject in sense_uris:
-                    sense_idx = sense_uris.index(t.subject) if t.subject in sense_uris else 0
-                    gloss = f"{t.subject} {t.relation} {t.object}"
-                    self.lesk_wsd.add_sense_example(entity, sense_idx, gloss)
 
     def _get_is_a_objects(self, entity: str) -> list[str]:
         """Get all `is_a` objects for an entity from the KG.
