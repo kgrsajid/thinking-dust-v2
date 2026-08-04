@@ -818,3 +818,313 @@ class TestMilestoneSpecCriteria:
         elapsed = time.perf_counter() - t0
         # Should be <100ms for 1000 calls = <0.1ms per call
         assert elapsed < 0.5
+
+
+# ─── 14. _rebuild_lesk_glosses: Decontamination ───────────────────
+
+class TestLeskGlossDecontamination:
+    """Test that _rebuild_lesk_glosses() produces clean per-sense glosses.
+
+    After sense creation, glosses must be decontaminated: each sense's
+    gloss should contain ONLY words from that sense's teach sentences,
+    not mixed words from other senses.
+
+    Reference:
+        Lesk (1986), "Automatic Sense Disambiguation Using Machine
+        Readable Dictionaries" — gloss overlap is the disambiguation
+        signal; contaminated glosses destroy the signal.
+        Banerjee & Pedersen (2002), "Extended Gloss Overlaps" —
+        per-sense gloss quality determines WSD accuracy.
+        ARCHITECTURE.md §6 — "Gloss quality > algorithm complexity".
+    """
+
+    def test_biology_gloss_decontaminated(self, td):
+        """After sense creation, biology-cell gloss has biology words.
+
+        Teach biology-cell, then tech-cell (triggers sense creation).
+        The biology sense gloss must contain "organelle" but NOT
+        "device" — otherwise Lesk overlap would route incorrectly.
+        """
+        # Teach biology sense
+        td.teach("cell is_a organelle", "organelle")
+        td.teach("cell is part of organism", "organism")
+
+        # Teach technology sense — triggers sense creation
+        td.teach("cell is_a device", "device")
+
+        # Verify Lesk glosses exist for "cell"
+        glosses = td.lesk_wsd.sense_glosses.get("cell", [])
+        assert len(glosses) >= 2, f"Expected >= 2 glosses, got {len(glosses)}"
+
+        # Sense 0 (biology) should contain biology words
+        bio_words = set(glosses[0].keys()) if len(glosses) > 0 else set()
+        assert "organelle" in bio_words or "organism" in bio_words, (
+            f"Biology gloss missing bio words: {bio_words}"
+        )
+
+        # Sense 0 (biology) should NOT contain tech words
+        # After _rebuild_lesk_glosses, the biology gloss is rebuilt
+        # from only biology teach sentences.
+        assert "device" not in bio_words, (
+            f"Biology gloss contaminated with 'device': {bio_words}"
+        )
+
+    def test_tech_gloss_decontaminated(self, td):
+        """Technology-cell gloss has tech words, not biology words."""
+        td.teach("cell is_a organelle", "organelle")
+        td.teach("cell is_a device", "device")
+
+        glosses = td.lesk_wsd.sense_glosses.get("cell", [])
+        assert len(glosses) >= 2
+
+        # Sense 1 (technology) should contain "device"
+        tech_words = set(glosses[1].keys()) if len(glosses) > 1 else set()
+        assert "device" in tech_words, (
+            f"Tech gloss missing 'device': {tech_words}"
+        )
+
+        # Sense 1 (technology) should NOT contain "organelle"
+        assert "organelle" not in tech_words, (
+            f"Tech gloss contaminated with 'organelle': {tech_words}"
+        )
+
+    def test_decontamination_preserves_all_words(self, td):
+        """No gloss words are lost during decontamination.
+
+        Every original teach sentence's words should appear in exactly
+        one sense's gloss — nothing dropped, nothing duplicated across
+        senses.
+        """
+        td.teach("cell is_a organelle", "organelle")
+        td.teach("cell is_a device", "device")
+
+        glosses = td.lesk_wsd.sense_glosses.get("cell", [])
+        all_words = set()
+        for g in glosses:
+            all_words.update(g.keys())
+
+        # Both "organelle" and "device" must be present somewhere
+        assert "organelle" in all_words
+        assert "device" in all_words
+
+    def test_three_way_decontamination(self, td):
+        """Three senses: biology, technology, prison — all clean."""
+        td.teach("cell is_a organelle", "organelle")
+        td.teach("cell is_a device", "device")
+        td.teach("cell is_a room", "room")
+
+        glosses = td.lesk_wsd.sense_glosses.get("cell", [])
+        assert len(glosses) >= 3, f"Expected >= 3 glosses, got {len(glosses)}"
+
+        # Each sense has its own word, not the others
+        for idx, word in enumerate(["organelle", "device", "room"]):
+            sense_words = set(glosses[idx].keys()) if idx < len(glosses) else set()
+            assert word in sense_words, (
+                f"Sense {idx} missing '{word}': {sense_words}"
+            )
+
+        # Cross-check: "organelle" only in sense 0
+        for idx in range(1, len(glosses)):
+            assert "organelle" not in set(glosses[idx].keys()), (
+                f"Sense {idx} contaminated with 'organelle'"
+            )
+
+
+# ─── 15. WSD State Persistence Round-Trip ─────────────────────────
+
+class TestWSDStatePersistence:
+    """Test save_wsd_state() → load_wsd_state() round-trip integrity.
+
+    Reference:
+        Standard round-trip testing per software engineering best
+        practices: save state → load into fresh instance → verify
+        equivalence.
+    """
+
+    def test_round_trip_preserves_teach_sentences(self, td, tmp_path):
+        """_original_teach_sentences survives save→load round-trip."""
+        td.teach("cell is_a organelle", "organelle")
+        td.teach("cell is_a device", "device")
+
+        original = td._original_teach_sentences.get("cell", [])
+        assert len(original) >= 2, "Pre-condition: sentences stored"
+
+        # Save
+        wsd_path = str(tmp_path / "state.wsd.json")
+        td.save_wsd_state(wsd_path)
+
+        # Load into fresh td
+        from td.perception.hdc import build_default_vocabulary
+        from td.memory.mhn import ModernHopfieldNetwork, MHNConfig
+        td2 = GenericThinkingDust(
+            vocab=build_default_vocabulary(dim=10000),
+            mhn=ModernHopfieldNetwork(MHNConfig(dim=10000, min_similarity=0.01)),
+            dim=10000, pure_mode=True,
+        )
+        td2.load_wsd_state(wsd_path)
+
+        loaded = td2._original_teach_sentences.get("cell", [])
+        assert len(loaded) == len(original), (
+            f"Count mismatch: {len(loaded)} vs {len(original)}"
+        )
+        # Verify each sentence matches
+        for (sent_orig, idx_orig), (sent_loaded, idx_loaded) in zip(original, loaded):
+            assert sent_orig == sent_loaded, (
+                f"Sentence mismatch: '{sent_orig}' vs '{sent_loaded}'"
+            )
+            assert idx_orig == idx_loaded
+
+    def test_round_trip_preserves_multiple_entities(self, td, tmp_path):
+        """Multiple entities' state survives round-trip."""
+        td.teach("cell is_a organelle", "organelle")
+        td.teach("bank is_a institution", "institution")
+        td.teach("cell is_a device", "device")
+
+        wsd_path = str(tmp_path / "multi.wsd.json")
+        td.save_wsd_state(wsd_path)
+
+        # Load into fresh td
+        from td.perception.hdc import build_default_vocabulary
+        from td.memory.mhn import ModernHopfieldNetwork, MHNConfig
+        td2 = GenericThinkingDust(
+            vocab=build_default_vocabulary(dim=10000),
+            mhn=ModernHopfieldNetwork(MHNConfig(dim=10000, min_similarity=0.01)),
+            dim=10000, pure_mode=True,
+        )
+        td2.load_wsd_state(wsd_path)
+
+        assert "cell" in td2._original_teach_sentences
+        assert "bank" in td2._original_teach_sentences
+
+    def test_empty_state_round_trip(self, td, tmp_path):
+        """Empty _original_teach_sentences survives round-trip."""
+        wsd_path = str(tmp_path / "empty.wsd.json")
+        td.save_wsd_state(wsd_path)
+
+        from td.perception.hdc import build_default_vocabulary
+        from td.memory.mhn import ModernHopfieldNetwork, MHNConfig
+        td2 = GenericThinkingDust(
+            vocab=build_default_vocabulary(dim=10000),
+            mhn=ModernHopfieldNetwork(MHNConfig(dim=10000, min_similarity=0.01)),
+            dim=10000, pure_mode=True,
+        )
+        td2.load_wsd_state(wsd_path)
+        assert td2._original_teach_sentences == {}
+
+
+# ─── 16. Corrupted JSON Resilience ────────────────────────────────
+
+class TestCorruptedJSONResilience:
+    """Test that load_wsd_state() handles corrupted JSON gracefully.
+
+    External state files can always be corrupted (disk errors, partial
+    writes, manual editing). The loader must fail gracefully rather
+    than crashing the application.
+
+    Reference:
+        Martin Fowler, "Refactoring" (2nd ed., 2018) — defensive
+        programming for external state. "Errors should never pass
+        silently" (Zen of Python) — log the error, don't crash.
+    """
+
+    def test_garbage_json_no_crash(self, td, tmp_path):
+        """Garbage content in WSD file doesn't crash load_wsd_state()."""
+        wsd_path = str(tmp_path / "corrupted.wsd.json")
+        with open(wsd_path, "w") as f:
+            f.write("{ this is not valid json !!!")
+
+        # Should not raise
+        td.load_wsd_state(wsd_path)
+
+        # Should fall back to empty dict
+        assert td._original_teach_sentences == {}
+
+    def test_partial_json_no_crash(self, td, tmp_path):
+        """Truncated JSON doesn't crash load_wsd_state()."""
+        wsd_path = str(tmp_path / "truncated.wsd.json")
+        with open(wsd_path, "w") as f:
+            f.write('{"cell": [["cell is_a organelle", 0]')  # truncated
+
+        td.load_wsd_state(wsd_path)
+        assert td._original_teach_sentences == {}
+
+    def test_empty_file_no_crash(self, td, tmp_path):
+        """Empty file doesn't crash load_wsd_state()."""
+        wsd_path = str(tmp_path / "empty_file.wsd.json")
+        with open(wsd_path, "w") as f:
+            f.write("")
+
+        td.load_wsd_state(wsd_path)
+        assert td._original_teach_sentences == {}
+
+    def test_missing_file_no_crash(self, td, tmp_path):
+        """Non-existent file doesn't crash, silently returns."""
+        wsd_path = str(tmp_path / "nonexistent.wsd.json")
+        td.load_wsd_state(wsd_path)
+        # No crash — _original_teach_sentences unchanged (empty from init)
+
+
+# ─── 17. Facade save()/load() on GenericThinkingDust ──────────────
+
+class TestFacadeSaveLoad:
+    """Test the orchestrating save()/load() Facade methods.
+
+    The Facade pattern (Gamma et al., 1994, Design Patterns) provides
+    a single interface to coordinate persistence across subsystems:
+    KG (SQLite/pyoxigraph), WSD state (JSON), and Lesk glosses (pickle).
+    """
+
+    def test_facade_save_creates_all_files(self, td, tmp_path):
+        """save() creates KG, WSD, and Lesk files."""
+        td.teach("cell is_a organelle", "organelle")
+        td.teach("cell is_a device", "device")
+
+        base_path = str(tmp_path / "facade.db")
+        td.save(base_path)
+
+        # KG file (SQLite) should exist
+        assert os.path.exists(base_path) or os.path.exists(
+            base_path.replace(".db", "_store")
+        ), "KG persistence file not created"
+
+        # WSD state file should exist
+        wsd_path = base_path + ".wsd.json"
+        assert os.path.exists(wsd_path), "WSD state file not created"
+
+        # Lesk glosses file should exist
+        lesk_path = base_path + ".lesk.pkl"
+        assert os.path.exists(lesk_path), "Lesk glosses file not created"
+
+    def test_facade_round_trip(self, td, tmp_path):
+        """Full save()→load() round-trip restores state."""
+        td.teach("cell is_a organelle", "organelle")
+        td.teach("cell is_a device", "device")
+
+        base_path = str(tmp_path / "round.db")
+        td.save(base_path)
+
+        # Create fresh td and load
+        from td.perception.hdc import build_default_vocabulary
+        from td.memory.mhn import ModernHopfieldNetwork, MHNConfig
+        td2 = GenericThinkingDust(
+            vocab=build_default_vocabulary(dim=10000),
+            mhn=ModernHopfieldNetwork(MHNConfig(dim=10000, min_similarity=0.01)),
+            dim=10000, pure_mode=True,
+        )
+        td2.load(base_path)
+
+        # WSD state restored
+        assert "cell" in td2._original_teach_sentences
+        loaded = td2._original_teach_sentences["cell"]
+        assert len(loaded) >= 2
+
+        # Lesk glosses restored
+        assert "cell" in td2.lesk_wsd.sense_glosses
+        assert len(td2.lesk_wsd.sense_glosses["cell"]) >= 2
+
+    def test_facade_load_missing_files(self, td, tmp_path):
+        """load() handles missing files gracefully."""
+        base_path = str(tmp_path / "missing.db")
+        # Should not raise even though no files exist
+        td.load(base_path)
+

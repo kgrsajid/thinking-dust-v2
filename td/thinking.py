@@ -21,6 +21,7 @@ Structure-Driven Routing:
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -2317,19 +2318,101 @@ class GenericThinkingDust:
         so that _rebuild_lesk_glosses() can use rich original sentences
         instead of falling back to sparse triple-form.
 
+        **Caller responsibility:** This method is NOT called automatically
+        during ``__init__``. The caller must invoke it explicitly after
+        construction, following the lazy-loading pattern (Fowler, 2002,
+        *Patterns of Enterprise Application Architecture*). This keeps
+        ``__init__`` fast and allows fresh-start scenarios where
+        persisted state is intentionally not loaded.
+
+        Typical usage::
+
+            td = GenericThinkingDust(...)
+            td.kg.load("data/td_knowledge.db")
+            td.load_wsd_state("data/td_knowledge.db.wsd.json")
+
+        Resilience: if the JSON file is corrupted or unreadable, the
+        method logs a warning and falls back to an empty dict rather
+        than crashing. External state files can always be corrupted;
+        fail gracefully (Martin Fowler, *Refactoring*, 2nd ed., 2018).
+
         Args:
             path: Path to JSON file saved by save_wsd_state().
         """
         import json
         import os
+        import logging
         if not os.path.exists(path):
             return
-        with open(path, "r") as f:
-            data = json.load(f)
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            logging.warning(
+                "load_wsd_state: corrupted or unreadable WSD state at %s: %s. "
+                "Falling back to empty dict.", path, exc
+            )
+            self._original_teach_sentences = {}
+            return
         self._original_teach_sentences = {
             entity: [(sent, idx) for sent, idx in sentences]
             for entity, sentences in data.items()
         }
+
+    def save(self, path: str) -> None:
+        """Persist all ThinkingDust state via the Facade pattern.
+
+        Coordinates persistence across subsystems so the caller only
+        needs one method call (Gamma et al., 1994, *Design Patterns*).
+
+        Saves:
+            1. Knowledge Graph (triples, senses, relation properties)
+               → ``{path}`` (SQLite DB / pyoxigraph store)
+            2. WSD state (_original_teach_sentences)
+               → ``{path}.wsd.json``
+            3. Lesk glosses (sense → Counter of gloss words)
+               → ``{path}.lesk.pkl``
+
+        Args:
+            path: Base path. WSD and Lesk files are derived from it.
+        """
+        # 1. KG persistence (SQLite + pyoxigraph)
+        self.kg.save(path)
+
+        # 2. WSD original teach sentences
+        wsd_path = path + ".wsd.json"
+        self.save_wsd_state(wsd_path)
+
+        # 3. Lesk glosses
+        lesk_path = path + ".lesk.pkl"
+        self.lesk_wsd.save(lesk_path)
+
+    def load(self, path: str) -> None:
+        """Load all ThinkingDust state via the Facade pattern.
+
+        Counterpart to :meth:`save`. Loads KG, WSD state, and Lesk
+        glosses from files derived from *path*.
+
+        Follows lazy-loading principles (Fowler, 2002): the caller
+        decides when to load. Not called automatically during init.
+
+        Args:
+            path: Base path previously passed to :meth:`save`.
+        """
+        # 1. KG
+        self.kg.load(path)
+
+        # 2. WSD original teach sentences
+        wsd_path = path + ".wsd.json"
+        self.load_wsd_state(wsd_path)
+
+        # 3. Lesk glosses
+        lesk_path = path + ".lesk.pkl"
+        if os.path.exists(lesk_path):
+            self.lesk_wsd.load(lesk_path)
+
+        # Re-sync KG relation properties to parser prototypes
+        self.sync_kg_to_parser()
 
     def _load_minimal_seed(self):
         try:
