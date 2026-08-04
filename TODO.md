@@ -31,7 +31,7 @@ _Last updated: 2026-08-04_
 
 ## 🚨 URGENT (RIGHT NOW)
 
-_Updated 2026-08-4: Preprocessing deferred (queries work natively). Duplicate triples fixed. Focus: gloss quality fix + scaling._
+_Updated 2026-08-04: Preprocessing deferred (queries work natively). Duplicate triples fixed. Gloss quality fix done. Focus: scaling._
 
 ### 1. Implement Preprocessing Layer with Gemini — NEXT SESSION
 
